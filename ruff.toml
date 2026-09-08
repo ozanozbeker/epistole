@@ -1,0 +1,57 @@
+# Ruff configuration file
+# See: https://docs.astral.sh/ruff/
+
+target-version = "py313"
+
+[lint]
+select = ["ALL"]
+ignore = [
+  # No per-file copyright headers; a single top-level LICENSE covers the project
+  "CPY001",  # flake8-copyright
+
+  # Recommended rules to disable per the docs
+  # https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
+  "COM812",  # flake8-commas > missing trailing-comma
+  "COM819",  # flake8-commas > prohibited-trailing-comma
+  "D203",  # pydocstyle > incorrect-blank-line-before-class
+  "D206",  # pydocstyle > docstring-tab-indentation
+  "D300",  # pydocstyle > triple-single-quotes
+  "E111",  # pycodestyle Error > indentation-with-invalid-multiple
+  "E114",  # pycodestyle Error > indentation-with-invalid-multiple-comment
+  "E117",  # pycodestyle Error > over-indented
+  "E501",  # pycodestyle Error
+  "ISC002",  # flake8-implicit-str-concat > multi-line-implicit-string-concatenation
+  "Q",  # flake8-quotes
+  "W191",  # pycodestyle Warning > tab-indentation
+]
+unfixable = [
+  "F401",  # Pyflakes > unused-import
+  "T20",  # flake8-print > ALL
+]
+
+[lint.per-file-ignores]
+# __init__.py related ignores
+"**/__init__.py" = [
+  "D104",  # pydocstyle > undocumented-public-package
+  "F401",  # Pyflakes > unused-import
+]
+
+# Pytest related ignores
+"**/tests/**/*.py" = [
+  "ANN",  # flake8-annotations > ALL
+  "ARG001",  # flake8-unused-arguments > unused-function-argument
+  "D",  # pydocstyle > ALL
+  "FBT001",  # flake8-boolean-trap > boolean-type-hint-positional-argument
+  "INP001",  # flake8-implicit-namespace-package > implicit-namespace-package
+  "PLR0913",  # Pylint Refactor > too-many-arguments
+  "PLR2004",  # Pylint Refactor > magic-value-comparison
+  "S101",  # flake8-bandit > assert
+  "SLF001",  # flake8-self > private-member-access
+]
+
+[lint.pydocstyle]
+convention = "numpy"
+
+[format]
+docstring-code-format = true
+line-ending = "lf"

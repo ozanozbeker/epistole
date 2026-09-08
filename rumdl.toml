@@ -1,0 +1,24 @@
+# Global configuration options
+[global]
+enable = ["ALL"]
+disable = [
+  # Heading Rules
+  "MD024",  # Multiple headings with the same content
+  "MD063",  # Heading text capitalization style
+  "MD082",  # No content before the next heading
+]
+exclude = [
+  "CHANGELOG.md",
+  "LICENSE.md",
+  "docs/agents/",
+  "docs/adr/",
+]
+respect-gitignore = true
+flavor = "quarto"
+
+# Rule configuration options
+[MD013]
+line-length = 0
+code-blocks = false
+reflow = true
+reflow-mode = "sentence-per-line"

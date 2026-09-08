@@ -1,13 +1,37 @@
 [project]
 name = "herma"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.0.1"
+description = "A single Python API for sending email, regardless of the backend behind it."
 readme = "README.md"
-authors = [
-    { name = "Ozan Ozbeker", email = "github@ozanozbeker.com" }
-]
 requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ozan Ozbeker", email = "github@ozanozbeker.com" }]
+keywords = ["email", "gmail", "microsoft-graph", "smtp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Communications :: Email",
+  "Typing :: Typed",
+]
 dependencies = []
+
+[project.urls]
+Changelog = "https://github.com/ozanozbeker/herma/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ozanozbeker/herma"
+Issues = "https://github.com/ozanozbeker/herma/issues"
+Repository = "https://github.com/ozanozbeker/herma"
+
+[dependency-groups]
+dev = [
+  "prek>=0.5.2",
+  "pyrefly>=1.2.0",
+  "pytest>=9.1.1",
+  "ruff>=0.16.6",
+  "rumdl>=0.2.68",
+  "tombi>=1.5.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
