@@ -5,6 +5,10 @@ This glossary is the vocabulary the spec and the implementation share.
 
 ## Language
 
+**Message**: The immutable value a caller builds: its content, its addressing, and its attachments.
+It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
+_Avoid_: email, draft (the server-side resource v1 rules out), mail
+
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
 It owns the credentials and the from address; the message owns everything else.
 _Avoid_: transport, sender, courier, carrier, connection
@@ -19,6 +23,10 @@ _Avoid_: deliver, transmit
 **Submit**: Hand a complete message to a backend for transmission.
 It is the backend's half of a send, and success means the service accepted the message, not that anyone received it.
 _Avoid_: send (the caller's verb, which includes preparation), deliver
+
+**Submission**: One message handed to one backend once.
+It carries its own `Message-ID` and `Date`, so sending the same message twice makes two submissions.
+_Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb)
 
 **Complete message**: A message that has passed preparation and can be submitted: at least one recipient, HTML and plain text both present, and every `data:` image already an attachment referenced by `cid:`.
 A backend receives nothing else.
