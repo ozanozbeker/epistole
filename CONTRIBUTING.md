@@ -35,6 +35,17 @@ Individual tools, when you want a faster loop:
 
 Most hooks fix in place, so a failed commit often just needs `git add` and a retry.
 
+## Prose
+
+The package has two spellings in prose, and each means one thing.
+
+- **Herma** is the name.
+  Use it in running text: "Herma sends the same message through any backend."
+- **`herma`** is the identifier, in code formatting.
+  Use it for the distribution, the module, and the command: `pip install herma`, `import herma`.
+
+Never write bare "herma" in a sentence, and never any other variation such as "HERMA" or "herma.py".
+
 ## Commits
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/), enforced by the `commit-msg` hook in strict mode.
