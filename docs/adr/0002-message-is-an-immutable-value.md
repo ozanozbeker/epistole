@@ -39,8 +39,8 @@ Porting the look without the semantics imports a bug R does not have, so chainin
   A message sent twice sends the same bytes twice, and a missing file fails at the line that named it.
 - **Content enters only through the constructor, and preparation runs there.**
   Subject, recipients, reply-to, and attachments arrive only through methods, so each field has one spelling.
-  Plain-text derivation and the `data:` to `cid:` harvest happen in `Message(...)`, so every copy shares the result and the loop above derives nothing per subscriber.
-  `send` checks addressing, stamps submission identity, and hands off.
+  Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)`, so every copy shares the result and the loop above derives nothing per subscriber.
+  `send` checks addressing and `cid:` references, stamps submission identity, and hands off.
   The derived text and the rewritten HTML are readable the moment the object exists.
 - **Submission identity is never on the value.**
   `Message-ID` and `Date` describe one submission, not the content.
@@ -77,7 +77,7 @@ Porting the look without the semantics imports a bug R does not have, so chainin
 - The constructor does work and can raise.
   A renderer error or a malformed `data:` URI surfaces at the line that supplied the HTML.
 - The split from [#9](https://github.com/ozanozbeker/herma/issues/9) survives with one line moved: backends never re-derive, and neither does `send`.
-- [#11](https://github.com/ozanozbeker/herma/issues/11) inherits attach-time reads and construction-time harvesting.
+- [#11](https://github.com/ozanozbeker/herma/issues/11) inherits attach-time reads and the construction-time `data:` rewrite.
   [#12](https://github.com/ozanozbeker/herma/issues/12) inherits the per-send `Message-ID`.
   [#14](https://github.com/ozanozbeker/herma/issues/14) still owns the readback names once `.to()` has taken the attribute.
   [#15](https://github.com/ozanozbeker/herma/issues/15) inherits a renderer that runs once, at construction.

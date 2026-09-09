@@ -9,6 +9,18 @@ This glossary is the vocabulary the spec and the implementation share.
 It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
 _Avoid_: email, draft (the server-side resource v1 rules out), mail
 
+**Attachment**: Bytes with a filename and a content type that travel with a message.
+The recipient's client lists it as a file, unless it is an inline image.
+_Avoid_: file, part, MIME part
+
+**Inline image**: An attachment the HTML body displays in place by naming its content id after `cid:`, never listed as a file.
+One comes from a caller embedding bytes under a name the HTML already uses, or from Herma rewriting a `data:` image it found.
+_Avoid_: embedded image, body image, related part
+
+**Content id**: The name an inline image answers to, unique within one message and deliberately not unique across messages.
+It never carries an `@domain`.
+_Avoid_: cid (the URL scheme), Content-ID (the header spelling)
+
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
 It owns the credentials and the from address; the message owns everything else.
 _Avoid_: transport, sender, courier, carrier, connection
@@ -28,6 +40,6 @@ _Avoid_: send (the caller's verb, which includes preparation), deliver
 It carries its own `Message-ID` and `Date`, so sending the same message twice makes two submissions.
 _Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb)
 
-**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, HTML and plain text both present, and every `data:` image already an attachment referenced by `cid:`.
+**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, HTML and plain text both present, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
 A backend receives nothing else.
 _Avoid_: prepared message, rendered message
