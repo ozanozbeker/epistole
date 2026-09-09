@@ -22,8 +22,12 @@ It never carries an `@domain`.
 _Avoid_: cid (the URL scheme), Content-ID (the header spelling)
 
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
-It owns the credentials and the from address; the message owns everything else.
-_Avoid_: transport, sender, courier, carrier, connection
+It owns the credentials and the from address; the message owns everything else, and a connection owns the live link.
+_Avoid_: transport, sender, courier, carrier, client
+
+**Connection**: One live, authenticated link a backend opened, which carries many submissions and then closes for good.
+A backend can be shared; a connection belongs to one thread and one `with`.
+_Avoid_: session, channel, socket, backend (the configuration that opens one)
 
 **From address**: The mailbox a backend sends from, with an optional display name.
 It belongs to the backend, never to the message, and the mail service decides whether the backend may use it.
