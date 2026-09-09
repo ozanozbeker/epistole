@@ -46,6 +46,10 @@ _Avoid_: addressee, target, destination
 It belongs to the backend, never to the message, and the mail service decides whether the backend may use it.
 _Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header), from_, user_id, mailbox
 
+**Credential**: What a backend holds to prove who it is to a mail service: a secret, a refresh token, or the machine's own identity, wrapped in an object that can produce a bearer token on demand.
+A caller hands one in; a backend never accepts the vendor's API client built on top of one.
+_Avoid_: client (the vendor SDK object), token (one short-lived output of a credential), auth, login, key (one kind of secret)
+
 **Transport**: The wire object a backend opens and a connection holds: the only code that speaks SMTP, the Gmail API, or Microsoft Graph.
 It submits complete messages and closes; a third-party backend supplies one and nothing else.
 _Avoid_: driver, dialect, wire, link, adapter, backend (the configuration that opens one), connection (the object that holds one)
