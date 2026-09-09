@@ -15,9 +15,9 @@ The from address belongs to the backend, and a service that will not send as it 
 
 **Almost nothing can be unsupported.**
 Gmail takes the RFC 5322 bytes as `raw`.
-Graph takes the same bytes as `text/plain` on its small path.
-So two of three backends carry everything the SMTP backend writes, headers included, and the message model never has to shrink to a JSON schema.
-The one path that does is Graph's large path (#20), where a draft is built from JSON and custom headers must start with `x-`.
+Graph accepts the same bytes as `text/plain`, and this ADR first assumed its small path would use them.
+[ADR-0012](0012-graph-sends-json-on-two-paths-chosen-by-size.md) chose JSON on every Graph request instead, so the gap is Graph at any size rather than its large path alone: custom headers must start with `x-`, and the caller's plain text next to HTML is replaced by Exchange's own, which ADR-0012 treats as degradation rather than refusal.
+The count below is unchanged: three backends, one gap.
 Anymail's mechanism serves fourteen providers and twelve optional message attributes; Herma has three backends and one gap.
 A method with one caller is a mechanism, not a design.
 
@@ -40,8 +40,8 @@ Each backend is its own class, so those knobs are already keyword arguments with
   Anything not exposed is out of scope, and the caller drops to the provider's REST API.
 - Per-message provider features that are MIME headers (`Importance`, read receipts) ride on custom headers, which #2 still has to specify.
 - A third-party transport (ADR-0006) that cannot carry part of a message raises `RejectedError` itself; there is no base-class hook to call.
-- #20 decides how much of the large path is JSON.
-  A MIME-built draft with attachments uploaded afterwards would shrink the gap further; whatever it leaves is the pre-check's job.
+- #20 decided that every Graph request is JSON (ADR-0012).
+  A MIME-built draft with attachments uploaded afterwards would shrink the gap; it is untested and recorded there as the reopener.
 - A provider that rewrites the stamped `Message-ID` is not a contract break: ADR-0004 defines `SendResult.message_id` as the id of the submission Herma made.
 - ADR-0004's consequence that #17 "can add an unsupported-feature leaf" is closed: it does not.
 - `docs/research/prior-art.md` keeps recommending both mechanisms; this ADR is the answer to that recommendation, not a correction of the research.
