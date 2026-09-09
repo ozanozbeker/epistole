@@ -1,7 +1,6 @@
 # Backend and Connection are Herma classes; Transport is the seam
 
-[#9](https://github.com/ozanozbeker/herma/issues/9) made `Backend` a one-method Protocol and put the verb on the message, `Message.send(over=...)`.
-[#14](https://github.com/ozanozbeker/herma/issues/14) reverses both.
+[#9](https://github.com/ozanozbeker/herma/issues/9) made `Backend` a one-method Protocol and put the verb on the message, `Message.send(over=...)`. [#14](https://github.com/ozanozbeker/herma/issues/14) reverses both.
 `Backend` is an abstract base class with `send`, `connect`, and one abstract `_open() -> Transport`; `Connection` is a concrete class Herma owns; `Transport` is the only Protocol, with `submit` and `close`, and it is the whole of what a third-party backend writes.
 The verb is `backend.send(message)` and `connection.send(message)`, and a `Message` cannot send.
 

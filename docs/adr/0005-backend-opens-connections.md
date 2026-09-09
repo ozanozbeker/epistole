@@ -76,7 +76,7 @@ That is why the connection carries no lock: two threads on one SMTP socket seria
 - One more public type, `Connection`, and the `Transport` seam that ADR-0006 names.
 - A connection left unclosed outside `with` holds an SMTP socket until the server times it out; on HTTP nothing leaks.
   The docstring on `connect()` says to use `with`.
-- The glossary gains *Connection* and `Backend` no longer lists it under _Avoid_.
+- The glossary gains *Connection* and `Backend` no longer lists it under *Avoid*.
 - [#16](https://github.com/ozanozbeker/herma/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all, and how the per-send token refresh is wired through `google-auth` and `msal`.
 - [#18](https://github.com/ozanozbeker/herma/issues/18) inherits that SMTP AUTH, including XOAUTH2, happens in `connect()`.
 - The README's user guide is written against this shape.

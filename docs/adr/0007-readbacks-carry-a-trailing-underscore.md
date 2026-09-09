@@ -7,8 +7,7 @@ Decided on [#14](https://github.com/ozanozbeker/herma/issues/14).
 
 ## Why
 
-PEP 8 reserves the trailing underscore for keyword clashes (`class_`), and Polars and SQLAlchemy use it only for `and_`, `or_`, `not_`, so a Python reader pauses on `to_`.
-scikit-learn's `coef_` and `classes_` trained the analyst audience to read `name_` as the value the object now holds, which is exactly this.
+PEP 8 reserves the trailing underscore for keyword clashes (`class_`), and Polars and SQLAlchemy use it only for `and_`, `or_`, `not_`, so a Python reader pauses on `to_`. scikit-learn's `coef_` and `classes_` trained the analyst audience to read `name_` as the value the object now holds, which is exactly this.
 One mechanical rule beats five invented words (`to_addresses`, `subject_line`) or a sub-object (`message.headers.to`, where `bcc` under "headers" teaches a falsehood, since Bcc is stripped from the sent message).
 The readbacks exist for tests against `MemoryBackend`'s outbox; that is the only place the suffix is typed.
 

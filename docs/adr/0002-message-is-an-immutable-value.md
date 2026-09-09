@@ -19,8 +19,7 @@ with smtp.connect() as connection:
 
 Under a `return self` builder that loop leaks.
 `.to()` accumulates, subscriber 200 receives a `To` header naming all 200 addresses, and every earlier subscriber already received everyone ahead of them.
-Nothing raises, and the code reads exactly like the version that works.
-blastula chains safely only because R copies values on modify.
+Nothing raises, and the code reads exactly like the version that works. blastula chains safely only because R copies values on modify.
 Porting the look without the semantics imports a bug R does not have, so chaining stays only because copy on write makes it safe.
 
 ## Rules
@@ -37,9 +36,9 @@ Porting the look without the semantics imports a bug R does not have, so chainin
 - **Closed value.**
   `.attach(Path(...))` reads the file when called, an open file object is read when passed and left open for the caller, and address lists become tuples.
   A message sent twice sends the same bytes twice, and a missing file fails at the line that named it.
-- **Content enters only through the constructor, and preparation runs there.**
+- **Content enters only through the constructor, as `html=`, `markdown=`, or `text=` (ADR-0008), and preparation runs there.**
   Subject, recipients, reply-to, and attachments arrive only through methods, so each field has one spelling.
-  Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)`, so every copy shares the result and the loop above derives nothing per subscriber.
+  Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)` whenever the content is HTML, so every copy shares the result and the loop above derives nothing per subscriber.
   `Connection.send` checks addressing and `cid:` references, stamps submission identity, and hands off to the transport.
   The derived text and the rewritten HTML are readable the moment the object exists.
 - **Submission identity is never on the value.**

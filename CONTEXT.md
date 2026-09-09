@@ -9,6 +9,13 @@ This glossary is the vocabulary the spec and the implementation share.
 It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
 _Avoid_: email, draft (the server-side resource v1 rules out), mail
 
+**Content**: What a message says: HTML the caller supplied or Herma rendered from Markdown, together with plain text; or plain text alone.
+_Avoid_: body (the HTML element, blastula's middle section, and RFC 5322's everything after the headers), payload, copy
+
+**Plain text**: The readable text every message carries: what the caller wrote, the Markdown source, or what Herma derived from the HTML.
+It ships alongside the HTML or alone, and a text-only client shows nothing else.
+_Avoid_: fallback (it is the whole message when there is no HTML), alternative (the MIME spelling), text part
+
 **Attachment**: Bytes with a filename and a content type that travel with a message.
 The recipient's client lists it as a file, unless it is an inline image.
 _Avoid_: file, part, MIME part
@@ -55,7 +62,7 @@ _Avoid_: send (the caller's verb, which includes preparation), deliver
 It carries its own `Message-ID` and `Date`, so sending the same message twice makes two submissions.
 _Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb)
 
-**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, HTML and plain text both present, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
+**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, plain text present, HTML present whenever the content entered as HTML or Markdown, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
 A transport receives nothing else.
 _Avoid_: prepared message, rendered message
 

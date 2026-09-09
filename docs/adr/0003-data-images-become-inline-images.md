@@ -25,8 +25,7 @@ Removing the rewrite later breaks every Gmail send.
 The glossary had already decided.
 *Complete message* required "every `data:` image already an attachment referenced by `cid:`" before this ADR existed, and a flag would have made the definition wrong.
 
-The content id format is a compatibility surface, not an implementation detail.
-blastula's source records why it omits the domain: "According to the spec there should be an @domain on this, but it makes attachment UI show up for Outlook.com (e.g. AT00001.bin)".
+The content id format is a compatibility surface, not an implementation detail. blastula's source records why it omits the domain: "According to the spec there should be an @domain on this, but it makes attachment UI show up for Outlook.com (e.g. AT00001.bin)".
 Anymail hit the same field from the other side and uses a fake `inline` domain, because Gmail blocks a Content-ID ending in `.com` when a provider reuses it as a filename.
 No RFC records either bug.
 

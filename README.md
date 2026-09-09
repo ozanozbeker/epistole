@@ -101,6 +101,59 @@ A backend is immutable and safe to share.
 A connection is not: use one per thread, the same rule as a DB-API connection.
 Herma does not lock a connection for you; two threads on one connection is a bug in the caller.
 
+### Markdown instead of HTML
+
+```python
+note = (
+    Message(markdown="## Numbers\n\nSee the [dashboard](https://kpi.example).")
+    .subject("Numbers")
+    .to("boss@corp.example")
+)
+```
+
+Needs the extra: `pip install "herma[markdown]"`.
+Without it, this line raises `ImportError` naming the extra.
+The Markdown renders to HTML for clients that show it, and the source you wrote is the plain text for clients that do not.
+Exactly one of `html=` or `markdown=` per message.
+
+### Plain text only
+
+```python
+smtp.send(
+    Message(text="Pipeline failed at 03:12. See run 4821.")
+    .subject("Pipeline failed")
+    .to("oncall@corp.example")
+)
+```
+
+No HTML part is made; the message is `text/plain` and every client renders it.
+
+### A better plain-text part
+
+Every HTML message carries plain text.
+Herma derives it with a small extractor of its own, which keeps links, marks list items, and drops the stylesheet.
+To supply your own, pass `text=` and nothing is derived:
+
+```python
+Message(html=body, text=Path("weekly.txt").read_text(encoding="utf-8"))
+```
+
+To derive it with a library you prefer, pass `text_renderer=`, a callable from HTML to text.
+It runs once, after Herma has moved `data:` images out of the HTML, so no base64 lands in the text.
+
+```python
+from inscriptis import get_text
+from inscriptis.model.config import ParserConfig
+
+config = ParserConfig(display_links=True)
+
+Message(html=body, text_renderer=lambda h: get_text(h, config))
+```
+
+`inscriptis` aligns table columns, which Herma's extractor does not.
+`html2text` works the same way through `HTML2Text().handle`; set `unicode_snob = True` on it or `Café` arrives as `Cafe`, and note its licence is GPL-3.0-or-later.
+The default is exported as `herma.html_to_text` if you want to wrap it.
+
 ## Choosing a backend
 
 Herma sends the same message through any backend, so choosing one is a deployment decision, not a code decision.
