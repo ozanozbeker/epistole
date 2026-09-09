@@ -23,6 +23,12 @@ Homepage = "https://github.com/ozanozbeker/herma"
 Issues = "https://github.com/ozanozbeker/herma/issues"
 Repository = "https://github.com/ozanozbeker/herma"
 
+[project.optional-dependencies]
+all = ["herma[gmail,graph,markdown]"]
+gmail = ["google-auth>=2.57", "httpx2>=2.12,<3"]
+graph = ["httpx2>=2.12,<3", "msal>=1.38"]
+markdown = ["markdown-it-py>=4.2"]
+
 [dependency-groups]
 dev = [
   "prek>=0.5.2",
