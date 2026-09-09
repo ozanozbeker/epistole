@@ -43,3 +43,11 @@ _Avoid_: delivery (acceptance never means anyone received it), send (the caller'
 **Complete message**: A message that has passed preparation and can be submitted: at least one recipient, HTML and plain text both present, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
 A backend receives nothing else.
 _Avoid_: prepared message, rendered message
+
+**Receipt**: What a send hands back: the record that one backend accepted one submission.
+It carries the submission's `Message-ID` and any refusals, and it never implies that anyone received the message.
+_Avoid_: result, response, status, sent message
+
+**Refusal**: A mail service's no to one recipient of an accepted submission, with the code and reason it gave.
+Only SMTP can refuse some recipients and accept the rest; the two APIs accept or refuse the whole message.
+_Avoid_: bounce (the non-delivery report that arrives later, which Herma never sees), rejection (the whole-message case)
