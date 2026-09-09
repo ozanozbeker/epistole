@@ -1,27 +1,27 @@
-# A send returns a receipt, and refusals do not raise
+# A send returns a send result, and refusals do not raise
 
 No backend hands back a message id Herma can return on all three, so `send` returns the id Herma wrote.
-`send` returns a frozen `Receipt(message_id, refused)`, the same shape on every backend.
-A recipient the service refused while accepting the rest rides on the receipt instead of raising.
+`send` returns a frozen `SendResult(message_id, date, refused)`, the same shape on every backend.
+A recipient the service refused while accepting the rest rides on the send result instead of raising.
 Every failure is one of seven flat subclasses of `HermaError`, with the native exception as `__cause__`, and only `ThrottledError` carries `retry_after`.
-Decided on [#12](https://github.com/ozanozbeker/herma/issues/12), grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
+Decided on [#12](https://github.com/ozanozbeker/herma/issues/12) as `Receipt`, renamed `SendResult` on [#14](https://github.com/ozanozbeker/herma/issues/14) because the owner read "receipt" as a delivery receipt, and grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
 
 ## Why
 
-**The receipt.**
+**The send result.**
 Graph answers `202` with no body, Gmail returns a mailbox-local id that is not an RFC 5322 `Message-ID`, and `smtplib` discards the SMTP queue id.
-The only identifier that exists on all three is the `Message-ID` that `send` stamps on each submission (ADR-0002), so the receipt carries that and nothing provider-specific.
+The only identifier that exists on all three is the `Message-ID` that `send` stamps on each submission (ADR-0002), so the send result carries that and nothing provider-specific.
 It is never `None`, because Herma wrote it.
-Whether Gmail and Graph preserve it on the wire is still the live-test question on #2, and the answer does not change the receipt: the id names the submission Herma made either way.
+Whether Gmail and Graph preserve it on the wire is still the live-test question on #2, and the answer does not change the send result: the id names the submission Herma made either way.
 The prototype's `accepted`, `backend`, and `retry_after` fields are gone.
-A returned receipt means accepted, the caller passed `over=` and knows the backend, and a retry hint only means something on a failure.
+A returned send result means accepted, the caller called `send` on the backend or connection and knows which, and a retry hint only means something on a failure.
 
-**Refusals ride on the receipt.**
+**Refusals ride on the send result.**
 `smtplib.sendmail` raises only when every recipient is refused.
 One refused out of three returns normally with a one-entry dict, and the message has already gone to the other two.
 Raising after that side effect would force every caller to catch in order to learn who received the mail.
 A warning is invisible in production logs.
-So a partial refusal is a fact about an accepted submission, and the receipt is where it lives.
+So a partial refusal is a fact about an accepted submission, and the send result is where it lives.
 Every recipient refused is a different case: nothing was submitted, and that raises.
 
 **Only what SMTP reports, not a per-recipient status.**
@@ -34,7 +34,7 @@ A Graph recipient typo arrives later as a non-delivery report in the sender's in
 **One root, not `OSError`.**
 `smtplib.SMTPException` subclasses `OSError`.
 Copying that would let an `except OSError` around unrelated file code swallow a mail failure.
-`HermaError` subclasses `Exception` and carries `backend`, the backend object the failure came from, or `None` when `send` raised before `submit`.
+`HermaError` subclasses `Exception` and carries `backend`, the backend object the failure came from, or `None` when `send` raised before the transport's `submit`.
 The native exception is reachable as `__cause__`, raised with `from`, and there is no duplicate `original` attribute.
 For the HTTP backends the cause is whatever the transport layer raised, so the status and body stay reachable through it; #16 owns that layer.
 
@@ -55,8 +55,8 @@ Herma never sleeps and never retries.
 
 ## Rules
 
-- **`Receipt` is frozen and has two fields.**
-  `message_id`, the `Message-ID` `send` stamped, and `refused`, a mapping of address to `Refusal(code, reason)`.
+- **`SendResult` is frozen and has three fields.**
+  `message_id` and `date`, the `Message-ID` and `Date` `send` stamped, and `refused`, a mapping of address to `Refusal(code, reason)`.
   `reason` is text, never bytes.
 - **Seven leaves under `HermaError`.**
 
@@ -72,7 +72,7 @@ Herma never sleeps and never retries.
 
   Sender and recipients refused stay apart from `RejectedError` because the fix is different: an administrator's grant or the address list, not the message content.
 - **Who said no decides the class.**
-  A mistake Herma finds before touching the wire, such as no recipients, `over=` not a `Backend`, or a `cid:` with no inline image behind it, is a `TypeError` or `ValueError`, never a `HermaError`.
+  A mistake Herma finds before touching the wire, such as no recipients, `send` on a closed connection, or a `cid:` with no inline image behind it, is a `TypeError` or `ValueError`, never a `HermaError`.
   A backend-local limit checked before writing, such as Graph's 4 MB body or 500 recipients, is `RejectedError` with `__cause__` `None`, because the same message succeeds on SMTP and the caller should see one class whether Herma or the service noticed first.
 - **Mapping.**
   SMTP classifies on `smtp_code // 100`, per RFC 5321.
@@ -117,7 +117,7 @@ Herma never sleeps and never retries.
   Present on Gmail only, and not an RFC 5322 id there either.
   Useless to backend-agnostic code.
 - **Raise on any refused recipient.**
-  The message already went to the accepted recipients, so the exception has to carry the receipt anyway, and every caller has to catch to read it.
+  The message already went to the accepted recipients, so the exception has to carry the send result anyway, and every caller has to catch to read it.
 - **Per-recipient status, as Anymail.**
   Rejected above: it promises detail two of three backends cannot supply.
 - **A `transient` base class or mixin.**
@@ -127,14 +127,14 @@ Herma never sleeps and never retries.
 
 ## Consequences
 
-- A caller who ignores the receipt loses SMTP refusals silently.
+- A caller who ignores the send result loses SMTP refusals silently.
   The docstring on `send` and the SMTP backend say so.
   Anymail made the same trade.
 - A Graph recipient typo is never an error Herma can raise.
   The documentation says where to look.
-- `RecipientsRefusedError.refused` and `Receipt.refused` share the `Refusal` type, so code that reads one reads the other.
+- `RecipientsRefusedError.refused` and `SendResult.refused` share the `Refusal` type, so code that reads one reads the other.
 - [#13](https://github.com/ozanozbeker/herma/issues/13) maps connection-lifecycle failures onto `TransportError` and `AuthenticationError`; no new class is needed.
-- [#14](https://github.com/ozanozbeker/herma/issues/14) keeps final authority over the spellings `Receipt`, `Refusal`, and the seven class names.
+- [#14](https://github.com/ozanozbeker/herma/issues/14) settled the spellings: `SendResult`, `Refusal`, and the seven class names as written here.
 - [#16](https://github.com/ozanozbeker/herma/issues/16) decides what `__cause__` is on the HTTP backends; the contract here is only that it is the transport's own exception.
 - [#17](https://github.com/ozanozbeker/herma/issues/17) can add an unsupported-feature leaf; the hierarchy is flat, so nothing here forecloses it.
 - What Gmail does when the `From` header names neither the account nor a verified alias stays fog on [#2](https://github.com/ozanozbeker/herma/issues/2), and its mapping is unknown until a live send.

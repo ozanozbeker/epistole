@@ -14,7 +14,7 @@ report = Message(html=html).subject("Weekly numbers").attach(pdf)
 
 with smtp.connect() as connection:
     for subscriber in subscribers:
-        report.to(subscriber.email).send(over=connection)
+        connection.send(report.to(subscriber.email))
 ```
 
 Under a `return self` builder that loop leaks.
@@ -40,11 +40,11 @@ Porting the look without the semantics imports a bug R does not have, so chainin
 - **Content enters only through the constructor, and preparation runs there.**
   Subject, recipients, reply-to, and attachments arrive only through methods, so each field has one spelling.
   Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)`, so every copy shares the result and the loop above derives nothing per subscriber.
-  `send` checks addressing and `cid:` references, stamps submission identity, and hands off.
+  `Connection.send` checks addressing and `cid:` references, stamps submission identity, and hands off to the transport.
   The derived text and the rewritten HTML are readable the moment the object exists.
 - **Submission identity is never on the value.**
   `Message-ID` and `Date` describe one submission, not the content.
-  `send` stamps them on the copy it gives `submit`, and the receipt carries the id back.
+  `Connection.send` stamps them on the copy it gives `Transport.submit`, and the send result carries the id back.
   One message sent twice is two submissions with two ids.
 - **Equal by content, hashable.**
   The plain-text renderer runs at construction and is not stored, so two messages built the same way compare equal whatever callable produced their text.

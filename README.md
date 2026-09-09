@@ -12,23 +12,22 @@ This is an early project and the API is not yet stable.
 
 Work in progress.
 Written while the API is still being designed, so the names are provisional and none of this runs yet.
-The shapes are settled: a `Message` is an immutable value you build by chaining, a backend holds the credentials and the from address, and `send(over=...)` takes either a backend or a connection the backend opened.
+The shapes are settled: a `Message` is an immutable value you build by chaining, a backend holds the credentials and the from address, and `backend.send(message)` or `connection.send(message)` sends it.
 
 ### One report, one recipient
 
 ```python
 from pathlib import Path
-from herma import Message
-from herma.smtp import SmtpBackend
+from herma import Message, SMTPBackend
 
-smtp = SmtpBackend(host="mail.corp.example", port=587, from_address="reports@corp.example", ...)
+smtp = SMTPBackend(host="mail.corp.example", port=587, from_address="reports@corp.example", ...)
 
-Message(html=Path("kpis.html").read_text(encoding="utf-8")).subject("Daily KPIs").to("boss@corp.example").send(over=smtp)
+smtp.send(Message(html=Path("kpis.html").read_text(encoding="utf-8")).subject("Daily KPIs").to("boss@corp.example"))
 ```
 
 The backend opens a connection, authenticates, submits, and closes, all inside that one call.
 A wrong password raises `AuthenticationError` on that line.
-Swap `SmtpBackend` for `GraphBackend` or `GmailBackend` and nothing else changes.
+Swap `SMTPBackend` for `GraphBackend` or `GmailBackend` and nothing else changes.
 
 ### One report, many recipients
 
@@ -41,10 +40,10 @@ report = (
 
 with smtp.connect() as connection:
     for subscriber in subscribers:
-        report.to(subscriber.email).send(over=connection)
+        connection.send(report.to(subscriber.email))
 ```
 
-One authentication, then one submission per subscriber over the same connection.
+One authentication, then one send per subscriber over the same connection.
 `.to()` replaces the recipient list on a copy, so each subscriber sees only their own address and the PDF is encoded once.
 
 If subscriber 140 has a dead mailbox, that send raises `RecipientsRefusedError` and the connection stays open, so wrap the send in `try` and log it.
@@ -55,7 +54,7 @@ Nothing is skipped silently.
 
 ```python
 for subscriber in subscribers:
-    report.to(subscriber.email).send(over=smtp)
+    smtp.send(report.to(subscriber.email))
 ```
 
 Still correct, only slower: one handshake per subscriber.
@@ -68,7 +67,7 @@ Use `connect()` for loops.
 with smtp.connect() as connection:
     pass
 
-report.send(over=connection)
+connection.send(report)
 ```
 
 Raises `ValueError`, because the connection is closed.
@@ -88,7 +87,7 @@ The token is acquired here, so a bad tenant id fails here rather than on the fir
 Cell two, an hour later:
 
 ```python
-message.send(over=connection)
+connection.send(message)
 ```
 
 The connection refreshes its token through the credential you gave the backend, so an expired token is not an error.
