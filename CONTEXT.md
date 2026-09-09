@@ -46,9 +46,14 @@ _Avoid_: addressee, target, destination
 It belongs to the backend, never to the message, and the mail service decides whether the backend may use it.
 _Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header), from_, user_id, mailbox
 
-**Credential**: What a backend holds to prove who it is to a mail service: a secret, a refresh token, or the machine's own identity, wrapped in an object that can produce a bearer token on demand.
-A caller hands one in; a backend never accepts the vendor's API client built on top of one.
-_Avoid_: client (the vendor SDK object), token (one short-lived output of a credential), auth, login, key (one kind of secret)
+**Credential**: What a backend holds to prove who it is to a mail service: a username and password, or the inputs from which a token source is built (a client secret, a certificate, a service account file, a user's saved consent, or the machine's own identity).
+An anonymous relay takes none.
+A caller hands one in as a value from the backend's own module; a backend never accepts the vendor's API client built on top of one.
+_Avoid_: client (the vendor SDK object), token (one short-lived output of a credential), bearer (the wire spelling of a token), auth, login, key (one kind of secret), creds (blastula's spelling)
+
+**Token source**: What Herma builds from a credential at connect time: the object that produces a fresh access token on demand, in the shape `get_token` defines.
+A caller who already has one hands it in as a credential and Herma uses it unchanged.
+_Avoid_: token credential (the vendor's name for the same shape), provider, authenticator
 
 **Transport**: The wire object a backend opens and a connection holds: the only code that speaks SMTP, the Gmail API, or Microsoft Graph.
 It submits complete messages and closes; a third-party backend supplies one and nothing else.
