@@ -29,7 +29,7 @@ It never carries an `@domain`.
 _Avoid_: cid (the URL scheme), Content-ID (the header spelling)
 
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
-It owns the credentials and the from address; the message owns everything else, and a connection owns the live link.
+It owns the credentials, the from address, and every setting only its mail service understands; the message owns everything else, and a connection owns the live link.
 A caller sends through it directly for one message, or opens a connection from it for many.
 _Avoid_: transport (the wire object a backend opens, never the backend), sender, courier, carrier, client, service and provider (the company, not one configured mailbox on it), account (an anonymous relay has none), mailer, engine (the SQLAlchemy analogue, kept as an analogy only)
 
