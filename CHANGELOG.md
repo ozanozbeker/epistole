@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3](https://github.com/ozanozbeker/epistole/compare/v0.0.2...v0.0.3) (2026-09-10)
+
+
+### Documentation
+
+* add html authoring guide to readme ([aa8030b](https://github.com/ozanozbeker/epistole/commit/aa8030b34f2d5c0965ebd823bb68ffb4f80cead0))
+* collapse the ADRs into the v1 api spec ([25171f6](https://github.com/ozanozbeker/epistole/commit/25171f6ec767e8d80ebaca2e124d5f6e5758a6c0))
+* decide how a message carries custom headers ([8203e40](https://github.com/ozanozbeker/epistole/commit/8203e404821e861a3f04857c268be6b8a23d980e))
+* decide how an address is written and when it is checked ([9424d34](https://github.com/ozanozbeker/epistole/commit/9424d340db9b2a26b08be488314109546a50d5c4))
+* decide what the test backends record ([d9fccd4](https://github.com/ozanozbeker/epistole/commit/d9fccd41840752782be50363d85d59b91fc24841))
+* record that css stays as written ([1b65853](https://github.com/ozanozbeker/epistole/commit/1b65853feb3df23d1f602e03360393888eeab24e))
+* research css in an html body ([9287a3e](https://github.com/ozanozbeker/epistole/commit/9287a3e97c5bb5e6be940715b20f2baf2cc1cbcf))
+* rule live-send verification out of scope ([128d18c](https://github.com/ozanozbeker/epistole/commit/128d18c92acca6a03578e9a9027ef15c514974cb))
+* update the package name explanation ([7f1e7b2](https://github.com/ozanozbeker/epistole/commit/7f1e7b23c3d9786ffad8be97607c591be8d3f84d))
+* write up the [#8](https://github.com/ozanozbeker/epistole/issues/8) html-body findings ([a5a351e](https://github.com/ozanozbeker/epistole/commit/a5a351e4c3a9f63be13c032ad7140f776856de3d))
+
 ## [0.0.2](https://github.com/ozanozbeker/epistole/compare/v0.0.1...v0.0.2) (2026-09-10)
 
 
