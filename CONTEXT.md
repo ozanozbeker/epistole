@@ -39,12 +39,18 @@ A backend can be shared; a connection belongs to one thread and one `with`.
 It holds a transport and does the preparation every send needs before handing the message to it.
 _Avoid_: session, channel, socket, link (prose only), backend (the configuration that opens one), transport (the wire object inside it)
 
+**Address**: One mailbox written as a string, either bare as `ada@example.com` or with a display name as `Ada Lovelace <ada@example.com>`.
+Every address Epistole holds is a `str`, and `Address(name, email)` is a `str` subclass that writes the second form so the caller never has to know the quoting rules.
+Epistole checks only that a string holds exactly one address and that the address has something on both sides of its last `@`; whether the mailbox exists, accepts mail, or may send is the mail service's answer.
+_Avoid_: email address (the noun is _address_ on its own), addr, recipient (the role an address plays, not the value)
+
 **Recipient**: One address in a message's to, cc, or bcc.
 The union, in that order with duplicates kept, is what a backend submits to, and a refusal names one of them.
 _Avoid_: addressee, target, destination
 
 **From address**: The mailbox a backend sends from, with an optional display name.
 It belongs to the backend, never to the message, and the mail service decides whether the backend may use it.
+It is an address like any other, taking the same type and the same check, run when the backend is constructed.
 _Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header), from_, user_id, mailbox
 
 **Credential**: What a backend holds to prove who it is to a mail service: a username and password, or the inputs from which a token source is built (a client secret, a certificate, a service account file, a user's saved consent, or the machine's own identity).

@@ -5,6 +5,7 @@ No backend hands back a message id Epistole can return on all three, so `send` r
 A recipient the service refused while accepting the rest rides on the send result instead of raising.
 Every failure is one of seven flat subclasses of `EpistoleError`, with the native exception as `__cause__`, and only `ThrottledError` carries `retry_after`.
 Decided on [#12](https://github.com/ozanozbeker/epistole/issues/12) as `Receipt`, renamed `SendResult` on [#14](https://github.com/ozanozbeker/epistole/issues/14) because the owner read "receipt" as a delivery receipt, and grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
+Amended on [#26](https://github.com/ozanozbeker/epistole/issues/26) with the `SMTPUTF8` row of the SMTP mapping, which ADR-0014 left unmapped by deciding not to check an address's character set.
 
 ## Why
 
@@ -82,6 +83,7 @@ Epistole never sleeps and never retries.
   | `SMTPRecipientsRefused` | `RecipientsRefusedError`, `refused` from `.recipients` |
   | `SMTPSenderRefused` | `SenderRefusedError` |
   | `SMTPAuthenticationError`, `SMTPNotSupportedError` from `login` or `auth` | `AuthenticationError` |
+  | `SMTPNotSupportedError` from `send_message`, meaning a non-ASCII address and no `SMTPUTF8` | `RejectedError` (ADR-0014) |
   | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `421`, `OSError`, `ssl` errors | `TransportError` |
   | `SMTPDataError` `5yz` | `RejectedError` |
   | `SMTPDataError` `4yz` | `ProviderError` |
