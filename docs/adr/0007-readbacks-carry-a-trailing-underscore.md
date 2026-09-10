@@ -5,6 +5,7 @@ The value reads back as the same name plus a trailing underscore: `to_`, `cc_`, 
 `recipients` has no underscore, because no method claims it; it is `to_ + cc_ + bcc_` in that order with duplicates kept, as Django's `recipients()`.
 Decided on [#14](https://github.com/ozanozbeker/epistole/issues/14).
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): `.headers()` joins the builder methods, so `headers_` joins the readbacks, produced by the mechanical rule with no exception (ADR-0016).
+Amended on [#29](https://github.com/ozanozbeker/epistole/issues/29): `attachments` and `inline_images` read back what `.attach()` and `.embed()` added, with no underscore, because neither method claims those names; the same reasoning that gives `recipients` none.
 
 ## Why
 
