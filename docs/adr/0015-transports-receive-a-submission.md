@@ -4,6 +4,7 @@
 It now takes a frozen `Submission(message, from_address, message_id, date)` and returns refusals alone, so `Connection.send` builds every `SendResult` in one place.
 `MemoryBackend.submissions` is a `list[Submission]` on the backend, and `ConsoleBackend` renders a submission rather than any one backend's wire bytes.
 Decided on [#28](https://github.com/ozanozbeker/epistole/issues/28), which amends ADR-0002, ADR-0004, ADR-0005, ADR-0006, ADR-0007, and ADR-0008.
+Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the rendering carries the caller's custom headers, alongside the addressing (ADR-0016).
 
 ## Why
 
@@ -75,7 +76,7 @@ The entries are `Submission` values, so the attribute and the type agree, as `Se
 - **`ConsoleBackend(from_address=..., stream=None)`.**
   `None` means `sys.stdout` looked up at write time, never captured in `__init__`, because pytest's `capsys` and Jupyter both swap it after import and an eagerly bound stream writes where the test cannot see.
 - **`ConsoleBackend` writes a rendering, not bytes.**
-  Addressing, `Message-ID`, `Date`, subject, the plain text in full, one line per attachment and inline image carrying name, content type and size, and HTML as a size line alone.
+  Addressing, custom headers, `Message-ID`, `Date`, subject, the plain text in full, one line per attachment and inline image carrying name, content type and size, and HTML as a size line alone.
 - **Both doubles default the from address and take no credential.**
   The default is `epistole@example.invalid`, reserved by RFC 2606 and passing the ADR-0014 shape check.
   On a double the from address carries no information, because there is no mail service to authorize it.

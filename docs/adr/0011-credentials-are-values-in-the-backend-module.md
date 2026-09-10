@@ -45,12 +45,12 @@ The values here are the door: a future `Login` value would be one more construct
 
 ## Rules
 
-- `SmtpBackend(..., credential=None | Password | OAuth)`.
+- `SMTPBackend(..., credential=None | Password | OAuth)`.
   `Password(username, password)`.
   `OAuth(username, credential, scope=None)`, where `credential` is a Graph value, a Gmail value, or a `get_token` object; `scope` is required for the last and forbidden for the first two.
   XOAUTH2 through `smtplib.SMTP.auth`, auth string `user={username}\x01auth=Bearer {token}\x01\x01`.
-- `GraphBackend(from_address, credential)` with `ClientSecret(tenant_id, client_id, client_secret)`, `Certificate(tenant_id, client_id, pfx=, passphrase=None)` or `Certificate(tenant_id, client_id, private_key=, thumbprint=)`, the two forms `msal` accepts and mutually exclusive, `ManagedIdentity(client_id=None)` for system- or user-assigned, or any `get_token` object.
-- `GmailBackend(from_address, credential)` with `ServiceAccount(path, subject)` for domain-wide delegation or `AuthorizedUser(path)` for a saved user consent.
+- `GraphBackend(from_address=, credential=)` with `ClientSecret(tenant_id, client_id, client_secret)`, `Certificate(tenant_id, client_id, pfx=, passphrase=None)` or `Certificate(tenant_id, client_id, private_key=, thumbprint=)`, the two forms `msal` accepts and mutually exclusive, `ManagedIdentity(client_id=None)` for system- or user-assigned, or any `get_token` object.
+- `GmailBackend(from_address=, credential=)` with `ServiceAccount(path, subject)` for domain-wide delegation or `AuthorizedUser(path)` for a saved user consent.
   The API path is always `users/me`; with a delegated service account `me` resolves to `subject`.
   Application Default Credentials are not offered: sending as a mailbox from ADC needs a signed delegation JWT that keyless ADC cannot produce.
 - Every value is a frozen dataclass of inputs.
@@ -75,7 +75,7 @@ The values here are the door: a future `Login` value would be one more construct
 - **`epistole.microsoft` and `epistole.google` modules shared by two backends each.**
   Would spare `epistole.smtp` an import from `epistole.graph`.
   Rejected for now because it names companies where the glossary names backends; additive if the crossover grows.
-- **Loose keyword arguments on `SmtpBackend`.**
+- **Loose keyword arguments on `SMTPBackend`.**
   Rejected above.
 - **Accept a bare token or a callable.**
   Rejected above.

@@ -23,9 +23,18 @@ The shapes are settled: a `Message` is an immutable value you build by chaining,
 from pathlib import Path
 from epistole import Message, SMTPBackend
 
-smtp = SMTPBackend(host="mail.corp.example", port=587, from_address="reports@corp.example", ...)
+smtp = SMTPBackend(
+    host="mail.corp.example",
+    port=587,
+    from_address="reports@corp.example",
+    credential=...,
+)
 
-smtp.send(Message(html=Path("kpis.html").read_text(encoding="utf-8")).subject("Daily KPIs").to("boss@corp.example"))
+smtp.send(
+    Message(html=Path("kpis.html").read_text(encoding="utf-8"))
+    .subject("Daily KPIs")
+    .to("boss@corp.example")
+)
 ```
 
 The backend opens a connection, authenticates, submits, and closes, all inside that one call.

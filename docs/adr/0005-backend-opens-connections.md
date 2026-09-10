@@ -6,6 +6,7 @@ A backend is frozen configuration, `backend.connect()` opens a connection, and o
 Both carry `send`: `backend.send(message)` opens a connection for one message and closes it, `connection.send(message)` reuses one.
 This is SQLAlchemy's `Engine` and `Connection` shape.
 Decided on [#13](https://github.com/ozanozbeker/epistole/issues/13); the verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/epistole/issues/14) (ADR-0006).
+Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the backend-held list is `MemoryBackend.submissions`, and `Connection.send` builds every send result from the `Submission` it stamped (ADR-0015).
 
 ## Why
 

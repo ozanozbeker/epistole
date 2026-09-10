@@ -394,7 +394,7 @@ class ConsoleBackend(Backend):
 - Pre-checks a backend can make from bytes it holds raise `RejectedError` with `__cause__` `None` before writing (ADR-0004, #11).
   Encoded size is raw size times 1.37.
 
-**SMTP (ADR-0011, ADR-0017).**
+**SMTP (ADR-0011, ADR-0016, ADR-0017).**
 
 - `security="starttls"` requires the upgrade after EHLO and raises `TransportError` when the server does not offer it; `"tls"` is implicit TLS on connect; `"none"` is plaintext.
   No opportunistic mode.
@@ -405,13 +405,14 @@ class ConsoleBackend(Backend):
 - Writes the RFC 5322 message Epistole built: custom headers after Epistole's own, in the caller's order.
 - Timeout 60 s, no knob.
 
-**Gmail (ADR-0009, ADR-0011).**
+**Gmail (ADR-0009, ADR-0011, ADR-0016).**
 
 - REST on `httpx2`, `google-auth` for tokens.
   `ServiceAccount` is domain-wide delegation acting as `subject`; `AuthorizedUser` is a saved user consent.
   Application Default Credentials are not offered.
 - `POST users/me/messages/send` with the RFC 5322 bytes as base64url `raw`.
 - Pre-checks: encoded size over 36,700,160 bytes; more than 500 recipients.
+- Writes every custom header after Epistole's own, in the caller's order.
 
 **Graph (ADR-0009, ADR-0011, ADR-0012, ADR-0016).**
 
@@ -442,7 +443,7 @@ class ConsoleBackend(Backend):
 - Neither takes a credential; both default `from_address` to `epistole@example.invalid`.
 - `MemoryBackend.submissions` is a live list on the backend, in send order, surviving every connection; no reset method.
   `refuse` maps an address to a `Refusal` applied at submit; nothing else is injectable.
-- `ConsoleBackend` writes a rendering, never wire bytes: addressing, `Message-ID`, `Date`, subject, custom headers, the plain text in full, one line per attachment and inline image with name, content type, and size, and HTML as a size line.
+- `ConsoleBackend` writes a rendering, never wire bytes: addressing, custom headers (ADR-0016), `Message-ID`, `Date`, subject, the plain text in full, one line per attachment and inline image with name, content type, and size, and HTML as a size line.
   `stream=None` binds `sys.stdout` at write time.
 
 ## SendResult, Refusal, errors
@@ -511,10 +512,10 @@ class ProviderError(EpistoleError): ...
 | `RecipientsRefusedError` | every recipient refused, nothing submitted; carries `refused` |
 | `AuthenticationError` | credential rejected or permission insufficient |
 | `ThrottledError` | the provider asked for a slower rate; carries `retry_after` |
-| `TransportError` | connect, TLS, disconnect, timeout; closes the connection |
+| `TransportError` | connect, TLS, disconnect, timeout; closes the connection (ADR-0005) |
 | `ProviderError` | the provider's own `5xx`, or a reply the mapper does not know |
 
-**SMTP mapping (ADR-0004, ADR-0014).**
+**SMTP mapping (ADR-0004, ADR-0014, ADR-0017).**
 Classify on `smtp_code // 100`.
 
 | Native | Epistole |
@@ -561,8 +562,8 @@ def html_to_text(html: str, /) -> str: ...
 ```
 
 - The default plain-text extractor, stdlib `html.parser`, no dependency (ADR-0008).
-- Keeps links as `label <url>`, marks list items, one table row per line, drops `<head>`, `<style>`, `<script>`, `<title>`, and comments, prints image alt text in brackets, decodes entities, never raises on malformed HTML.
-- Output is best effort and pinned by fixtures, not a contract; it may change in a minor version.
+- Keeps links as `label <url>`, marks list items, one table row per line, drops `<head>`, `<style>`, `<script>`, `<title>`, and comments, prints image alt text in brackets, decodes entities, never raises on malformed HTML (ADR-0008).
+- Output is best effort and pinned by fixtures, not a contract; it may change in a minor version (ADR-0008).
 
 ## Verify in implementation
 

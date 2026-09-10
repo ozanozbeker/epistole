@@ -7,6 +7,7 @@ When the content is Markdown, the source is the plain text and an extra renders 
 When the content is plain text, that is the whole message.
 `text=` alongside `html=` or `markdown=` wins outright, and `text_renderer=` swaps Epistole's extractor for the caller's.
 Decided on [#15](https://github.com/ozanozbeker/epistole/issues/15), grounded by `docs/research/html-to-plain-text.md`.
+Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the plain text reads back as `submissions[0].message.text`, because the doubles record a `Submission` rather than a stamped message (ADR-0015).
 
 ## Why
 
