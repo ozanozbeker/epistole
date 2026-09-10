@@ -1,18 +1,18 @@
 # A send returns a send result, and refusals do not raise
 
-No backend hands back a message id Herma can return on all three, so `send` returns the id Herma wrote.
+No backend hands back a message id Epistole can return on all three, so `send` returns the id Epistole wrote.
 `send` returns a frozen `SendResult(message_id, date, refused)`, the same shape on every backend.
 A recipient the service refused while accepting the rest rides on the send result instead of raising.
-Every failure is one of seven flat subclasses of `HermaError`, with the native exception as `__cause__`, and only `ThrottledError` carries `retry_after`.
-Decided on [#12](https://github.com/ozanozbeker/herma/issues/12) as `Receipt`, renamed `SendResult` on [#14](https://github.com/ozanozbeker/herma/issues/14) because the owner read "receipt" as a delivery receipt, and grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
+Every failure is one of seven flat subclasses of `EpistoleError`, with the native exception as `__cause__`, and only `ThrottledError` carries `retry_after`.
+Decided on [#12](https://github.com/ozanozbeker/epistole/issues/12) as `Receipt`, renamed `SendResult` on [#14](https://github.com/ozanozbeker/epistole/issues/14) because the owner read "receipt" as a delivery receipt, and grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
 
 ## Why
 
 **The send result.**
 Graph answers `202` with no body, Gmail returns a mailbox-local id that is not an RFC 5322 `Message-ID`, and `smtplib` discards the SMTP queue id.
 The only identifier that exists on all three is the `Message-ID` that `send` stamps on each submission (ADR-0002), so the send result carries that and nothing provider-specific.
-It is never `None`, because Herma wrote it.
-Whether Gmail and Graph preserve it on the wire is still the live-test question on #2, and the answer does not change the send result: the id names the submission Herma made either way.
+It is never `None`, because Epistole wrote it.
+Whether Gmail and Graph preserve it on the wire is still the live-test question on #2, and the answer does not change the send result: the id names the submission Epistole made either way.
 The prototype's `accepted`, `backend`, and `retry_after` fields are gone.
 A returned send result means accepted, the caller called `send` on the backend or connection and knows which, and a retry hint only means something on a failure.
 
@@ -26,15 +26,15 @@ Every recipient refused is a different case: nothing was submitted, and that rai
 
 **Only what SMTP reports, not a per-recipient status.**
 Anymail gives every recipient one of six states because its ESPs report per-recipient outcomes richly.
-Herma's backends do not: Gmail and Graph report nothing per recipient, and SMTP reports refusals only.
-A six-state enum where two backends emit one constant and the third emits two promises information Herma does not have, and its `sent` versus `queued` split is the "success is not delivery" trap with a name.
+Epistole's backends do not: Gmail and Graph report nothing per recipient, and SMTP reports refusals only.
+A six-state enum where two backends emit one constant and the third emits two promises information Epistole does not have, and its `sent` versus `queued` split is the "success is not delivery" trap with a name.
 `refused` maps an address to a `Refusal(code, reason)`, is always empty on the two APIs, and the docstring says so.
-A Graph recipient typo arrives later as a non-delivery report in the sender's inbox, and Herma never sees it.
+A Graph recipient typo arrives later as a non-delivery report in the sender's inbox, and Epistole never sees it.
 
 **One root, not `OSError`.**
 `smtplib.SMTPException` subclasses `OSError`.
 Copying that would let an `except OSError` around unrelated file code swallow a mail failure.
-`HermaError` subclasses `Exception` and carries `backend`, the backend object the failure came from, or `None` when `send` raised before the transport's `submit`.
+`EpistoleError` subclasses `Exception` and carries `backend`, the backend object the failure came from, or `None` when `send` raised before the transport's `submit`.
 The native exception is reachable as `__cause__`, raised with `from`, and there is no duplicate `original` attribute.
 For the HTTP backends the cause is whatever the transport layer raised, so the status and body stay reachable through it; #16 owns that layer.
 
@@ -51,14 +51,14 @@ Putting the hint on the base would make it `None` almost everywhere.
 It lives on `ThrottledError` alone, as `float | None` seconds, so retry code is `except ThrottledError as e: sleep(e.retry_after or backoff)`.
 The cost is one dropped hint on a Graph `503`, which maps to `ProviderError` without it.
 Gmail's `dailyLimitExceeded` is a quota, not the message, so it is `ThrottledError` with `retry_after=None` rather than an eighth class.
-Herma never sleeps and never retries.
+Epistole never sleeps and never retries.
 
 ## Rules
 
 - **`SendResult` is frozen and has three fields.**
   `message_id` and `date`, the `Message-ID` and `Date` `send` stamped, and `refused`, a mapping of address to `Refusal(code, reason)`.
   `reason` is text, never bytes.
-- **Seven leaves under `HermaError`.**
+- **Seven leaves under `EpistoleError`.**
 
   | Class | Meaning |
   | --- | --- |
@@ -72,12 +72,12 @@ Herma never sleeps and never retries.
 
   Sender and recipients refused stay apart from `RejectedError` because the fix is different: an administrator's grant or the address list, not the message content.
 - **Who said no decides the class.**
-  A mistake Herma finds before touching the wire, such as no recipients, `send` on a closed connection, or a `cid:` with no inline image behind it, is a `TypeError` or `ValueError`, never a `HermaError`.
-  A backend-local limit checked before writing, such as Graph's 4 MB body or 500 recipients, is `RejectedError` with `__cause__` `None`, because the same message succeeds on SMTP and the caller should see one class whether Herma or the service noticed first.
+  A mistake Epistole finds before touching the wire, such as no recipients, `send` on a closed connection, or a `cid:` with no inline image behind it, is a `TypeError` or `ValueError`, never a `EpistoleError`.
+  A backend-local limit checked before writing, such as Graph's 4 MB body or 500 recipients, is `RejectedError` with `__cause__` `None`, because the same message succeeds on SMTP and the caller should see one class whether Epistole or the service noticed first.
 - **Mapping.**
   SMTP classifies on `smtp_code // 100`, per RFC 5321.
 
-  | SMTP native | Herma |
+  | SMTP native | Epistole |
   | --- | --- |
   | `SMTPRecipientsRefused` | `RecipientsRefusedError`, `refused` from `.recipients` |
   | `SMTPSenderRefused` | `SenderRefusedError` |
@@ -88,7 +88,7 @@ Herma never sleeps and never retries.
 
   SMTP never raises `ThrottledError`: the protocol cannot tell a throttle from a hiccup, and `421` or `45x` is a blind back-off.
 
-  | Gmail status and `errors[].reason` | Herma |
+  | Gmail status and `errors[].reason` | Epistole |
   | --- | --- |
   | `400`, `404`, `403 domainPolicy` | `RejectedError` |
   | `401`, `403 authError`, `403 insufficientPermissions` | `AuthenticationError` |
@@ -96,7 +96,7 @@ Herma never sleeps and never retries.
   | `5xx` | `ProviderError` |
   | network failure | `TransportError` |
 
-  | Graph status and `error.code` | Herma |
+  | Graph status and `error.code` | Epistole |
   | --- | --- |
   | `400` (including `ErrorMimeContentInvalidBase64String`), `404`, `413`, `415` | `RejectedError` |
   | `401`, other `403` | `AuthenticationError` |
@@ -122,7 +122,7 @@ Herma never sleeps and never retries.
   Rejected above: it promises detail two of three backends cannot supply.
 - **A `transient` base class or mixin.**
   Rejected above; the axes do not nest on Gmail.
-- **`retry_after` on `HermaError`.**
+- **`retry_after` on `EpistoleError`.**
   Rejected above; `None` almost everywhere.
 
 ## Consequences
@@ -130,11 +130,11 @@ Herma never sleeps and never retries.
 - A caller who ignores the send result loses SMTP refusals silently.
   The docstring on `send` and the SMTP backend say so.
   Anymail made the same trade.
-- A Graph recipient typo is never an error Herma can raise.
+- A Graph recipient typo is never an error Epistole can raise.
   The documentation says where to look.
 - `RecipientsRefusedError.refused` and `SendResult.refused` share the `Refusal` type, so code that reads one reads the other.
-- [#13](https://github.com/ozanozbeker/herma/issues/13) maps connection-lifecycle failures onto `TransportError` and `AuthenticationError`; no new class is needed.
-- [#14](https://github.com/ozanozbeker/herma/issues/14) settled the spellings: `SendResult`, `Refusal`, and the seven class names as written here.
-- [#16](https://github.com/ozanozbeker/herma/issues/16) decides what `__cause__` is on the HTTP backends; the contract here is only that it is the transport's own exception.
-- [#17](https://github.com/ozanozbeker/herma/issues/17) can add an unsupported-feature leaf; the hierarchy is flat, so nothing here forecloses it.
-- What Gmail does when the `From` header names neither the account nor a verified alias stays fog on [#2](https://github.com/ozanozbeker/herma/issues/2), and its mapping is unknown until a live send.
+- [#13](https://github.com/ozanozbeker/epistole/issues/13) maps connection-lifecycle failures onto `TransportError` and `AuthenticationError`; no new class is needed.
+- [#14](https://github.com/ozanozbeker/epistole/issues/14) settled the spellings: `SendResult`, `Refusal`, and the seven class names as written here.
+- [#16](https://github.com/ozanozbeker/epistole/issues/16) decides what `__cause__` is on the HTTP backends; the contract here is only that it is the transport's own exception.
+- [#17](https://github.com/ozanozbeker/epistole/issues/17) can add an unsupported-feature leaf; the hierarchy is flat, so nothing here forecloses it.
+- What Gmail does when the `From` header names neither the account nor a verified alias stays fog on [#2](https://github.com/ozanozbeker/epistole/issues/2), and its mapping is unknown until a live send.

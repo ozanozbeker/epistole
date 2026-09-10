@@ -4,7 +4,7 @@
 Under 4 MB of encoded request it calls `POST /me/sendMail`.
 Over that it creates a JSON draft, adds each attachment by its own call, sends the draft, and deletes the draft if anything fails in between.
 The switch is automatic and has no constructor knob: the tenant's permission grant is the gate, and a draft path without `Mail.ReadWrite` fails as `AuthenticationError`.
-Decided on [#20](https://github.com/ozanozbeker/herma/issues/20), grounded by `docs/research/attachment-and-inline-rules.md` and `docs/research/send-boundary-semantics.md`.
+Decided on [#20](https://github.com/ozanozbeker/epistole/issues/20), grounded by `docs/research/attachment-and-inline-rules.md` and `docs/research/send-boundary-semantics.md`.
 
 ## Why
 
@@ -16,7 +16,7 @@ Shipping the small path alone would cap Graph attachments near 2 MB, below one P
 
 **JSON everywhere, not MIME on the small path.**
 `sendMail` and `POST /me/messages` both accept the whole RFC 5322 message base64-encoded under `Content-Type: text/plain`, the bytes the SMTP backend writes.
-That form keeps the stamped `Message-ID`, any custom header, the caller's own plain text next to the HTML, and Herma's `multipart/related` layout.
+That form keeps the stamped `Message-ID`, any custom header, the caller's own plain text next to the HTML, and Epistole's `multipart/related` layout.
 It was the first choice for the small path and it lost.
 Whether attachments can be added to a MIME-built draft is undocumented, so the large path is JSON either way, and a MIME small path would make one message send at 3 MB and raise at 5 MB because of a header.
 Size-dependent rejection is a trap in a library whose premise is that the same code works everywhere.
@@ -44,7 +44,7 @@ The draft carries the body, recipients, and headers; every attachment then goes 
 
 **Best-effort cleanup.**
 A failure after draft creation leaves a draft in the mailbox, and a nightly job that fails would grow a pile.
-#2 rules server-side drafts out of scope, so a draft Herma made is Herma's mess.
+#2 rules server-side drafts out of scope, so a draft Epistole made is Epistole's mess.
 The delete is best effort and its own failure is swallowed, so the original error is never masked (ADR-0005).
 
 **`saveToSentItems` stays unexposed.**
@@ -66,15 +66,15 @@ Additive later if a use appears.
   Any failure after the draft exists: `DELETE {uploadUrl}` if a session is open, then `DELETE /me/messages/{id}`, each best effort with the failure swallowed.
   Then the original error is raised; a `TransportError` closes the connection after cleanup (ADR-0005).
 - **Pre-checks**, `RejectedError` with `__cause__` `None` (ADR-0004): an attachment over `150_000_000` raw bytes; more than 500 recipients; a custom header not starting with `x-`.
-  The tenant message limit (1 MB to 150 MB, default 35 MB) is not knowable and has no pre-check; a message over it bounces as a non-delivery report Herma never sees.
+  The tenant message limit (1 MB to 150 MB, default 35 MB) is not knowable and has no pre-check; a message over it bounces as a non-delivery report Epistole never sees.
 - **`internetMessageId`** is set to the stamped `Message-ID` on both paths.
-  Whether Exchange keeps it is a live test; ADR-0004 already defines `SendResult.message_id` as the submission Herma made, so the answer changes documentation, not the contract.
+  Whether Exchange keeps it is a live test; ADR-0004 already defines `SendResult.message_id` as the submission Epistole made, so the answer changes documentation, not the contract.
 - **Inline images** are `fileAttachment` with `isInline: true` and a bare `contentId`, on both paths and in upload-session `AttachmentItem`s.
 - **Every size constant is private** to `GraphTransport`.
   Microsoft writes "4 MB" and "3 MB" without units; 3 MiB raw encodes above 4 MiB, so the attachment cut must be decimal, and the request cap is taken conservatively.
   Moving a number after a live test changes nothing public.
 - **Error mapping** is ADR-0004's Graph table, unchanged.
-  `403` on draft creation is `AuthenticationError`; `413` or `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize` on an attachment call is `RejectedError` and should not occur, because Herma cut by size.
+  `403` on draft creation is `AuthenticationError`; `413` or `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize` on an attachment call is `RejectedError` and should not occur, because Epistole cut by size.
 
 ## Considered options
 
@@ -98,14 +98,14 @@ Additive later if a use appears.
 
 ## Consequences
 
-- On Graph the recipient's text part is Exchange's, not Herma's.
+- On Graph the recipient's text part is Exchange's, not Epistole's.
   The Graph backend docstring and the README say so in one sentence.
 - Custom headers on Graph must start with `x-` at every size.
   The headers decision on #2 inherits this pre-check.
-- Herma does not control where Exchange places inline parts relative to the alternative body; `cid:` references are guaranteed, the MIME layout around them is not.
+- Epistole does not control where Exchange places inline parts relative to the alternative body; `cid:` references are guaranteed, the MIME layout around them is not.
 - A large send costs `Mail.ReadWrite` and `2 + N` round trips plus upload chunks, and writes against Graph's 150 MB per five minutes per app and mailbox budget.
 - A delegated credential cannot add a large attachment to a message in a shared or delegated mailbox (Graph known issue, `403`); it surfaces as `AuthenticationError`.
 - The glossary's *Message* entry lists "draft" under *Avoid* as the server-side resource v1 rules out.
-  The draft here is transient, created and removed inside one send, and never a Herma concept; the entry stands.
+  The draft here is transient, created and removed inside one send, and never a Epistole concept; the entry stands.
 - ADR-0010's claim that Graph's small path carries the same bytes as SMTP is withdrawn there; its decision is unchanged.
-- Live tests, on [#23](https://github.com/ozanozbeker/herma/issues/23): whether `internetMessageId` survives; the exact request cap and attachment cut; the shared-mailbox `403`.
+- Live tests, on [#23](https://github.com/ozanozbeker/epistole/issues/23): whether `internetMessageId` survives; the exact request cap and attachment cut; the shared-mailbox `403`.

@@ -1,17 +1,17 @@
 # Attachment and inline-image rules across the three backends
 
-Research for [issue #4](https://github.com/ozanozbeker/herma/issues/4).
+Research for [issue #4](https://github.com/ozanozbeker/epistole/issues/4).
 Primary sources only.
 Every factual claim below carries a URL.
 Where a claim comes from a live probe or a local run rather than a document, the text says so.
 
-## What this means for herma's design
+## What this means for epistole's design
 
 Two of the three backends speak MIME.
 The third does not.
-SMTP and the Gmail API both take a complete RFC 5322 message that herma builds with `email.message.EmailMessage`.
+SMTP and the Gmail API both take a complete RFC 5322 message that epistole builds with `email.message.EmailMessage`.
 Microsoft Graph takes a flat JSON array of `fileAttachment` objects and builds the MIME itself inside Exchange.
-So herma's attachment API has to be a description of an attachment, not a MIME part.
+So epistole's attachment API has to be a description of an attachment, not a MIME part.
 An `Attachment` value object carrying `content: bytes`, `filename: str`, `content_type: str | None`, `inline: bool`, and `content_id: str | None` maps cleanly onto all three.
 A MIME-tree-shaped API does not, because Graph has no way to express nesting.
 
@@ -20,7 +20,7 @@ Graph forces a different call sequence above 3 MB, and that sequence needs a dif
 `sendMail` needs `Mail.Send`.
 `createUploadSession` needs `Mail.ReadWrite` ([sendMail permissions](https://learn.microsoft.com/en-us/graph/api/user-sendmail), [createUploadSession permissions](https://learn.microsoft.com/en-us/graph/api/attachment-createuploadsession)).
 An app that only ever attaches small files can be granted the narrower scope.
-That is user-visible, so herma should document it rather than hide it.
+That is user-visible, so epistole should document it rather than hide it.
 
 Check size before encoding, and derive the encoded size arithmetically.
 Both numbers are needed, and neither requires actually encoding the payload.
@@ -29,7 +29,7 @@ Gmail's 25 MB account limit is measured before encoding.
 The SMTP `SIZE` value, Graph's 4 MB request cap, and the Gmail API's 35 MiB upload cap are all measured after encoding.
 For base64 the encoded size is `4 * ceil(n / 3)` characters, wrapped at 76 characters per line ([RFC 2045](https://datatracker.ietf.org/doc/html/rfc2045)).
 With CRLF line endings that is `1.3333 * 78/76`, or about 1.37x.
-That is exactly the "about a 37% increase" Google quotes ([Gmail receiving limits](https://knowledge.workspace.google.com/admin/gmail/gmail-receiving-limits-in-google-workspace)), and it is the number herma should use, not a flat 33 percent.
+That is exactly the "about a 37% increase" Google quotes ([Gmail receiving limits](https://knowledge.workspace.google.com/admin/gmail/gmail-receiving-limits-in-google-workspace)), and it is the number epistole should use, not a flat 33 percent.
 
 Content-ID needs normalizing at the boundary.
 MIME wants angle brackets in the header.
@@ -74,7 +74,7 @@ There is a trap here.
 If not specified, and _filename_ is specified, add the header with the value `attachment`" ([contentmanager docs](https://docs.python.org/3/library/email.contentmanager.html)).
 Because the header is then already present, `add_related` leaves it alone.
 Verified locally on CPython 3.14.7: `add_related(data, maintype="image", subtype="png", cid="<a@b>", filename="logo.png")` produces `Content-Disposition: attachment; filename="logo.png"`.
-Passing `disposition="inline"` explicitly restores the intended value. herma must pass `disposition="inline"` whenever it passes both `filename` and `cid`, or inline images arrive as ordinary attachments.
+Passing `disposition="inline"` explicitly restores the intended value. epistole must pass `disposition="inline"` whenever it passes both `filename` and `cid`, or inline images arrive as ordinary attachments.
 
 For `bytes` payloads, `maintype` and `subtype` are required or `set_content` raises `TypeError`, and the transfer encoding defaults to base64 ([contentmanager docs](https://docs.python.org/3/library/email.contentmanager.html)).
 
@@ -118,7 +118,7 @@ Live probe on 2026-09-07 from this machine:
 The `SIZE` value covers the message as transmitted, so it is a post-encoding number.
 Gmail's 35882577 divided by 1.37 is about 26.2 MB, which is where a 25 MB pre-encoding limit lands after base64 plus line breaks.
 
-herma should read `esmtp_features["size"]` and refuse locally before writing the message, rather than discovering the ceiling from a 552.
+epistole should read `esmtp_features["size"]` and refuse locally before writing the message, rather than discovering the ceiling from a 552.
 
 ## Gmail API
 
@@ -129,7 +129,7 @@ The `raw` field is "The entire email message in an RFC 2822 formatted and base64
 "Gmail messages are sent as base64URL encoded strings within the `raw` field of a `messages` resource" ([sending guide](https://developers.google.com/workspace/gmail/api/guides/sending)).
 
 So Gmail and SMTP share the same construction path.
-Anything herma can express in MIME, it can send through Gmail.
+Anything epistole can express in MIME, it can send through Gmail.
 Attachment handling is explicitly the caller's problem: "Creating a message with an attachment is like creating any other message, but the process of uploading the file as a multi-part MIME message depends on the programming language" ([sending guide](https://developers.google.com/workspace/gmail/api/guides/sending)).
 
 ### Size limits
@@ -191,7 +191,7 @@ These attachments can ride along in the `sendMail` call: "When using JSON format
 Graph also accepts raw MIME.
 Set `Content-Type: text/plain` and put the whole MIME message, base64-encoded, in the request body ([sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail)).
 Malformed input returns `400` with code `ErrorMimeContentInvalidBase64String` and message "Invalid base64 string for MIME content."
-This looks like an escape hatch that would let herma use one MIME builder for all three backends.
+This looks like an escape hatch that would let epistole use one MIME builder for all three backends.
 It is not a usable one at any size, because the 4 MB request cap still applies and the payload now carries base64 twice: once inside the MIME part, once around the whole message.
 A 2 MB file becomes roughly 2.7 MB of MIME and roughly 3.7 MB of request body.
 
@@ -218,11 +218,11 @@ So the 3 MB figure is a per-file, pre-encoding number, chosen so that the post-e
 The failure above it is HTTP 413, not a mail-specific error.
 
 The 4 MB cap is on the whole request.
-Several small attachments in one `sendMail` call sum against it, along with the body and headers. herma should therefore budget the encoded total, not check each attachment in isolation.
+Several small attachments in one `sendMail` call sum against it, along with the body and headers. epistole should therefore budget the encoded total, not check each attachment in isolation.
 
 The one documented Graph error specific to attachment size goes the other way.
 `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize` "is returned when attempting to create an upload session to attach a file smaller than 3 MB" ([large attachments](https://learn.microsoft.com/en-us/graph/outlook-large-attachments)).
-The upload session is not a universal path that herma can always take.
+The upload session is not a universal path that epistole can always take.
 Below 3 MB it is an error.
 
 ### The large-file sequence
@@ -234,7 +234,7 @@ Each `PUT` sends `Content-Type: application/octet-stream`, a `Content-Length`, a
 "For better performance, keep each byte range less than 4 MB", and "You must upload bytes in a file in order."
 The final `PUT` returns `201 Created` with a `Location` header containing the attachment ID.
 
-Two consequences for herma.
+Two consequences for epistole.
 
 First, the flow becomes create-draft, upload, send-draft.
 That is a different endpoint, a different number of round trips, and a different permission (`Mail.ReadWrite` rather than `Mail.Send`).
@@ -283,7 +283,7 @@ So the header carries brackets and the URL does not.
 Any character in the Content-ID that is not URL-safe "must be hex-encoded using the %hh escape mechanism".
 
 Python does not manage the brackets.
-Verified locally: `set_content(..., cid="bare-id")` writes `Content-ID: bare-id`, with no brackets added. herma must add them.
+Verified locally: `set_content(..., cid="bare-id")` writes `Content-ID: bare-id`, with no brackets added. epistole must add them.
 
 ### Graph
 
@@ -309,10 +309,10 @@ Graph does not enforce that.
 ### Does `cid:` resolve identically on all three?
 
 For SMTP and Gmail, yes by construction.
-Both carry the identical MIME bytes herma produces, so the receiving client sees the same `multipart/related`, the same `Content-ID` and the same `cid:` reference.
+Both carry the identical MIME bytes epistole produces, so the receiving client sees the same `multipart/related`, the same `Content-ID` and the same `cid:` reference.
 
 For Graph, the HTML side is identical: the same `cid:value` reference works.
-The MIME side is not under herma's control.
+The MIME side is not under epistole's control.
 Graph accepts the attachment as a flat list entry; Exchange serializes the message to MIME later, in transport step 3, where "the transport process serializes the message properties to construct MIME content" ([send mail process](https://learn.microsoft.com/en-us/graph/outlook-things-to-know-about-send-mail)).
 Microsoft does not document whether the result is a `multipart/related`, where the inline part lands relative to the `multipart/alternative`, or whether the emitted `Content-ID` matches the `contentId` verbatim.
 I could not verify this from primary sources.
@@ -323,13 +323,13 @@ Confirming it needs a live send and an inspection of the received message.
 ### Content-type detection
 
 Python's `mimetypes.guess_type` returns `None` for an unknown extension.
-Verified locally: `a.png` gives `image/png`, `a.docx` gives `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `a.unknownext` gives `None`. herma must supply a fallback.
+Verified locally: `a.png` gives `image/png`, `a.docx` gives `application/vnd.openxmlformats-officedocument.wordprocessingml.document`, `a.unknownext` gives `None`. epistole must supply a fallback.
 `application/octet-stream` is the conventional one, and `set_content` requires an explicit `maintype` and `subtype` for `bytes` anyway ([contentmanager docs](https://docs.python.org/3/library/email.contentmanager.html)).
 
 Graph's `contentType` is optional, and Graph fills it in from the content.
 In the documented example, the request posts `{"name": "smile", "contentBytes": "R0lGODdhEAYEAA7"}` with no `contentType`, and the `201` response comes back with `"contentType": "image/gif"` ([add attachment](https://learn.microsoft.com/en-us/graph/api/message-post-attachments)).
 The name `smile` has no extension, so Graph sniffed the bytes, not the name.
-That is a behavioural difference worth knowing: if herma always sends an explicit `contentType`, the three backends agree; if it omits it, Graph may disagree with what herma would have guessed.
+That is a behavioural difference worth knowing: if epistole always sends an explicit `contentType`, the three backends agree; if it omits it, Graph may disagree with what epistole would have guessed.
 
 ### Filename encoding
 
@@ -360,8 +360,8 @@ Long non-ASCII names get RFC 2231 continuations as well:
  filename*1*=%C3%A0%C3%BC-et-beaucoup-de-caract%C3%A8res-2024-final.pdf
 ```
 
-So for SMTP and Gmail, herma passes the filename through and the stdlib handles the encoding.
-Some older clients only understand the encoded-word form, but emitting it would violate RFC 2047, and the stdlib gives no supported way to do so. herma should not try.
+So for SMTP and Gmail, epistole passes the filename through and the stdlib handles the encoding.
+Some older clients only understand the encoded-word form, but emitting it would violate RFC 2047, and the stdlib gives no supported way to do so. epistole should not try.
 
 ### What Graph does with `name`
 
@@ -377,7 +377,7 @@ Graph's own docs disagree about what `name` means.
 | [attachmentItem](https://learn.microsoft.com/en-us/graph/api/resources/attachmentitem) | "The display name of the attachment. This can be a descriptive string and doesn't have to be the actual file name." |
 
 Two of the three call it a display label.
-The base resource calls it a filename. herma should treat it as a filename anyway, because that is the only field available and because it is what recipients will see, but it should not assume a round-trip through Graph preserves an exact filename.
+The base resource calls it a filename. epistole should treat it as a filename anyway, because that is the only field available and because it is what recipients will see, but it should not assume a round-trip through Graph preserves an exact filename.
 
 What Exchange emits into the MIME `filename` parameter for a non-ASCII `name` is not documented.
 I could not verify it.
@@ -389,19 +389,19 @@ The `fileAttachment` prose says base64, and OData `Edm.Binary` in JSON is standa
 The auto-generated Python snippets on both the [add attachment](https://learn.microsoft.com/en-us/graph/api/message-post-attachments) and [sendMail](https://learn.microsoft.com/en-us/graph/api/user-sendmail) pages call `base64.urlsafe_b64decode`.
 Standard and URL-safe base64 differ in two characters.
 The two statements cannot both be right.
-I could not verify which alphabet Graph accepts. herma should use standard base64, matching the prose and the OData type.
+I could not verify which alphabet Graph accepts. epistole should use standard base64, matching the prose and the OData type.
 
 ## What makes a uniform attachment API hard
 
 1. Graph forces a different call sequence above 3 MB, and that sequence needs a broader OAuth scope.
-   This one leaks: herma cannot promise `Mail.Send` alone is enough without also capping attachment size.
+   This one leaks: epistole cannot promise `Mail.Send` alone is enough without also capping attachment size.
 2. Graph cannot express MIME nesting.
-   Any herma API shaped like a MIME tree is unimplementable on Graph.
+   Any epistole API shaped like a MIME tree is unimplementable on Graph.
    A flat list of attachment descriptions is the only shape that works everywhere.
 3. Content-ID brackets differ between the MIME header and the Graph JSON field.
    Normalize at the boundary.
-4. Graph's inline rendering is not under herma's control and is not documented. herma can guarantee identical `cid:` references in the HTML but not identical MIME structure.
-5. Size is measured against two different quantities depending on which limit you are checking, and the two backends state their expansion factor differently (33 versus 37 percent). herma needs both the raw and encoded byte counts.
+4. Graph's inline rendering is not under epistole's control and is not documented. epistole can guarantee identical `cid:` references in the HTML but not identical MIME structure.
+5. Size is measured against two different quantities depending on which limit you are checking, and the two backends state their expansion factor differently (33 versus 37 percent). epistole needs both the raw and encoded byte counts.
 6. Graph's 4 MB cap applies to the whole request, so attachments must be budgeted together, not individually.
 7. There are two ceilings per backend, an API ceiling and an account or tenant ceiling, and only the API ceiling fails fast.
    A 100 MB attachment is accepted by Graph's upload session and then bounces in transport on a default 35 MB tenant.

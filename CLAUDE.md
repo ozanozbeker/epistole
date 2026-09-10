@@ -1,12 +1,12 @@
 # CLAUDE.md
 
-Instructions for agents working in `herma`.
+Instructions for agents working in `epistole`.
 
 ## Agent skills
 
 ### Issue tracker
 
-GitHub Issues on `ozanozbeker/herma`, via the `gh` CLI.
+GitHub Issues on `ozanozbeker/epistole`, via the `gh` CLI.
 See `docs/agents/issue-tracker.md`.
 
 ### Triage labels

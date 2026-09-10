@@ -1,10 +1,10 @@
 # Send-boundary semantics across SMTP, Gmail, and Graph
 
-Research for [issue #3](https://github.com/ozanozbeker/herma/issues/3), checked 2026-09-07.
+Research for [issue #3](https://github.com/ozanozbeker/epistole/issues/3), checked 2026-09-07.
 Every claim cites a primary source: Microsoft Learn, Google's developer documentation, the Python documentation, the CPython 3.13 source, or a published RFC.
 Where a source is silent or two sources disagree, the text says so instead of guessing.
 
-## What this means for herma
+## What this means for epistole
 
 **`send()` cannot return a provider message id.**
 Graph answers `202 Accepted` with an empty body, and the claim in the issue is correct.
@@ -12,9 +12,9 @@ Graph answers `202 Accepted` with an empty body, and the claim in the issue is c
 Only Gmail returns an id, and it is a Gmail-mailbox-local string, not an RFC 5322 `Message-ID`.
 Two of three backends have nothing to return.
 
-**The only identifier available on all three is the one herma generates.**
+**The only identifier available on all three is the one epistole generates.**
 RFC 5322 makes the message author responsible for `Message-ID` uniqueness.
-If herma sets `Message-ID` before serializing, it can return that value on every backend without asking the provider for anything.
+If epistole sets `Message-ID` before serializing, it can return that value on every backend without asking the provider for anything.
 This is unverified in one respect: neither Gmail nor Graph documents whether it preserves a client-supplied `Message-ID`, and Graph's JSON path almost certainly does not.
 Test this before committing to it.
 
@@ -40,13 +40,13 @@ SMTP: the first digit of the reply code, per RFC 5321.
 The exception hierarchy should carry a `transient: bool` that each backend computes, rather than making callers match on backend-specific codes.
 
 **Sender identity is pinned to the authenticated mailbox on all three.**
-Overriding it is a server-side grant that an administrator makes, not a request field herma can simply fill in.
+Overriding it is a server-side grant that an administrator makes, not a request field epistole can simply fill in.
 Graph returns `403 ErrorSendAsDenied` when the grant is missing.
 An honest API exposes `from_` and lets the backend fail, rather than promising it works.
 
 **The tightest sending quotas sit below the API and do not surface as errors.**
 Exchange Online enforces 30 messages per minute and 10,000 recipients per day at the transport layer, after the `202`.
-Failures there arrive as a non-delivery report in the sender's Inbox, not as an HTTP status. herma cannot report them, and the documentation should say that plainly.
+Failures there arrive as a non-delivery report in the sender's Inbox, not as an HTTP status. epistole cannot report them, and the documentation should say that plainly.
 
 ## Comparison
 
@@ -105,7 +105,7 @@ The `250` after `DATA` carries real meaning: RFC 5321 section 4.1.1.4 makes it a
 That report arrives as a bounce message, hours later, out of band.
 
 The one durable identifier is the `Message-ID` header.
-RFC 5322 section 3.6.4 says the generator of the identifier must guarantee uniqueness, and that every message should have the field ([RFC 5322](https://www.rfc-editor.org/rfc/rfc5322.html)). herma generates it, so herma can return it.
+RFC 5322 section 3.6.4 says the generator of the identifier must guarantee uniqueness, and that every message should have the field ([RFC 5322](https://www.rfc-editor.org/rfc/rfc5322.html)). epistole generates it, so epistole can return it.
 
 ### SMTP failure surface
 
@@ -127,7 +127,7 @@ Connections stay open after an exception unless the reply code was `421`, in whi
 RFC 5321 section 4.2.1 does: `4yz` is a Transient Negative Completion reply where "the error condition is temporary and the action may be requested again", and `5yz` is a Permanent Negative Completion reply where "the SMTP client SHOULD NOT repeat the same request" ([RFC 5321](https://www.rfc-editor.org/rfc/rfc5321.html)).
 Reading `smtp_code // 100` is the whole classification rule.
 
-Transient codes herma will see: `421` service not available, `450` mailbox unavailable, `451` local error in processing, `452` insufficient system storage.
+Transient codes epistole will see: `421` service not available, `450` mailbox unavailable, `451` local error in processing, `452` insufficient system storage.
 Permanent codes: `550` mailbox unavailable, `552` exceeded storage allocation, `553` mailbox name not allowed, `554` transaction failed ([RFC 5321](https://www.rfc-editor.org/rfc/rfc5321.html)).
 
 Servers that implement RFC 3463 add an enhanced status code with the same split: class 4 is a persistent transient failure where "sending in the future may be successful", class 5 is a permanent failure "not likely to be resolved by resending the message in the current form" ([RFC 3463](https://www.rfc-editor.org/rfc/rfc3463.html)).
@@ -159,7 +159,7 @@ There is no scope model.
 
 `login` only tries CRAM-MD5, PLAIN, and LOGIN, in that order, and drops CRAM-MD5 when `hmac.digest` rejects MD5 under a FIPS build ([CPython 3.13 `Lib/smtplib.py`](https://github.com/python/cpython/blob/3.13/Lib/smtplib.py)).
 XOAUTH2 is not implemented.
-Reaching it means calling `SMTP.auth("XOAUTH2", authobject)` with a callable herma supplies ([docs](https://docs.python.org/3/library/smtplib.html#smtplib.SMTP.auth)).
+Reaching it means calling `SMTP.auth("XOAUTH2", authobject)` with a callable epistole supplies ([docs](https://docs.python.org/3/library/smtplib.html#smtplib.SMTP.auth)).
 This matters because both Gmail and Exchange Online now steer SMTP clients toward OAuth.
 
 ## Gmail API
@@ -184,7 +184,7 @@ The [Gmail API discovery document](https://gmail.googleapis.com/$discovery/rest?
 It lists a simple path at `/upload/gmail/v1/users/{userId}/messages/send` and a resumable path at `/resumable/upload/gmail/v1/users/{userId}/messages/send`, both marked `multipart: true`.
 `uploadType` takes `media`, `multipart`, or `resumable` ([upload guide](https://developers.google.com/workspace/gmail/api/guides/uploads)).
 
-Practical consequence for herma: send small messages to the plain endpoint and route anything with attachments through `/upload`.
+Practical consequence for epistole: send small messages to the plain endpoint and route anything with attachments through `/upload`.
 The discovery document is the citable source for the threshold; the human-facing docs do not state it.
 
 ### What a Gmail send returns
@@ -239,7 +239,7 @@ A `403` is permanent or transient depending entirely on which reason string it h
 
 ### Gmail throttling
 
-Gmail runs two independent quota systems, and herma will hit both.
+Gmail runs two independent quota systems, and epistole will hit both.
 
 The API quota is measured in units ([usage limits](https://developers.google.com/workspace/gmail/api/reference/quota)).
 `messages.send` costs 100 units.
@@ -273,7 +273,7 @@ An alias needing verification is returned with `verificationStatus` of `pending`
 
 What I could not verify: no Gmail API page states what `messages.send` does when the `From` header names an address that is neither the account nor a verified alias.
 The plausible behaviours are rejection with `400` and silent rewriting to the default send-as address, and the documentation supports neither.
-This needs a live test before herma promises anything about `from_` on Gmail.
+This needs a live test before epistole promises anything about `from_` on Gmail.
 
 ### Gmail scopes
 
@@ -311,7 +311,7 @@ The JSON path uses `subject`, `body` with a `contentType` of `Text` or `HTML`, `
 Custom headers carry a naming rule: "Add custom headers only when creating a message, and name them starting with 'x-'.
 After the message is sent, you cannot modify the headers." ([`message` resource](https://learn.microsoft.com/en-us/graph/api/resources/message)).
 
-The MIME path matters for herma.
+The MIME path matters for epistole.
 It accepts the exact bytes the SMTP backend would send, so one serializer can feed both.
 It preserves headers the JSON model cannot express.
 It is also the S/MIME path, and S/MIME payloads are "currently limited to 4 MB.
@@ -339,7 +339,7 @@ Failures there produce a non-delivery report placed in the sender's Inbox: "If s
 Transport also detects invalid recipient addresses at step 5 and mails NDRs back.
 
 So a Graph recipient typo is not an API error.
-It is an email that arrives in the sender's mailbox later. herma cannot see it.
+It is an email that arrives in the sender's mailbox later. epistole cannot see it.
 
 **Getting an id costs a second call and a wider permission.**
 `POST /me/messages` creates a draft, returns `201 Created`, and includes a full `message` object with `id` and an Exchange-assigned `internetMessageId` such as `<MWHPR1301MB@MWHPR1301MB.namprd13.prod.outlook.com>` ([create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages)).
@@ -367,7 +367,7 @@ Graph returns standard HTTP status codes with a JSON error object ([error respon
 }
 ```
 
-Two rules from that page shape herma's error model.
+Two rules from that page shape epistole's error model.
 "The **code** property contains a machine-readable value that you can take a dependency on in your code."
 "Don't take any dependency on the content of this value [`message`] in your code."
 Also: "The **innererror** object can recursively contain more **innererror** objects with more specific error **codes** properties.
@@ -423,7 +423,7 @@ Retry-After: 10
 ```
 
 The header is near-guaranteed but not absolute: "All the resources and APIs described in the Service-specific limits provide a `Retry-After` header except where indicated", and "If no `Retry-After` header is provided by the response, we recommend implementing an exponential backoff retry policy" ([throttling guidance](https://learn.microsoft.com/en-us/graph/throttling)).
-The [Outlook service limits](https://learn.microsoft.com/en-us/graph/throttling-limits) section does not indicate an exception, so mail sending should always carry the header. herma should still fall back to backoff when it is missing.
+The [Outlook service limits](https://learn.microsoft.com/en-us/graph/throttling-limits) section does not indicate an exception, so mail sending should always carry the header. epistole should still fall back to backoff when it is missing.
 
 Three limit tiers apply, and the first one reached triggers throttling ([throttling limits](https://learn.microsoft.com/en-us/graph/throttling-limits)):
 
@@ -432,13 +432,13 @@ Three limit tiers apply, and the first one reached triggers throttling ([throttl
   "Exceeding the limit for one mailbox doesn't affect the ability of the application to access another mailbox."
 - Exchange Online transport, per mailbox: 30 messages per minute and 10,000 recipients per day ([Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits)).
 
-The third tier is the one that will bite herma, and it does not produce a `429`.
+The third tier is the one that will bite epistole, and it does not produce a `429`.
 "When outbound message volumes surpass the message rate limit, any excess in message submission will be throttled and successively carried over to the following minutes."
 The recipient rate limit is harder: "After the recipient rate limit is reached, messages can't be sent from the mailbox until the number of recipients that were sent messages in the past 24 hours drops below the limit."
 There is also a tenant-wide external recipient cap, and mail from a default `onmicrosoft.com` domain is capped at 100 external recipients per organization per 24 hours, with senders receiving "NDRs with the code 550 5.7.236" past that point ([Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits)).
 
-Four concurrent requests per app and mailbox is the number that constrains herma's design most directly.
-Any concurrency herma offers for a single Graph mailbox should default to four or fewer.
+Four concurrent requests per app and mailbox is the number that constrains epistole's design most directly.
+Any concurrency epistole offers for a single Graph mailbox should default to four or fewer.
 
 ### Graph sender identity
 
@@ -457,7 +457,7 @@ Only an administrator can grant Send As; a user can grant Send on Behalf for the
 
 Set `from` and leave `sender` alone: "You don't need to set the `sender` property - Microsoft Graph sets it appropriately, based on the mailbox permissions granted to the user who has signed in."
 
-One gap worth knowing before designing an alias-listing feature: "It's not currently possible to use Microsoft Graph to query which mailboxes the authenticated user has permissions for." herma cannot enumerate valid `from` values on Graph, only attempt and catch `ErrorSendAsDenied`.
+One gap worth knowing before designing an alias-listing feature: "It's not currently possible to use Microsoft Graph to query which mailboxes the authenticated user has permissions for." epistole cannot enumerate valid `from` values on Graph, only attempt and catch `ErrorSendAsDenied`.
 
 **The application-permission case is the dangerous one.**
 `Mail.Send` as an application permission means "Send mail as any user" and "Allows the app to send mail as users in the organization without a signed-in user" ([permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)).
@@ -470,7 +470,7 @@ The trap is additive consent: "the assigned permissions are a union operation on
 Leaving the unscoped Microsoft Entra grant in place while adding a scoped RBAC assignment "results in no effective resource scoping".
 Permission changes also cache for 30 minutes to 2 hours.
 
-None of this is herma's code, but herma's documentation should tell operators that application-permission `Mail.Send` is tenant-wide until Exchange scopes it.
+None of this is epistole's code, but epistole's documentation should tell operators that application-permission `Mail.Send` is tenant-wide until Exchange scopes it.
 
 ### Graph permissions
 
@@ -485,7 +485,7 @@ None of this is herma's code, but herma's documentation should tell operators th
 Admin consent is required for every one of them ([permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference)).
 Graph has no consumer-consentable send permission, which makes the Graph onboarding story heavier than Gmail's.
 
-Creating a draft needs `Mail.ReadWrite` on top ([create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages)), so the id-returning workaround widens herma's permission ask from send-only to read-write.
+Creating a draft needs `Mail.ReadWrite` on top ([create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages)), so the id-returning workaround widens epistole's permission ask from send-only to read-write.
 
 ## Things that make a uniform interface hard
 
@@ -497,7 +497,7 @@ Ranked by how much design they force.
    Any uniform `send()` return type either omits the id or makes it optional, and an optional id that is present only on Gmail is close to useless to a caller writing backend-agnostic code.
 2. **Partial acceptance exists only on SMTP.**
    `sendmail` returning a non-empty dict without raising has no analogue in either API.
-   Either herma raises on any refusal and discards the distinction, or it carries a per-recipient result list that is always empty on Gmail and Graph.
+   Either epistole raises on any refusal and discards the distinction, or it carries a per-recipient result list that is always empty on Gmail and Graph.
 3. **`retry_after` exists only on Graph.**
    Optional field, documented as such.
 4. **The message model differs at the boundary.**
@@ -506,7 +506,7 @@ Ranked by how much design they force.
    Feeding Graph the same bytes keeps one serializer, but it costs the JSON-only features and it is the S/MIME path with its 4 MB limit.
 5. **Transport-layer quotas are invisible to the API.**
    Exchange Online's 30 messages per minute and Gmail's 2,000 messages per day both live below the send call.
-   Gmail surfaces its as a delayed `429`; Exchange surfaces its as an NDR that herma never sees.
+   Gmail surfaces its as a delayed `429`; Exchange surfaces its as an NDR that epistole never sees.
 6. **Success is asynchronous everywhere, and each backend admits it differently.**
    Graph says `202` does not mean processed.
    Gmail says a `200` does not mean sent.
@@ -535,7 +535,7 @@ Ranked by how much design they force.
 - **`Message-ID` preservation is undocumented on both APIs.**
   Whether Gmail keeps a client-supplied `Message-ID` on the `raw` payload, and whether Graph's MIME path keeps one while its JSON path assigns its own `internetMessageId`, is stated nowhere I could find.
   The Graph draft examples all show an Exchange-generated `internetMessageId`, which suggests the JSON path assigns one.
-  This is load-bearing if herma plans to return its own `Message-ID` as the uniform identifier, so test it first.
+  This is load-bearing if epistole plans to return its own `Message-ID` as the uniform identifier, so test it first.
 - **No overall `sendMail` size limit is published for Graph.**
   The 4 MB figure is S/MIME-specific and the 150 MB figure is a throttling window, not a per-message cap.
   I could not find a documented per-message maximum for `POST /me/sendMail`.

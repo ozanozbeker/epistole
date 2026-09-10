@@ -1,11 +1,11 @@
 # A backend opens connections and is not one
 
-Django, redmail, and the first draft of [#13](https://github.com/ozanozbeker/herma/issues/13) make the backend its own context manager: `with SMTPBackend(...) as backend:` opens a socket that the same object later closes.
-Herma splits the two.
+Django, redmail, and the first draft of [#13](https://github.com/ozanozbeker/epistole/issues/13) make the backend its own context manager: `with SMTPBackend(...) as backend:` opens a socket that the same object later closes.
+Epistole splits the two.
 A backend is frozen configuration, `backend.connect()` opens a connection, and only the connection is a context manager.
 Both carry `send`: `backend.send(message)` opens a connection for one message and closes it, `connection.send(message)` reuses one.
 This is SQLAlchemy's `Engine` and `Connection` shape.
-Decided on [#13](https://github.com/ozanozbeker/herma/issues/13); the verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/herma/issues/14) (ADR-0006).
+Decided on [#13](https://github.com/ozanozbeker/epistole/issues/13); the verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/epistole/issues/14) (ADR-0006).
 
 ## Why
 
@@ -25,7 +25,7 @@ That is why the connection carries no lock: two threads on one SMTP socket seria
   Everything about how to connect lives on the backend constructor, as it does on `create_engine`.
   `__enter__` returns `self` and does nothing else, so redmail's return-`None` trap has nowhere to hide.
 - **A connection is one link, used once.**
-  `send` or `__enter__` on a closed connection raises `ValueError`, not a `HermaError`, because it is a mistake in the calling code (ADR-0004).
+  `send` or `__enter__` on a closed connection raises `ValueError`, not a `EpistoleError`, because it is a mistake in the calling code (ADR-0004).
   Reopening means calling `connect()` again.
 - **`close()` is idempotent and never raises; `__exit__` calls it and never suppresses.**
   SMTP `QUIT` is best effort, and a dead socket is swallowed so an error from the `with` body is not masked.
@@ -34,16 +34,16 @@ That is why the connection carries no lock: two threads on one SMTP socket seria
   `RejectedError`, `SenderRefusedError`, `RecipientsRefusedError`, `ThrottledError`, `ProviderError`, and `AuthenticationError` leave it open, because `smtplib` leaves the socket open and a loop should continue with the next recipient.
 - **`backend.send()` is `connect`, `send`, `close`.**
   The one-off send stays one line and opens one connection for it.
-  SQLAlchemy 2.0 removed `Engine.execute`; Herma keeps the one-shot because a report sender has no transaction to scope and almost every call is one message.
+  SQLAlchemy 2.0 removed `Engine.execute`; Epistole keeps the one-shot because a report sender has no transaction to scope and almost every call is one message.
 - **Every backend has `connect()`, including Gmail, Graph, `MemoryBackend`, and `ConsoleBackend`.**
   The loop `with backend.connect() as c:` must survive a backend swap unchanged.
   On HTTP the connection holds a token and, where the transport allows it, one keep-alive link.
   It refreshes the token through the caller's credential object on each send, so an expired token in a long notebook session is not an error; only a failed refresh is.
   On the test doubles it is a no-op that delegates to the backend, and `MemoryBackend`'s outbox lives on the backend so it survives the `with`.
 - **Two classes, one Protocol.**
-  `Backend` and `Connection` are Herma classes; `Transport` is the Protocol a backend author implements.
+  `Backend` and `Connection` are Epistole classes; `Transport` is the Protocol a backend author implements.
   ADR-0006 records the shape; this ADR owns the lifecycle rules above, which are unchanged by it.
-- **`HermaError.backend` is always the configured backend.**
+- **`EpistoleError.backend` is always the configured backend.**
   A connection exposes `.backend` and fills it in, so a log line names the route whether the send went through a connection or not, and ADR-0004's wording survives unchanged.
 - **A backend is not a context manager.**
   `with SMTPBackend(...)` is a `TypeError`.
@@ -77,6 +77,6 @@ That is why the connection carries no lock: two threads on one SMTP socket seria
 - A connection left unclosed outside `with` holds an SMTP socket until the server times it out; on HTTP nothing leaks.
   The docstring on `connect()` says to use `with`.
 - The glossary gains *Connection* and `Backend` no longer lists it under *Avoid*.
-- [#16](https://github.com/ozanozbeker/herma/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all, and how the per-send token refresh is wired through `google-auth` and `msal`.
-- [#18](https://github.com/ozanozbeker/herma/issues/18) inherits that SMTP AUTH, including XOAUTH2, happens in `connect()`.
+- [#16](https://github.com/ozanozbeker/epistole/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all, and how the per-send token refresh is wired through `google-auth` and `msal`.
+- [#18](https://github.com/ozanozbeker/epistole/issues/18) inherits that SMTP AUTH, including XOAUTH2, happens in `connect()`.
 - The README's user guide is written against this shape.

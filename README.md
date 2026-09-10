@@ -1,8 +1,8 @@
-# herma
+# Epistole
 
 A single Python API for sending email, regardless of the backend.
 
-`herma` takes an email you have already composed as HTML and sends it through whichever service you have configured, using the same interface each time.
+`epistole` takes an email you have already composed as HTML and sends it through whichever service you have configured, using the same interface each time.
 Supported backends are SMTP, Microsoft Graph, and Google, with room for more.
 Switching providers means changing configuration, not rewriting your code.
 
@@ -18,7 +18,7 @@ The shapes are settled: a `Message` is an immutable value you build by chaining,
 
 ```python
 from pathlib import Path
-from herma import Message, SMTPBackend
+from epistole import Message, SMTPBackend
 
 smtp = SMTPBackend(host="mail.corp.example", port=587, from_address="reports@corp.example", ...)
 
@@ -71,7 +71,7 @@ connection.send(report)
 ```
 
 Raises `ValueError`, because the connection is closed.
-This is a mistake in the calling code, not a mail failure, so it is not a `HermaError` and `except HermaError` does not swallow it.
+This is a mistake in the calling code, not a mail failure, so it is not a `EpistoleError` and `except EpistoleError` does not swallow it.
 A connection is one link, used once; to send again, call `connect()` again.
 
 ### Notebook, two cells, Graph
@@ -99,7 +99,7 @@ On SMTP it leaves a socket open until the server times it out, which is why the 
 
 A backend is immutable and safe to share.
 A connection is not: use one per thread, the same rule as a DB-API connection.
-Herma does not lock a connection for you; two threads on one connection is a bug in the caller.
+Epistole does not lock a connection for you; two threads on one connection is a bug in the caller.
 
 ### Markdown instead of HTML
 
@@ -111,7 +111,7 @@ note = (
 )
 ```
 
-Needs the extra: `pip install "herma[markdown]"`.
+Needs the extra: `pip install "epistole[markdown]"`.
 Without it, this line raises `ImportError` naming the extra.
 The Markdown renders to HTML for clients that show it, and the source you wrote is the plain text for clients that do not.
 Exactly one of `html=` or `markdown=` per message.
@@ -131,7 +131,7 @@ No HTML part is made; the message is `text/plain` and every client renders it.
 ### A better plain-text part
 
 Every HTML message carries plain text.
-Herma derives it with a small extractor of its own, which keeps links, marks list items, and drops the stylesheet.
+Epistole derives it with a small extractor of its own, which keeps links, marks list items, and drops the stylesheet.
 To supply your own, pass `text=` and nothing is derived:
 
 ```python
@@ -139,7 +139,7 @@ Message(html=body, text=Path("weekly.txt").read_text(encoding="utf-8"))
 ```
 
 To derive it with a library you prefer, pass `text_renderer=`, a callable from HTML to text.
-It runs once, after Herma has moved `data:` images out of the HTML, so no base64 lands in the text.
+It runs once, after Epistole has moved `data:` images out of the HTML, so no base64 lands in the text.
 
 ```python
 from inscriptis import get_text
@@ -150,16 +150,16 @@ config = ParserConfig(display_links=True)
 Message(html=body, text_renderer=lambda h: get_text(h, config))
 ```
 
-`inscriptis` aligns table columns, which Herma's extractor does not.
+`inscriptis` aligns table columns, which Epistole's extractor does not.
 `html2text` works the same way through `HTML2Text().handle`; set `unicode_snob = True` on it or `Café` arrives as `Cafe`, and note its licence is GPL-3.0-or-later.
-The default is exported as `herma.html_to_text` if you want to wrap it.
+The default is exported as `epistole.html_to_text` if you want to wrap it.
 
 ## Choosing a backend
 
-Herma sends the same message through any backend, so choosing one is a deployment decision, not a code decision.
+Epistole sends the same message through any backend, so choosing one is a deployment decision, not a code decision.
 
 Use **SMTP** unless something stops you.
-It works with every mail system, it carries the largest messages, and it sends exactly the MIME Herma built.
+It works with every mail system, it carries the largest messages, and it sends exactly the MIME Epistole built.
 
 Use **Graph** when your tenant has turned SMTP AUTH off, or when you need a retry hint on throttling.
 Accept its 4 MB body limit before you choose it.
@@ -191,8 +191,8 @@ Graph keeps working through all of it.
 The per-mailbox SMTP AUTH setting overrides the organization setting, so one enabled mailbox is the documented workaround.
 
 **Fidelity against features.**
-SMTP and Gmail take the complete RFC 5322 message Herma builds, so what you send is what arrives.
-Graph takes a flat JSON array and Exchange serializes the MIME later, so Herma can guarantee your `cid:` references resolve but not the MIME structure around them.
+SMTP and Gmail take the complete RFC 5322 message Epistole builds, so what you send is what arrives.
+Graph takes a flat JSON array and Exchange serializes the MIME later, so Epistole can guarantee your `cid:` references resolve but not the MIME structure around them.
 In exchange, Graph is the only backend that tells you how long to wait when it throttles you.
 
 **What the permission costs.**
@@ -208,11 +208,11 @@ Fuller working is in `docs/research/send-boundary-semantics.md` and `docs/resear
 
 ## About the name
 
-A herma was a stone marker set at crossroads and roadsides in ancient Greece.
+An epistole was a stone marker set at crossroads and roadsides in ancient Greece.
 Travelers used them to tell which road led where.
 The name fits a library whose job is to take one message and direct it down whichever road you have chosen.
 
 ## Credit
 
-`herma` is inspired by [blastula](https://github.com/rstudio/blastula), an R package for composing and sending email.
+`epistole` is inspired by [blastula](https://github.com/rstudio/blastula), an R package for composing and sending email.
 It is not a port, and the API does not mirror blastula's.

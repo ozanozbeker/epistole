@@ -298,7 +298,7 @@ wheels = [
 ]
 
 [[package]]
-name = "herma"
+name = "epistole"
 version = "0.0.1"
 source = { editable = "." }
 
@@ -334,7 +334,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.57" },
-    { name = "herma", extras = ["gmail", "graph", "markdown"], marker = "extra == 'all'" },
+    { name = "epistole", extras = ["gmail", "graph", "markdown"], marker = "extra == 'all'" },
     { name = "httpx2", marker = "extra == 'gmail'", specifier = ">=2.12,<3" },
     { name = "httpx2", marker = "extra == 'graph'", specifier = ">=2.12,<3" },
     { name = "markdown-it-py", marker = "extra == 'markdown'", specifier = ">=4.2" },

@@ -39,12 +39,12 @@ Most hooks fix in place, so a failed commit often just needs `git add` and a ret
 
 The package has two spellings in prose, and each means one thing.
 
-- **Herma** is the name.
-  Use it in running text: "Herma sends the same message through any backend."
-- **`herma`** is the identifier, in code formatting.
-  Use it for the distribution, the module, and the command: `pip install herma`, `import herma`.
+- **Epistole** is the name.
+  Use it in running text: "Epistole sends the same message through any backend."
+- **`epistole`** is the identifier, in code formatting.
+  Use it for the distribution, the module, and the command: `pip install epistole`, `import epistole`.
 
-Never write bare "herma" in a sentence, and never any other variation such as "HERMA" or "herma.py".
+Never write bare "epistole" in a sentence, and never any other variation such as "EPISTOLE" or "epistole.py".
 
 ## Commits
 
@@ -142,9 +142,9 @@ A pending publisher on PyPI:
 
 | Field | Value |
 | --- | --- |
-| PyPI Project Name | `herma` |
+| PyPI Project Name | `epistole` |
 | Owner | `ozanozbeker` |
-| Repository name | `herma` |
+| Repository name | `epistole` |
 | Workflow name | `release.yml` |
 | Environment name | `pypi` |
 

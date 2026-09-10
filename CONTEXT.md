@@ -1,6 +1,6 @@
-# Herma
+# Epistole
 
-Herma is one API for building an email message and sending it through SMTP, the Gmail API, or Microsoft Graph without changing the calling code.
+Epistole is one API for building an email message and sending it through SMTP, the Gmail API, or Microsoft Graph without changing the calling code.
 This glossary is the vocabulary the spec and the implementation share.
 
 ## Language
@@ -9,10 +9,10 @@ This glossary is the vocabulary the spec and the implementation share.
 It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
 _Avoid_: email, draft (the server-side resource v1 rules out), mail
 
-**Content**: What a message says: HTML the caller supplied or Herma rendered from Markdown, together with plain text; or plain text alone.
+**Content**: What a message says: HTML the caller supplied or Epistole rendered from Markdown, together with plain text; or plain text alone.
 _Avoid_: body (the HTML element, blastula's middle section, and RFC 5322's everything after the headers), payload, copy
 
-**Plain text**: The readable text every message carries: what the caller wrote, the Markdown source, or what Herma derived from the HTML.
+**Plain text**: The readable text every message carries: what the caller wrote, the Markdown source, or what Epistole derived from the HTML.
 It ships alongside the HTML or alone, and a text-only client shows nothing else.
 _Avoid_: fallback (it is the whole message when there is no HTML), alternative (the MIME spelling), text part
 
@@ -21,7 +21,7 @@ The recipient's client lists it as a file, unless it is an inline image.
 _Avoid_: file, part, MIME part
 
 **Inline image**: An attachment the HTML body displays in place by naming its content id after `cid:`, never listed as a file.
-A caller embeds one under a name the HTML already uses; Herma makes one by rewriting a `data:` image it found.
+A caller embeds one under a name the HTML already uses; Epistole makes one by rewriting a `data:` image it found.
 _Avoid_: embedded image, body image, related part
 
 **Content id**: The name an inline image answers to, unique within one message and deliberately not unique across messages.
@@ -51,8 +51,8 @@ An anonymous relay takes none.
 A caller hands one in as a value from the backend's own module; a backend never accepts the vendor's API client built on top of one.
 _Avoid_: client (the vendor SDK object), token (one short-lived output of a credential), bearer (the wire spelling of a token), auth, login, key (one kind of secret), creds (blastula's spelling)
 
-**Token source**: What Herma builds from a credential at connect time: the object that produces a fresh access token on demand, in the shape `get_token` defines.
-A caller who already has one hands it in as a credential and Herma uses it unchanged.
+**Token source**: What Epistole builds from a credential at connect time: the object that produces a fresh access token on demand, in the shape `get_token` defines.
+A caller who already has one hands it in as a credential and Epistole uses it unchanged.
 _Avoid_: token credential (the vendor's name for the same shape), provider, authenticator
 
 **Transport**: The wire object a backend opens and a connection holds: the only code that speaks SMTP, the Gmail API, or Microsoft Graph.
@@ -81,4 +81,4 @@ _Avoid_: receipt (reads as a delivery receipt), result (the Rust-style success-o
 
 **Refusal**: A mail service's no to one recipient of an accepted submission, with the code and reason it gave.
 Only SMTP can refuse some recipients and accept the rest; the two APIs accept or refuse the whole message.
-_Avoid_: bounce (the non-delivery report that arrives later, which Herma never sees), rejection (the whole-message case)
+_Avoid_: bounce (the non-delivery report that arrives later, which Epistole never sees), rejection (the whole-message case)

@@ -3,7 +3,7 @@
 `.to()`, `.cc()`, `.bcc()`, `.reply_to()`, and `.subject()` are the builder methods (ADR-0002), so `message.to` is a bound method and the value needs a second name.
 The value reads back as the same name plus a trailing underscore: `to_`, `cc_`, `bcc_`, `reply_to_`, `subject_`.
 `recipients` has no underscore, because no method claims it; it is `to_ + cc_ + bcc_` in that order with duplicates kept, as Django's `recipients()`.
-Decided on [#14](https://github.com/ozanozbeker/herma/issues/14).
+Decided on [#14](https://github.com/ozanozbeker/epistole/issues/14).
 
 ## Why
 

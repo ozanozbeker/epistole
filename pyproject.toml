@@ -1,5 +1,5 @@
 [project]
-name = "herma"
+name = "epistole"
 version = "0.0.1"
 description = "A single Python API for sending email, regardless of the backend behind it."
 readme = "README.md"
@@ -18,13 +18,13 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Changelog = "https://github.com/ozanozbeker/herma/blob/main/CHANGELOG.md"
-Homepage = "https://github.com/ozanozbeker/herma"
-Issues = "https://github.com/ozanozbeker/herma/issues"
-Repository = "https://github.com/ozanozbeker/herma"
+Changelog = "https://github.com/ozanozbeker/epistole/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/ozanozbeker/epistole"
+Issues = "https://github.com/ozanozbeker/epistole/issues"
+Repository = "https://github.com/ozanozbeker/epistole"
 
 [project.optional-dependencies]
-all = ["herma[gmail,graph,markdown]"]
+all = ["epistole[gmail,graph,markdown]"]
 gmail = ["google-auth>=2.57", "httpx2>=2.12,<3"]
 graph = ["httpx2>=2.12,<3", "msal>=1.38"]
 markdown = ["markdown-it-py>=4.2"]

@@ -1,13 +1,13 @@
 # Message is an immutable value that copies on write
 
 No Python email library chains, and the two that come closest mutate while doing it.
-Herma chains anyway, and every builder method returns a new `Message` instead of `self`.
+Epistole chains anyway, and every builder method returns a new `Message` instead of `self`.
 A `Message` is a closed value: nothing it holds changes, nothing it holds is read later, and nothing can be removed from it.
-Decided on [#10](https://github.com/ozanozbeker/herma/issues/10), building on the prototype verdict in [#8](https://github.com/ozanozbeker/herma/issues/8).
+Decided on [#10](https://github.com/ozanozbeker/epistole/issues/10), building on the prototype verdict in [#8](https://github.com/ozanozbeker/epistole/issues/8).
 
 ## Why
 
-The loop Herma exists for is one composed body sent to many recipients over one connection:
+The loop Epistole exists for is one composed body sent to many recipients over one connection:
 
 ```python
 report = Message(html=html).subject("Weekly numbers").attach(pdf)
@@ -59,8 +59,8 @@ Porting the look without the semantics imports a bug R does not have, so chainin
   Same safety, no invented API.
   Rejected because appending an attachment becomes `replace(m, attachments=(*m.attachments, new))`, and `to=("a",)` reopens the bug where a bare string iterates into single-character recipients, which varargs on `.to()` close for free.
 - **Constructor accepts every field.**
-  Rejected because it gives each field two spellings, and the keyword name `to` would differ from whatever [#14](https://github.com/ozanozbeker/herma/issues/14) names the readback.
-- **Lazy preparation inside `send`, as [#9](https://github.com/ozanozbeker/herma/issues/9) first wrote it.**
+  Rejected because it gives each field two spellings, and the keyword name `to` would differ from whatever [#14](https://github.com/ozanozbeker/epistole/issues/14) names the readback.
+- **Lazy preparation inside `send`, as [#9](https://github.com/ozanozbeker/epistole/issues/9) first wrote it.**
   Copy on write means `send` cannot write derived text back to the caller's message, so the loop would derive once per subscriber.
   A public idempotent `prepare()` fixes the cost but adds a second state to one type.
   Eager preparation removes the state.
@@ -75,8 +75,8 @@ Porting the look without the semantics imports a bug R does not have, so chainin
   Django's locmem backend deep-copies for exactly that reason.
 - The constructor does work and can raise.
   A renderer error or a malformed `data:` URI surfaces at the line that supplied the HTML.
-- The split from [#9](https://github.com/ozanozbeker/herma/issues/9) survives with one line moved: backends never re-derive, and neither does `send`.
-- [#11](https://github.com/ozanozbeker/herma/issues/11) inherits attach-time reads and the construction-time `data:` rewrite.
-  [#12](https://github.com/ozanozbeker/herma/issues/12) inherits the per-send `Message-ID`.
-  [#14](https://github.com/ozanozbeker/herma/issues/14) still owns the readback names once `.to()` has taken the attribute.
-  [#15](https://github.com/ozanozbeker/herma/issues/15) inherits a renderer that runs once, at construction.
+- The split from [#9](https://github.com/ozanozbeker/epistole/issues/9) survives with one line moved: backends never re-derive, and neither does `send`.
+- [#11](https://github.com/ozanozbeker/epistole/issues/11) inherits attach-time reads and the construction-time `data:` rewrite.
+  [#12](https://github.com/ozanozbeker/epistole/issues/12) inherits the per-send `Message-ID`.
+  [#14](https://github.com/ozanozbeker/epistole/issues/14) still owns the readback names once `.to()` has taken the attribute.
+  [#15](https://github.com/ozanozbeker/epistole/issues/15) inherits a renderer that runs once, at construction.

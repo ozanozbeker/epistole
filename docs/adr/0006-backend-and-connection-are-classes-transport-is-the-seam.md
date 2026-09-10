@@ -1,7 +1,7 @@
-# Backend and Connection are Herma classes; Transport is the seam
+# Backend and Connection are Epistole classes; Transport is the seam
 
-[#9](https://github.com/ozanozbeker/herma/issues/9) made `Backend` a one-method Protocol and put the verb on the message, `Message.send(over=...)`. [#14](https://github.com/ozanozbeker/herma/issues/14) reverses both.
-`Backend` is an abstract base class with `send`, `connect`, and one abstract `_open() -> Transport`; `Connection` is a concrete class Herma owns; `Transport` is the only Protocol, with `submit` and `close`, and it is the whole of what a third-party backend writes.
+[#9](https://github.com/ozanozbeker/epistole/issues/9) made `Backend` a one-method Protocol and put the verb on the message, `Message.send(over=...)`. [#14](https://github.com/ozanozbeker/epistole/issues/14) reverses both.
+`Backend` is an abstract base class with `send`, `connect`, and one abstract `_open() -> Transport`; `Connection` is a concrete class Epistole owns; `Transport` is the only Protocol, with `submit` and `close`, and it is the whole of what a third-party backend writes.
 The verb is `backend.send(message)` and `connection.send(message)`, and a `Message` cannot send.
 
 ## Why
@@ -15,7 +15,7 @@ Putting the verb on the backend and connection, not the message, is 2.0's other 
 `backend.send()` stays as a one-shot because the audience sends one report far more often than a loop, and because it costs nothing once `Backend` is a class.
 
 The base class reverses #9's structural typing.
-That choice paid for the `over=` union, which is gone; a backend author importing Herma is normal, as Django backends import Django.
+That choice paid for the `over=` union, which is gone; a backend author importing Epistole is normal, as Django backends import Django.
 
 ## Rules
 
@@ -23,7 +23,7 @@ That choice paid for the `over=` union, which is gone; a backend author importin
 - `Connection.send` raises `ValueError` when closed, checks the message, stamps it, calls `transport.submit`, and on `TransportError` closes itself and re-raises (ADR-0005).
 - `Transport` is `submit(message, /) -> SendResult` and `close() -> None`, positional-only so a third-party `submit(self, msg)` still matches.
 - The abstract surface of `Backend` is `_open()` alone; adding an abstract method later breaks every subclass, so nothing else is abstract.
-- Concrete transports, `SMTPTransport` and the rest, are not exported from `herma`; users never construct one.
+- Concrete transports, `SMTPTransport` and the rest, are not exported from `epistole`; users never construct one.
 
 ## Considered options
 

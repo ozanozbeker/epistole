@@ -1,6 +1,6 @@
 # HTML to plain-text extraction
 
-Research for [#7](https://github.com/ozanozbeker/herma/issues/7).
+Research for [#7](https://github.com/ozanozbeker/epistole/issues/7).
 All figures measured on 2026-09-07, Python 3.13.12, macOS arm64.
 Every candidate was installed into its own throwaway venv and run against one realistic marketing email.
 
@@ -17,9 +17,9 @@ It keeps every `href`, marks list items, holds table rows on one line, drops `<s
 
 Second, the two libraries that beat it or match it both carry a disqualifying cost.
 `inscriptis` is the best output in the field, but it hard-depends on `lxml` and on `requests`, which its own package only imports from the CLI.
-That is 22 MB installed and a `lxml>=5.4.0,<6.2.0` upper bound that herma would push onto every user.
+That is 22 MB installed and a `lxml>=5.4.0,<6.2.0` upper bound that epistole would push onto every user.
 `html2text` is GPL-3.0-or-later.
-Herma is MIT, and a GPL runtime import is a licence question herma's users should never have to answer.
+Epistole is MIT, and a GPL runtime import is a licence question epistole's users should never have to answer.
 
 Third, the "extra absent" branch has no good answer.
 Omitting the `text/plain` part is wrong, and naive tag stripping produces the `lxml` output shown below, which is worse than no email at all.
@@ -32,7 +32,7 @@ Instead of an extra, expose the seam:
   Supplied text wins outright and derivation never runs.
 - `text_renderer: Callable[[str], str] | None`.
   A caller who wants `inscriptis` or `html2text` installs it themselves and passes `inscriptis.get_text` or `html2text.html2text`.
-  Herma never depends on either, so the GPL question stays with the caller who opted in.
+  Epistole never depends on either, so the GPL question stays with the caller who opted in.
 
 Never omit the part.
 The spam case for it is weaker than folklore says: SpamAssassin scores HTML-only mail at 0.1 via `MIME_HTML_ONLY` ([`50_scores.cf`](https://github.com/apache/spamassassin/blob/trunk/rules/50_scores.cf), [`20_body_tests.cf`](https://github.com/apache/spamassassin/blob/trunk/rules/20_body_tests.cf)), and the `multipart/alternative` variant `MIME_HTML_ONLY_MULTI` scores 0.000 to 0.001 across the four scoresets.
@@ -332,7 +332,7 @@ The friction is smaller than it used to be.
 `lxml` 6.1.3 publishes wheels for CPython 3.8 through 3.15 including free-threaded 3.14t and 3.15t, on macOS universal2 and x86_64, manylinux and musllinux for x86_64/aarch64/i686/armv7l/ppc64le/riscv64, Windows 32/64/arm64, and PyPy.
 Wheels run 3.5 MB to 8.4 MB each; 19 MB installed.
 The failure mode is a platform with no wheel, where `pip` falls back to the sdist and needs libxml2 and libxslt headers plus Cython.
-That is exactly the class of user a zero-dependency core is meant to protect, and it is why `lxml` should not become a herma dependency for a job the stdlib already does adequately.
+That is exactly the class of user a zero-dependency core is meant to protect, and it is why `lxml` should not become a epistole dependency for a job the stdlib already does adequately.
 
 ### On maintenance health
 
@@ -362,8 +362,8 @@ Its problem is dependencies, not upkeep.
 | html-to-text | Apache-2.0 | [repo](https://github.com/emludei/html_to_text) |
 
 One flag: **html2text is GPL-3.0-or-later**.
-Herma is MIT.
-A GPL dependency does not relicense herma's own source, but importing GPL code at runtime creates a combined-work argument that herma's downstream users would have to evaluate.
+Epistole is MIT.
+A GPL dependency does not relicense epistole's own source, but importing GPL code at runtime creates a combined-work argument that epistole's downstream users would have to evaluate.
 Even as an optional extra, it puts a licence decision in the install path.
 Since `inscriptis` (Apache-2.0) produces better output and the stdlib approach produces comparable output, there is no reason to take that on.
 
@@ -387,7 +387,7 @@ The closest precedent for derivation is Node, and it is instructive: `nodemailer
 It has not been published since 2021-04-22 and pins `html-to-text@7.1.1` while upstream is on 10.0.1.
 That is the maintenance cost of pinning someone else's extractor.
 
-Herma derives by default because the alternative is that most callers send HTML-only.
+Epistole derives by default because the alternative is that most callers send HTML-only.
 But the parameter must exist, and supplying it must skip derivation entirely rather than merging or validating.
 
 ## CSS inlining: overlap
@@ -399,7 +399,7 @@ Neither `css-inline` nor `premailer` exposes any plain-text function; `premailer
 
 The one indirect connection is `lxml`.
 `premailer` depends on it, and so does `inscriptis`.
-If herma ever takes an `lxml` dependency for CSS inlining, the marginal cost of `inscriptis` drops to 46 KB and this recommendation is worth revisiting.
+If epistole ever takes an `lxml` dependency for CSS inlining, the marginal cost of `inscriptis` drops to 46 KB and this recommendation is worth revisiting.
 
 The leading Python option is [`css-inline`](https://pypi.org/project/css-inline/) 0.21.2 (2026-08-24), MIT, a Rust extension built on Mozilla Servo components, [16 releases in 24 months](https://github.com/Stranger6667/css-inline), 2.8M downloads/month, `abi3` wheels for cp310+ so one wheel covers all future CPython 3.x.
 This is what red-mail's `style` extra pulls in ([PyPI metadata](https://pypi.org/project/redmail/)).
@@ -409,5 +409,5 @@ Separate question, separate issue.
 
 ## Reproduction
 
-The fixture, the per-candidate scripts and the venvs live under `/tmp/herma-h2t/` for this session only.
+The fixture, the per-candidate scripts and the venvs live under `/tmp/epistole-h2t/` for this session only.
 Nothing was installed into the project venv and `pyproject.toml` was not touched.

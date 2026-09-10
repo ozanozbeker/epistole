@@ -3,7 +3,7 @@
 Every library in `docs/research/prior-art.md` puts the From address on the message, and the send-boundary research recommended the same: expose `from_` and let the backend fail.
 We put it on the backend instead.
 Each real backend takes a required from address at construction, the message has no From field at all, and there is no per-send override.
-Decided on [#8](https://github.com/ozanozbeker/herma/issues/8), made a required field on [#9](https://github.com/ozanozbeker/herma/issues/9).
+Decided on [#8](https://github.com/ozanozbeker/epistole/issues/8), made a required field on [#9](https://github.com/ozanozbeker/epistole/issues/9).
 
 ## Why
 
@@ -14,7 +14,7 @@ A message carrying a From it cannot honor is a document that lies about itself b
 
 The address has to be caller-supplied anyway.
 Anonymous SMTP has no username, so nothing on the credential can stand in for it.
-Gmail's `gmail.send` scope cannot call `getProfile`, so Herma cannot learn the account address under least privilege.
+Gmail's `gmail.send` scope cannot call `getProfile`, so Epistole cannot learn the account address under least privilege.
 Graph could leave `from` empty under a delegated token, but application permissions need the mailbox in the request path regardless, so requiring it everywhere costs Graph nothing and gives all three one shape.
 
 Putting it on the backend keeps the Send As grant visible where the backend is constructed, instead of at a call site that returns `403` on Graph and quietly succeeds on SMTP.
@@ -26,6 +26,6 @@ Putting it on the backend keeps the Send As grant visible where the backend is c
 - `reply_to` stays on the message and covers most reasons people reach for From.
 - An anonymous SMTP relay must still be told its from address, because RFC 5322 requires the header and nothing else supplies it.
 - Whether the address is legitimate is the mail service's call.
-  Herma writes it and surfaces the refusal: `SMTPSenderRefused` on SMTP, `403 ErrorSendAsDenied` on Graph, and on Gmail a behavior the docs do not state and a live test must settle.
+  Epistole writes it and surfaces the refusal: `SMTPSenderRefused` on SMTP, `403 ErrorSendAsDenied` on Graph, and on Gmail a behavior the docs do not state and a live test must settle.
 - The field is never derived from `username`.
   A default that works on one credential shape and not another is the per-backend exception the unified field exists to remove.

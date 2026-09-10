@@ -1,6 +1,6 @@
 # Prior art: one API across many mail backends
 
-Research for [#6](https://github.com/ozanozbeker/herma/issues/6).
+Research for [#6](https://github.com/ozanozbeker/epistole/issues/6).
 Everything below comes from reading the source, not from summaries of it.
 
 ## What was read, and at what version
@@ -13,7 +13,7 @@ Everything below comes from reading the source, not from summaries of it.
 | blastula | 0.3.6 on CRAN, published 2025-04-03 | [rstudio/blastula](https://github.com/rstudio/blastula) |
 
 Django is mid-migration.
-The email API herma should study is not the one in the 5.2 docs.
+The email API epistole should study is not the one in the 5.2 docs.
 See "Django is replacing `get_connection()` right now" below.
 
 ## Django
@@ -249,7 +249,7 @@ Three decisions in ten lines.
 It calls `message.message()` first so header validation still fires, meaning a test catches a malformed address even though nothing goes on the wire.
 It deep-copies, so a test asserting on `outbox[0]` cannot be fooled by later mutation of the original.
 It stamps `sent_using = self.alias`, so a test can assert *which* mailer a code path chose.
-That third one is new in 6.1 and directly answers herma's open question about what `MemoryBackend` should record.
+That third one is new in 6.1 and directly answers epistole's open question about what `MemoryBackend` should record.
 
 `EmailMultiAlternatives.body_contains(text)` (`message.py`, line 687) is a test helper on the message: it returns `False` unless the text appears in the plain body *and* in every `text/*` alternative.
 It exists because the classic bug is updating the HTML and forgetting the plain-text fallback.
@@ -261,7 +261,7 @@ It exists because the classic bug is updating the HTML and forgetting the plain-
 ## django-anymail
 
 Not in the issue's list, and it should be.
-Anymail is the working answer to herma's exact premise: send through fourteen different providers with the calling code unchanged.
+Anymail is the working answer to epistole's exact premise: send through fourteen different providers with the calling code unchanged.
 Version 15.2 shipped 2026-09-05, so it is live prior art, not a museum piece.
 
 Its shape: it does not invent a message class.
@@ -289,11 +289,11 @@ class AnymailMessageMixin(EmailMessage):
 The docstring says the mixin is optional and exists for type checkers.
 Setting the bare attributes on a plain `EmailMessage` works identically.
 
-### Three ideas herma will need
+### Three ideas epistole will need
 
 **A named escape hatch.**
 `esp_extra` is a dict passed through to the provider's API untouched.
-It gives users provider-specific features without herma promising to normalize them, and it keeps them off the shared surface.
+It gives users provider-specific features without epistole promising to normalize them, and it keeps them off the shared surface.
 
 **An explicit failure when a backend cannot do what the message asks.**
 `anymail/backends/base.py` line 401:
@@ -318,7 +318,7 @@ The exception docstring states the policy precisely:
 
 Loud by default, silenceable by setting.
 That second paragraph is the harder half: Anymail refuses to re-implement each provider's validation locally, and lets the provider's own error surface.
-Herma faces the identical choice for `from_`, which SMTP lets you set freely and which Gmail and Graph derive from the authenticated account.
+Epistole faces the identical choice for `from_`, which SMTP lets you set freely and which Gmail and Graph derive from the authenticated account.
 
 **A normalized result object attached to the message.**
 `anymail/message.py` lines 103 and 113:
@@ -342,7 +342,7 @@ class AnymailRecipientStatus:
 `AnymailStatus` aggregates per-recipient statuses and collapses `message_id` to a scalar when every recipient shares one.
 Django's `send()` returns an `int`.
 Anymail keeps that return value and puts the real answer on `message.anymail_status`.
-Herma is designing this return value from scratch and does not have to inherit the `int`.
+Epistole is designing this return value from scratch and does not have to inherit the `int`.
 
 ### The inline-image helper Django lacks
 
@@ -361,7 +361,7 @@ def attach_inline_image(
     return unquote(content_id)  # Without <...>, for use as the <img> tag src
 ```
 
-Two details herma will otherwise rediscover the hard way.
+Two details epistole will otherwise rediscover the hard way.
 The function returns the content id already stripped of angle brackets, because that is what goes in `src="cid:..."`, and forgetting to strip is the classic bug.
 And the default `domain` is the literal string `"inline"` rather than the hostname, because Gmail blocks a Content-ID ending in `.com` when the provider reuses Content-ID as a filename.
 `attach_inline_image_file(path)` is the path-taking sibling.
@@ -433,7 +433,7 @@ def get_sender(self, sender: Union[str, None]) -> str:
 ```
 
 The three-level fallback for `sender` is the good part: an explicit argument, then an instance default, then the authenticated username.
-Herma has the same problem and can reuse that precedence.
+Epistole has the same problem and can reuse that precedence.
 
 The bad part is that the defaults are plain mutable attributes with no `__init__` parameters and no validation.
 `EmailSender.__init__` sets nine of them to `None` by hand.
@@ -473,7 +473,7 @@ gmail.password = "<APP PASSWORD>"
 
 Setting a password on a module-level singleton makes credentials process-wide state.
 Two libraries in one process cannot both use `redmail.gmail`.
-Herma wants the convenience (`host` and `port` presets for Gmail and Outlook are genuinely useful) without the singleton.
+Epistole wants the convenience (`host` and `port` presets for Gmail and Outlook are genuinely useful) without the singleton.
 A factory function or a frozen preset constant gives the same ergonomics with none of the aliasing.
 
 ### Attachments: real type dispatch, and one trap
@@ -547,7 +547,7 @@ css_inline: "css_inline_lib" = import_from_string("css_inline", if_missing="igno
 
 Every dispatch branch is guarded by `has_pandas`, `has_pillow`, `has_matplotlib`.
 The core stays dependency-free and the branch simply does not exist when the package is absent.
-That is exactly herma's zero-dependency-core constraint, solved.
+That is exactly epistole's zero-dependency-core constraint, solved.
 
 ### Embedded images go through Jinja variable names, not `cid:`
 
@@ -575,7 +575,7 @@ if self.use_jinja:
     text = self.render(text, **kwargs)
 ```
 
-Herma's brief is "takes an email you have already composed as HTML".
+Epistole's brief is "takes an email you have already composed as HTML".
 Running caller-supplied HTML through a template engine by default would break any body containing a literal `{{`, and it is a template injection surface if the HTML came from anywhere but the developer.
 The redmail approach only works because templating is the whole point of the library.
 
@@ -607,9 +607,9 @@ It inlines CSS on the HTML that `Styler.to_html()` produces, because pandas emit
 The underlying problem is real and general.
 [`css-inline`](https://pypi.org/project/css-inline/) is a Rust library with Python bindings, built on components from Mozilla's Servo, and its README states it is "designed for scenarios such as preparing HTML emails or embedding HTML into third-party web pages".
 It claims 10x to 500x the speed of `premailer`.
-For herma the decision is not "copy redmail".
+For epistole the decision is not "copy redmail".
 The library never solved this.
-The question is whether herma inlines the whole body, warns, or does nothing, and it is unresolved by prior art.
+The question is whether epistole inlines the whole body, warns, or does nothing, and it is unresolved by prior art.
 
 ### Connection reuse works, but the context manager is broken
 
@@ -688,7 +688,7 @@ No recipients, no subject, no sender, no credentials.
 Note where `subject` landed.
 Most libraries treat the subject as part of the message.
 Here it counts as addressing, alongside `to` and `from`, which lets one composed body go to two audiences with two subjects and no recomposition.
-That is the whole argument for the split, and it is the design question herma has to answer first.
+That is the whole argument for the split, and it is the design question epistole has to answer first.
 
 The result of `compose_email()` is an object with a class tag and four fields (`R/utils-html_manipulation.R` line 414):
 
@@ -789,7 +789,7 @@ format.blastula_creds <- function(x, ...) {
   }
 ```
 
-Herma should write the `__repr__` that does this on day one, before anything gets pasted into an issue.
+Epistole should write the `__repr__` that does this on day one, before anything gets pasted into an issue.
 
 `creds()` never takes a `password` argument.
 It reaches `create_credentials_list()`, whose default is `password = get_password()`, and R evaluates default arguments lazily, so it prompts on demand through `getPass::getPass()`.
@@ -800,7 +800,7 @@ Storing a credential and reading one are different operations with different nam
 
 ### `add_image()` is a text helper, not a message method
 
-This is the design herma should look at hardest, because herma's premise is caller-supplied HTML.
+This is the design epistole should look at hardest, because epistole's premise is caller-supplied HTML.
 
 `R/add_image.R` line 50:
 
@@ -897,7 +897,7 @@ That asymmetry is correct: an attachment has no position in the body, an inline 
 
 ### blastula has three backends and no backend protocol
 
-This is the mistake, and it is the one most relevant to herma.
+This is the mistake, and it is the one most relevant to epistole.
 
 `R/smtp_send.R`:
 
@@ -926,7 +926,7 @@ Different argument order.
 
 The Posit Connect path is a third shape entirely: `attach_connect_email()` attaches the message to an R Markdown render and Connect sends it later.
 
-So the package that inspired herma has exactly the problem herma exists to solve.
+So the package that inspired epistole has exactly the problem epistole exists to solve.
 Switching from SMTP to Mailgun in blastula means rewriting the send call.
 The message object is portable; the send is not.
 Every argument that appears on more than one backend must be spelled identically, or the promise fails on the second backend.
@@ -1047,7 +1047,7 @@ Credentials are the best part of the library.
 `yagmail/password.py` line 9 reads `keyring.get_password("yagmail", user)`, prompts if that is empty, then offers to save.
 `register(username, password)` writes to the keyring.
 `oauth2_file=` (`yagmail/oauth2.py` line 98) reads a JSON file, and walks a full Google consent flow if the file is missing, writing the refresh token back.
-It is the only library in the survey with a real OAuth story, which matters because two of herma's three backends are OAuth-only.
+It is the only library in the survey with a real OAuth story, which matters because two of epistole's three backends are OAuth-only.
 
 `SMTP = Client` at `sender.py` line 288 keeps the old name working.
 
@@ -1179,7 +1179,7 @@ if to:
 So the same `Message` object sent twice to two people ends up mutated, and the second send has the first recipient's `To:` header gone.
 `set_mail_to=False` gets envelope-only delivery.
 A boolean that changes whether an argument mutates the receiver is a bad shape.
-The underlying need is real and herma will hit it: sending one composed body to many recipients individually.
+The underlying need is real and epistole will hit it: sending one composed body to many recipients individually.
 
 Attachments are kwargs-only (`message.py` line 203):
 
@@ -1248,8 +1248,8 @@ def _src_update_func(src, **kw):
 
 `emails/loader/__init__.py` builds on it: `from_html`, `from_url`, `from_directory`, `from_file`, `from_zip`, `from_rfc822`.
 Every loader runs the transformer during construction (`loader/__init__.py` line 54), so `from_url("https://.../campaign.html")` returns a `Message` whose CSS is already inlined and whose images are already downloaded.
-The whole thing needs lxml, premailer, requests and cssutils, which puts it outside herma's zero-dependency core.
-It is the reference for what a `herma[html]` extra could do.
+The whole thing needs lxml, premailer, requests and cssutils, which puts it outside epistole's zero-dependency core.
+It is the reference for what a `epistole[html]` extra could do.
 
 Address parsing is the most permissive here, and it has one genuine ambiguity (`emails/utils.py` line 137):
 
@@ -1296,7 +1296,7 @@ class SMTPResponse(Response):
 ```
 
 `success` is `self._finished and self.status_code == 250`, and the base carries `.error` and `.raise_if_needed()`.
-`refused_recipients` is the field herma will want: partial failure is the normal case when sending to a list.
+`refused_recipients` is the field epistole will want: partial failure is the normal case when sending to a list.
 The bad part is that `fail_silently=True` is the backend default, so errors land on the response instead of raising, and the send can return `None` when there are no recipients.
 
 ### flanker: not a sender, and the only real address parser
@@ -1333,7 +1333,7 @@ Returning the failures alongside the successes is better than raising on the fir
 `AddressList.__add__` returns a new `AddressList`, which is the only new-instance-returning operator anywhere in this survey.
 
 Validation is a separate tier, not part of parsing: `validate_address()` and `validate_list()` add DNS and MX lookups plus per-provider grammar plugins for aol, gmail, google, hotmail, icloud and yahoo, behind a `validator` extra.
-Splitting "is this a well-formed address" from "does this mailbox plausibly exist" is the right seam, and it is exactly the distinction herma's open question about build-time versus send-time validation is groping for.
+Splitting "is this a well-formed address" from "does this mailbox plausibly exist" is the right seam, and it is exactly the distinction epistole's open question about build-time versus send-time validation is groping for.
 
 **MIME construction** (`flanker/mime/create.py`):
 
@@ -1408,7 +1408,7 @@ Almost nobody chains, and the two that do are instructive.
 So there is no Python precedent for a chaining email builder.
 Chaining works in blastula because the R pipe makes `f(x, ...)` read as `x %>% f(...)`, and because R copies values on modify, so each step is a new object for free.
 
-That matters for herma.
+That matters for epistole.
 A `return self` builder chains but mutates.
 Reusing a half-built message then becomes a foot-gun: two chains from the same base share state.
 R has no such problem, so copying blastula's *feel* without copying its *semantics* imports the bug.
@@ -1461,7 +1461,7 @@ Django's locmem backend stamps the alias onto each copy in the outbox.
 A test can then assert which mailer a code path chose, not just that it sent something.
 
 **`esp_extra`, for the provider-specific escape hatch.**
-Anymail. herma's equivalent would name the concept, not a vendor: something like `backend_extra`.
+Anymail. epistole's equivalent would name the concept, not a vendor: something like `backend_extra`.
 
 **`unsupported_feature(feature)`, as a method on the backend.**
 Anymail.
@@ -1469,7 +1469,7 @@ One place to route "this backend cannot do that", one exception type, one settin
 
 **`raw()` and `inline()` as marker types is a name worth stealing from a design worth avoiding.**
 They exist because yagmail guesses.
-If herma never guesses, it never needs them, but the words are the right words if a marker is ever necessary.
+If epistole never guesses, it never needs them, but the words are the right words if a marker is ever necessary.
 
 ## Mistakes worth avoiding
 
@@ -1494,7 +1494,7 @@ The second send from the same object is not the message you built.
 **Do not name the same thing differently on two backends.**
 Compare blastula's `smtp_send(email, to, from, subject, cc, bcc, credentials, ...)` against `send_by_mailgun(message, subject, from, recipients, url, api_key)`.
 Different word for the message, different word for the recipients, no cc or bcc, credentials as loose arguments.
-The composed message is portable and the send is not, which is the exact failure herma exists to prevent.
+The composed message is portable and the send is not, which is the exact failure epistole exists to prevent.
 Fix it by writing the send signature once, as a protocol, and making every backend implement that signature and nothing else.
 
 **Do not invent a new tuple order for `(name, address)`.**
@@ -1512,11 +1512,11 @@ An argument that turns an exception into a silent `return 0` moves the failure t
 **Do not accept a bare string where a list of addresses is meant.**
 Django raises `TypeError('"to" argument must be a list or tuple')` for all four address fields.
 The alternative is `to="a@b.com"` iterating into eleven single-character recipients on the day someone passes the wrong variable.
-Herma may want to accept a bare string deliberately, but it should be a decision with a normalization function behind it, not an accident.
+Epistole may want to accept a bare string deliberately, but it should be a decision with a normalization function behind it, not an accident.
 
 **Do not run caller-supplied HTML through a template engine by default.**
 In redmail, `use_jinja=True` is the default and every body gets rendered.
-The brief for herma is HTML the caller already composed.
+The brief for epistole is HTML the caller already composed.
 Rendering it breaks any literal `{{`, and it is an injection surface when the HTML did not come from the developer.
 
 **Do not silently ignore unknown configuration keys.**
@@ -1524,35 +1524,35 @@ Django's pre-`MAILERS` backends accepted any kwarg.
 The new path raises `InvalidMailer(f"Unknown options {kwarg_names}.", alias=alias)`.
 A typo in `use_tsl` should fail at startup, not send in the clear.
 
-## Capabilities herma has not yet considered
+## Capabilities epistole has not yet considered
 
 Ordered by how likely each is to force a change to the v1 surface.
 
 **A normalized send result with per-recipient status.**
 Anymail's `ANYMAIL_STATUSES` is `sent`, `queued`, `invalid`, `rejected`, `failed`, `unknown`, and `AnymailRecipientStatus(message_id, status)` carries one per recipient.
 `emails`' `SMTPResponse.refused_recipients` is a dict of address to `(code, text)`.
-Partial failure is the normal case for a multi-recipient send, and all three of herma's backends report it differently.
-Django's `send()` returns an `int`, which is the answer herma should not copy.
+Partial failure is the normal case for a multi-recipient send, and all three of epistole's backends report it differently.
+Django's `send()` returns an `int`, which is the answer epistole should not copy.
 
 **An explicit unsupported-feature policy.**
 Anymail's `unsupported_feature()` raises by default and can be silenced with a setting.
-Its docstring also draws the line herma needs: raise for things the API cannot express, but let the provider report its own limits rather than duplicating each provider's validation locally.
-This is the mechanism for herma's open `from_` question.
+Its docstring also draws the line epistole needs: raise for things the API cannot express, but let the provider report its own limits rather than duplicating each provider's validation locally.
+This is the mechanism for epistole's open `from_` question.
 
 **A named escape hatch for provider-specific fields.**
 `esp_extra`.
-Without one, every provider-only feature either bloats the shared surface or forces users off herma entirely.
+Without one, every provider-only feature either bloats the shared surface or forces users off epistole entirely.
 
 **Content-ID as a compatibility surface, not an implementation detail.**
 Anymail defaults the cid domain to the literal `"inline"` because Gmail blocks Content-IDs ending in `.com` when a provider reuses the cid as a filename.
 The `@domain` is omitted entirely in blastula, because including it makes Outlook.com show a phantom `AT00001.bin` attachment.
 Two independent projects hit client-specific bugs in the same three-character string.
-Whatever herma generates needs a test against these two known cases.
+Whatever epistole generates needs a test against these two known cases.
 
 **Harvesting `cid:` references out of finished HTML.**
 In blastula, `cid_images()` walks every `<img src>` in the rendered body, converts local paths and data URIs into `cid:` references, attaches the bytes, and deduplicates identical images by digest.
 The user never types a Content-ID.
-Given that herma takes caller-supplied HTML, this is the most directly applicable idea in the survey, and it is not on herma's list.
+Given that epistole takes caller-supplied HTML, this is the most directly applicable idea in the survey, and it is not on epistole's list.
 `emails`' transformer does the same walk and adds downloading remote images.
 
 **Deduplicating repeated inline images.**
@@ -1562,7 +1562,7 @@ A logo used in a header and a footer attaches once.
 **A file-format-from-filename convention for structured attachments.**
 Compare redmail's `attachments={'data.xlsx': df}` against `{'data.csv': df}`.
 The extension picks the serializer.
-Behind an optional-import guard this costs the core nothing, and it is the difference between herma being usable in a report script and not.
+Behind an optional-import guard this costs the core nothing, and it is the difference between epistole being usable in a report script and not.
 
 **Optional-dependency dispatch as a general pattern.**
 In redmail, `import_from_string(..., if_missing="ignore")` returns `None`, and every dispatch branch is guarded by `has_pandas` and friends.
@@ -1575,7 +1575,7 @@ Django's locmem calls `message.message()` first so header validation still fires
 **Splitting address parsing from address validation.**
 In flanker, `parse()` (grammar, never raises, returns `None`) is separate from `validate_address()` (DNS and MX lookups, provider-specific grammars).
 `parse_list(..., as_tuple=True)` returns the successes and the failures together instead of raising on the first bad one.
-That shape answers herma's open build-time-versus-send-time question directly.
+That shape answers epistole's open build-time-versus-send-time question directly.
 
 **Rendering the composed message for preview before sending.**
 In blastula the message carries two HTML strings: one with `cid:` for sending and one with data URIs for viewing, and printing the object shows the preview.
@@ -1585,12 +1585,12 @@ Both are cheap and both catch the mistake before it reaches an inbox.
 **A connection stack, as an alternative to a settings alias.**
 `envelopes.connstack` gives `push_connection` / `get_current_connection` and a context manager over a thread-local.
 Django solved the same problem with a named alias in settings.
-There is no settings module in herma, so the stack is worth knowing about even if the answer is to pass the backend explicitly.
+There is no settings module in epistole, so the stack is worth knowing about even if the answer is to pass the backend explicitly.
 
 **HTML preparation as an extra: CSS inlining, unsafe-tag stripping, absolute links.**
 `emails`' `load_and_transform()` does all of it, plus downloading remote images into attachments.
 None of this happens in redmail: its `style` extra only inlines CSS on pandas `Styler` output, never on the email body.
-So herma's open CSS-inlining question has no prior art in redmail at all, and the real reference is `emails` plus the `css-inline` package itself.
+So epistole's open CSS-inlining question has no prior art in redmail at all, and the real reference is `emails` plus the `css-inline` package itself.
 
 **A logging handler that emails records.**
 There is `EmailHandler` and `MultiEmailHandler` in redmail; Django ships `AdminEmailHandler` with a `using` option.

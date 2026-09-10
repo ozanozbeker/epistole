@@ -1,6 +1,6 @@
 # Vendor SDKs versus raw REST for Gmail and Graph
 
-Answers [issue #5](https://github.com/ozanozbeker/herma/issues/5).
+Answers [issue #5](https://github.com/ozanozbeker/epistole/issues/5).
 Maintenance figures were measured on 2026-09-07 and go stale.
 See [Figures to recheck](#figures-to-recheck).
 
@@ -11,12 +11,12 @@ Take credentials from the vendor auth library and leave the vendor client out of
 
 | Extra | Depend on | Do not depend on |
 | --- | --- | --- |
-| `herma[gmail]` | `google-auth` | `google-api-python-client`, `google-auth-oauthlib` |
-| `herma[graph]` | `msal` | `msgraph-sdk`, `msgraph-core`, `azure-identity` |
+| `epistole[gmail]` | `google-auth` | `google-api-python-client`, `google-auth-oauthlib` |
+| `epistole[graph]` | `msal` | `msgraph-sdk`, `msgraph-core`, `azure-identity` |
 
 Write the transport on `urllib.request` from the standard library.
 Do not add `httpx`.
-Both auth libraries let herma supply its own HTTP, so `httpx` would buy nothing that `urllib.request` does not already give a sync-only library, and its stable line has not moved in 21 months ([evidence](#httpx)).
+Both auth libraries let epistole supply its own HTTP, so `httpx` would buy nothing that `urllib.request` does not already give a sync-only library, and its stable line has not moved in 21 months ([evidence](#httpx)).
 
 What that costs, measured (see [Install weight](#2-install-weight)):
 
@@ -38,11 +38,11 @@ For one send call the SDK contributes a URL, a base64url encode, and an exceptio
 Its retry helper is off unless you pass `num_retries` yourself.
 
 **Graph.**
-The SDK is alive and does real work, but it is the wrong shape for herma.
+The SDK is alive and does real work, but it is the wrong shape for epistole.
 It is async-only: every generated request builder is an `async def`, and the README calls async "the default" ([source](https://github.com/microsoftgraph/msgraph-sdk-python/blob/main/README.md)).
-Issue #2 fixes herma as sync-only, so the SDK would mean `asyncio.run()` per send.
-The SDK's headline feature for a send is a retry middleware that fires by default on 429, 503 and 504, and issue #2 already ruled out herma owning a retry policy.
-Adopting the SDK means adopting behaviour herma decided against, then configuring it back off.
+Issue #2 fixes epistole as sync-only, so the SDK would mean `asyncio.run()` per send.
+The SDK's headline feature for a send is a retry middleware that fires by default on 429, 503 and 504, and issue #2 already ruled out epistole owning a retry policy.
+Adopting the SDK means adopting behaviour epistole decided against, then configuring it back off.
 It also pins `httpx<1.0.0` transitively and drags in `aiohttp`, `requests` and `opentelemetry-sdk`, which is a lot of resolver surface for one POST.
 
 **Where the call is closest.**
@@ -53,8 +53,8 @@ Gmail has no equivalent complexity, because its resumable upload is a single 35 
 
 **On the standing constraint.**
 REST-direct does not foreclose anything.
-Both backends should accept a credential object, not a client object, and both vendors already define the credential interface herma needs: `google.auth.credentials.Credentials` and `azure.core.credentials.TokenCredential`.
-Section 5 shows that a caller's built SDK client can still be unwrapped, and why herma should not ask for one.
+Both backends should accept a credential object, not a client object, and both vendors already define the credential interface epistole needs: `google.auth.credentials.Credentials` and `azure.core.credentials.TokenCredential`.
+Section 5 shows that a caller's built SDK client can still be unwrapped, and why epistole should not ask for one.
 
 ## Evidence
 
@@ -120,7 +120,7 @@ The archive is a monorepo consolidation, not abandonment.
 
 `google-auth-oauthlib` is the outlier: 7 releases in two years, 77 day median gap, 191 day longest.
 It exists only to run three-legged OAuth flows (`InstalledAppFlow`, `Flow`).
-Issue #2 puts OAuth flows out of scope, so herma does not need it and should not carry its slow cadence.
+Issue #2 puts OAuth flows out of scope, so epistole does not need it and should not carry its slow cadence.
 
 #### `msgraph-sdk` is active and knows it is heavy
 
@@ -162,10 +162,10 @@ open PRs:             77
 
 The `1.0.0.beta0` tag in the repository dates to 2021-09-14, so the 1.0 line has been imminent for five years.
 None of this makes `httpx` unusable, and 0.28.1 is stable code.
-It does mean two things for herma.
-First, a 1.0 release is a breaking change waiting to land in an extra herma does not control.
+It does mean two things for epistole.
+First, a 1.0 release is a breaking change waiting to land in an extra epistole does not control.
 Second, `microsoft-kiota-http` pins `httpx[http2]>=0.25,<1.0.0`, so anyone who installs `msgraph-sdk` alongside another `httpx` consumer inherits that ceiling.
-Both problems disappear if herma writes its transport on `urllib.request`.
+Both problems disappear if epistole writes its transport on `urllib.request`.
 
 ### 2. Install weight
 
@@ -203,7 +203,7 @@ graph_sdk, top of du -sk site-packages/*
 ```
 
 `googleapiclient/discovery_cache/documents/` holds 600 JSON files, one per Google API.
-The one herma needs, `gmail.v1.json`, is 151,948 bytes. herma would ship 101.5 MiB to use 0.14 MiB of it, and the cache cannot be trimmed at install time.
+The one epistole needs, `gmail.v1.json`, is 151,948 bytes. epistole would ship 101.5 MiB to use 0.14 MiB of it, and the cache cannot be trimmed at install time.
 
 `msgraph/generated` contains 16,572 `.py` files plus the 35.7 MiB `kiota-dom-export.txt` from issue #1287.
 By comparison `googleapiclient` is 16 `.py` files, because Google's design puts the API surface in data and Microsoft's puts it in generated code.
@@ -274,7 +274,7 @@ The snippets below ran against local servers that returned canned OAuth response
 
 `google.auth.transport.Request` is a public one-method ABC.
 Implement it over anything.
-This is the version herma should ship, because `google.auth.transport._http_client` is documented "for internal use only" and `google.auth.transport.requests` raises `ImportError` unless `requests` is installed.
+This is the version epistole should ship, because `google.auth.transport._http_client` is documented "for internal use only" and `google.auth.transport.requests` raises `ImportError` unless `requests` is installed.
 
 ```python
 import urllib.request
@@ -328,7 +328,7 @@ $ python -c "...; creds.apply(headers); print(headers)"
 {'authorization': 'Bearer ya29.FAKE'}
 ```
 
-`Credentials.before_request(request, method, url, headers)` is the one call herma needs.
+`Credentials.before_request(request, method, url, headers)` is the one call epistole needs.
 It works identically for `google.oauth2.credentials.Credentials` (user OAuth), `google.oauth2.service_account.Credentials` (with `with_subject` for domain-wide delegation), and whatever `google.auth.default()` returns.
 
 #### `msal` alone
@@ -361,19 +361,19 @@ cached: eyJ0eXAFAKE | token_source: cache
 ```
 
 Two things worth keeping.
-`msal` caches in memory and serves the second call from cache without a network round trip, so herma does not need to track expiry itself.
-`msal` also declares `requests` as a hard dependency regardless of `http_client`, so the Graph extra gets `requests` whether herma uses it or not.
-Injecting an `http_client` is therefore optional, and herma should not bother unless a user asks for proxy control.
+`msal` caches in memory and serves the second call from cache without a network round trip, so epistole does not need to track expiry itself.
+`msal` also declares `requests` as a hard dependency regardless of `http_client`, so the Graph extra gets `requests` whether epistole uses it or not.
+Injecting an `http_client` is therefore optional, and epistole should not bother unless a user asks for proxy control.
 
 ### 4. What the SDK does for one send that REST must reimplement
 
-| Concern | Gmail SDK | Graph SDK | What herma writes |
+| Concern | Gmail SDK | Graph SDK | What epistole writes |
 | --- | --- | --- | --- |
 | Token refresh | `AuthorizedHttp` calls `creds.before_request` | kiota auth provider calls `credential.get_token` | one line, `creds.before_request(...)` or `app.acquire_token_for_client(...)` |
 | Retries | **off by default** | 3 retries on 429/503/504, honours `Retry-After` | nothing; issue #2 rules retry out of scope |
 | Large attachments | resumable upload helper for one endpoint | `LargeFileUploadTask` in `msgraph-core` | Gmail: nothing. Graph: roughly 60 lines |
-| Error typing | one `HttpError` class | `ODataError(APIError)` with typed fields | parse the vendor error envelope, raise herma's own |
-| Batching | `BatchHttpRequest` | `$batch` builders in `msgraph-core` | nothing; herma sends one message |
+| Error typing | one `HttpError` class | `ODataError(APIError)` with typed fields | parse the vendor error envelope, raise epistole's own |
+| Batching | `BatchHttpRequest` | `$batch` builders in `msgraph-core` | nothing; epistole sends one message |
 | Endpoint knowledge | 600 cached discovery documents | 16,572 generated request builders | two URL constants |
 
 #### Retries
@@ -404,7 +404,7 @@ kiota_http/middleware/retry_handler.py
 ```
 
 This is the one place the Graph SDK gives away real, correct code.
-It is also the one place herma has already decided not to go.
+It is also the one place epistole has already decided not to go.
 Issue #2: "No retry policy.
 Errors expose `retry_after` where the provider gives one."
 Reading `Retry-After` off a 429 is a header lookup, and that is the whole requirement.
@@ -431,7 +431,7 @@ From the cached discovery document `gmail.v1.json` (revision 20260727):
 
 36,700,160 bytes is exactly 35 MiB, and that is the hard ceiling.
 Google's upload guide puts simple and multipart at "5 MB or less" and resumable above ([source](https://developers.google.com/workspace/gmail/api/guides/uploads)).
-So herma picks one of two URLs by message size and POSTs a base64url RFC 5322 message.
+So epistole picks one of two URLs by message size and POSTs a base64url RFC 5322 message.
 There is no session to manage.
 
 Graph is where the work is.
@@ -447,7 +447,7 @@ Under 3 MB it is one `POST /me/sendMail` with `contentBytes` inline, or `Content
 
 `msgraph_core/tasks/large_file_upload.py` implements step 3 generically.
 Reimplementing it is a loop over ranges plus resume handling, and the other three steps are plain requests that the SDK does not simplify.
-Call it 60 lines of herma code against 188 MiB and an async runtime.
+Call it 60 lines of epistole code against 188 MiB and an async runtime.
 
 #### Error typing
 
@@ -456,7 +456,7 @@ The parsing has a comment warning that keyword order must not change or user cod
 
 The Graph SDK gives `ODataError(APIError)` carrying `message`, `response_status_code`, `response_headers` and a typed `error` object.
 
-herma will raise its own exception type either way, so both are one envelope parse rather than a reusable win.
+epistole will raise its own exception type either way, so both are one envelope parse rather than a reusable win.
 Graph's envelope is `{"error": {"code", "message", "innerError"}}`.
 Gmail's is `{"error": {"code", "message", "errors"}}`.
 
@@ -464,7 +464,7 @@ Gmail's is `{"error": {"code", "message", "errors"}}`.
 
 `BatchHttpRequest` posts to `https://gmail.googleapis.com/batch`, derived from `batchPath` in the discovery document.
 `msgraph-core` ships `$batch` request and response builders.
-Neither matters: herma sends one message per call.
+Neither matters: epistole sends one message per call.
 
 ### 5. Accepting caller-supplied clients and credentials
 
@@ -473,7 +473,7 @@ The right thing to accept is a credential, and both vendors already define a nar
 
 **Gmail.**
 Accept `google.auth.credentials.Credentials`.
-Every Google credential type subclasses it, so one parameter covers user OAuth, service accounts with `with_subject`, and application default credentials. herma calls `before_request(request, method, url, headers)` and supplies the `Request` from section 3.
+Every Google credential type subclasses it, so one parameter covers user OAuth, service accounts with `with_subject`, and application default credentials. epistole calls `before_request(request, method, url, headers)` and supplies the `Request` from section 3.
 
 **Graph.**
 Accept anything matching `azure.core.credentials.TokenCredential`.
@@ -484,7 +484,7 @@ get_token(*scopes: str, claims=None, tenant_id=None, enable_cae=False, **kwargs)
 AccessToken._fields == ('token', 'expires_on')
 ```
 
-That is a structural type, so herma can declare it as a `Protocol` in its own code and never import `azure-core`.
+That is a structural type, so epistole can declare it as a `Protocol` in its own code and never import `azure-core`.
 Every `azure.identity` credential satisfies it.
 An `msal` app is three lines from satisfying it.
 A caller who already builds `ClientSecretCredential` for other Azure work hands it straight over.
@@ -503,14 +503,14 @@ msgraph GraphServiceClient: client.request_adapter._authentication_provider
 
 The Gmail path goes through one underscore attribute.
 The Graph path goes through three, two of which are private on classes owned by `kiota`, not by Microsoft Graph.
-Supporting either means herma breaks when a vendor renames a private attribute.
+Supporting either means epistole breaks when a vendor renames a private attribute.
 Accept the credential instead.
 A caller who has a client also has the credential they built it from.
 
 **On the standing constraint.**
-Nothing here blocks herma owning OAuth later.
-Owning OAuth means herma constructs the credential rather than receiving it, and the backend protocol is unchanged either way as long as it takes a credential and not a client.
-Taking a client is the choice that would foreclose it, because it would tie the protocol to a vendor class herma does not control.
+Nothing here blocks epistole owning OAuth later.
+Owning OAuth means epistole constructs the credential rather than receiving it, and the backend protocol is unchanged either way as long as it takes a credential and not a client.
+Taking a client is the choice that would foreclose it, because it would tie the protocol to a vendor class epistole does not control.
 
 ## Figures to recheck
 

@@ -1,10 +1,10 @@
 # A `data:` image becomes an inline image at construction
 
-Herma promises to send caller-supplied HTML as written, and `Message(html=...)` edits it anyway.
+Epistole promises to send caller-supplied HTML as written, and `Message(html=...)` edits it anyway.
 Every `<img>` whose `src` is a `data:` URI is rewritten to a `cid:` reference, and the bytes become an inline image on the message.
 No flag turns it off.
-The content id Herma generates is a digest with no `@domain` part, against RFC 2045.
-Decided on [#11](https://github.com/ozanozbeker/herma/issues/11), building on the prototype findings in [#8](https://github.com/ozanozbeker/herma/issues/8).
+The content id Epistole generates is a digest with no `@domain` part, against RFC 2045.
+Decided on [#11](https://github.com/ozanozbeker/epistole/issues/11), building on the prototype findings in [#8](https://github.com/ozanozbeker/epistole/issues/8).
 
 ## Why
 
@@ -61,9 +61,9 @@ No RFC records either bug.
   Readable, but the index shifts when an image is inserted earlier, and it can collide with a name a caller chose for an explicit inline image.
 - **Also rewriting CSS `url(data:...)`.**
   Pandoc emits these for Bootstrap icons, tiny SVGs that render in no mail client either way.
-  If [#19](https://github.com/ozanozbeker/herma/issues/19) inlines or strips CSS they vanish upstream.
+  If [#19](https://github.com/ozanozbeker/epistole/issues/19) inlines or strips CSS they vanish upstream.
 - **Resolving local paths, `<img src="logo.png">`, as blastula also does.**
-  Rejected because Herma reading a file named inside HTML, relative to some directory, is the working-directory guess `prior-art.md` warns about, and #8 killed `from_html_file` on the same ground.
+  Rejected because Epistole reading a file named inside HTML, relative to some directory, is the working-directory guess `prior-art.md` warns about, and #8 killed `from_html_file` on the same ground.
 - **Keeping the original HTML for preview, as blastula does.**
   Doubles a multi-MB body per message for a diff the caller can already make.
 
@@ -76,5 +76,5 @@ No RFC records either bug.
 - A caller who wants a `data:` image on the wire cannot have one.
 - The stdlib trap: `add_related(..., filename=, cid=)` writes `Content-Disposition: attachment` unless `disposition="inline"` is passed explicitly.
   The MIME builder must pass it.
-- [#15](https://github.com/ozanozbeker/herma/issues/15) inherits the renderer order.
-  [#21](https://github.com/ozanozbeker/herma/issues/21) tells authors: no `data:` images, use `cid:` and `.embed()`, and an `<img>` in a comment is not rewritten.
+- [#15](https://github.com/ozanozbeker/epistole/issues/15) inherits the renderer order.
+  [#21](https://github.com/ozanozbeker/epistole/issues/21) tells authors: no `data:` images, use `cid:` and `.embed()`, and an `<img>` in a comment is not rewritten.
