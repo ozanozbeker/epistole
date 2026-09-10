@@ -8,7 +8,8 @@ Switching providers means changing configuration, not rewriting your code.
 
 This is an early project and the API is not yet stable.
 
-> **Epistole** (ἐπιστολή, epistolē) is the Greek word for a letter or written message sent from one person to another. The word is also the source of the English epistle.
+> **Epistole** (ἐπιστολή, epistolē) is the Greek word for a letter or written message sent from one person to another.
+> The word is also the source of the English epistle.
 
 ## User guide
 
@@ -155,6 +156,125 @@ Message(html=body, text_renderer=lambda h: get_text(h, config))
 `inscriptis` aligns table columns, which Epistole's extractor does not.
 `html2text` works the same way through `HTML2Text().handle`; set `unicode_snob = True` on it or `Café` arrives as `Cafe`, and note its licence is GPL-3.0-or-later.
 The default is exported as `epistole.html_to_text` if you want to wrap it.
+
+## Writing HTML for email
+
+Epistole never composes HTML.
+You supply it finished, and this section is what that costs you.
+Every constraint below is recipient-side: it applies to every message Epistole sends over every backend, and no backend choice avoids it.
+Paste this section into the prompt when a model writes the HTML for you.
+
+### Choose how the content enters
+
+`html=` is for a rendered report: Quarto, Pandoc, or a self-contained page a model wrote.
+The rest of this section is about that case.
+
+`markdown=` is for mail you write by hand.
+It renders through `epistole[markdown]` on the CommonMark preset, so tables and footnotes are not available in v1; render those yourself and pass `html=`.
+The Markdown source is the plain text, so what you wrote is what a text client shows.
+
+`text=` alone is for alerts.
+There is no HTML part and nothing below applies.
+
+An HTML message carries plain text as well.
+Epistole derives it with its own extractor, `text=` replaces it outright, and `text_renderer=` swaps the extractor.
+
+### Charts are static images or they are nothing
+
+No email client runs JavaScript.
+A plotly figure is an empty `<div>` that `Plotly.newPlot` fills on load, so it arrives empty and stays that way.
+So does anything else that draws itself in the browser.
+
+Write the figure to a PNG and reference it from an `<img>`.
+`fig.write_image("chart.png")` does that for plotly and needs `kaleido`; matplotlib's `savefig` already works this way.
+This is the constraint most often broken by a request for an interactive dashboard in an email.
+
+### Put every image in an `<img>` tag
+
+Gmail renders no `data:` URI image on any of its four surfaces: desktop webmail, mobile webmail, and the iOS and Android apps.
+That is community testing rather than a Google statement, and the desktop row was last retested in 2024-05.
+
+So `Message(html=...)` rewrites every `data:` image it finds in an `<img src>` into an inline image: the bytes travel as an attachment and the tag points at them with `cid:`.
+Quarto's `embed-resources: true` produces exactly that construct, and you do not have to do anything about it.
+
+The rewrite reaches `<img src>` and nothing else.
+A `data:` image inside a CSS `url()`, inside a `srcset`, or inside a conditional comment such as `<!--[if mso]>` stays as written, and Gmail will not show it.
+There is nowhere to move those bytes to, because `cid:` inside CSS has no reliable client support.
+If an image has to render, give it an `<img>` tag rather than a `background-image`.
+
+An image you already hold as a file skips the round trip:
+
+```python
+Message(html=body).embed(Path("logo.png"))
+```
+
+The content id defaults to the filename, so the HTML refers to it as `<img src="cid:logo.png">`.
+
+### Style from a `<style>` block in `<head>`
+
+A `<head>` stylesheet reaches further than email folklore says.
+Community testing records full or partial support in Apple Mail, Outlook.com, Outlook for macOS, Outlook for Windows 2007 through 2019, Yahoo, Thunderbird, ProtonMail and Gmail desktop webmail.
+The one outright hole is Gmail mobile webmail, recorded as no support since 2020-02.
+
+Two caveats come with it.
+On Outlook for Windows a rule must be declared before the element it styles.
+Gmail desktop webmail keeps the first 16 KB of your `<style>` and drops the rest, a figure from community testing; Google publishes no limit at all, and the 8192 figure repeated elsewhere is a superseded 2017 measurement.
+
+Treat `@media` and `:hover` as decoration.
+They fail in the same clients that ignore the stylesheet, and Outlook for Windows supports neither.
+
+Lay out with tables.
+Microsoft's only first-party document on this covers Outlook 2007 and lists `position`, `float`, `max-width`, `min-width` and `overflow` as unsupported.
+Nothing equivalent has been published since.
+
+### Watch the total size
+
+Gmail clips a message at roughly 102,400 bytes and hides the rest behind a "View entire message" link.
+
+Epistole never warns you about this.
+The number is vendor documentation rather than Google's, and [hteumeuleu/email-bugs#41](https://github.com/hteumeuleu/email-bugs/issues/41) collects reports of clipping below it, so there is no threshold Epistole could defend.
+Measure your own HTML with `len(html.encode("utf-8"))`.
+
+Clipping is recipient-side.
+Every recipient on Gmail meets it whichever backend sent the message, and a Workspace address does not end in `@gmail.com`.
+Backend ceilings are the separate problem in the next section, where Graph's 4 MB is the one that stops you.
+
+### Making a large report fit
+
+A Quarto report rendered with `embed-resources: true` runs to about a megabyte before any figure goes in.
+Measured on a 1,188,695-byte report: 993,049 characters of CSS and 155,053 of `<script>` wrapped around under 400 characters of prose.
+
+Two edits shrink it, and the first matters more than the advice you usually hear.
+
+| What you send | Bytes |
+| --- | --- |
+| The report as Quarto rendered it | 1,188,695 |
+| Scripts stripped | 996,201 |
+| CSS rewritten onto elements | 195,706 |
+| Both | 3,212 |
+
+Stripping the scripts is yours to do, and it is safe: none of that JavaScript was going to run.
+Rewriting the CSS onto elements is `css-inline`, a package Epistole does not depend on:
+
+```python
+import css_inline
+
+Message(html=css_inline.inline(html))
+```
+
+Know two things before you run it.
+
+It raises `InlineError` on a Quarto `embed-resources` report.
+Pandoc leaves a stylesheet as `<link href="data:text/css,...">` whenever the CSS contains `</`, and `css-inline` resolves that `href` as a filesystem path.
+Strip those `<link>` tags first.
+Their CSS goes with them, and in the measured report that cost nothing: the output was 195,706 bytes either way.
+
+It also drops every `:hover` rule, and by default every `@media` block.
+`keep_at_rules=True` saves the `@media` blocks and does not save the `:hover` rules.
+A responsive layout disappears with no signal.
+
+Epistole does none of this for you.
+The only edit `Message(html=...)` makes to your HTML is the `<img src>` rewrite above.
 
 ## Choosing a backend
 
