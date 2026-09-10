@@ -55,6 +55,10 @@ The values here are the door: a future `Login` value would be one more construct
   Application Default Credentials are not offered: sending as a mailbox from ADC needs a signed delegation JWT that keyless ADC cannot produce.
 - Every value is a frozen dataclass of inputs.
   Importing a value imports no vendor library; the backend constructor raises `ImportError` naming the extra (ADR-0009), and `connect()` builds the vendor object.
+- The SMTP scope derivation covers application-flow Graph values only, which is every Graph value Epistole issues.
+  `https://outlook.office365.com/.default` is what the SMTP onboarding page tells an app to request, and it tells the app to add no claims at all, because including an `SMTP.SendAsApp` claim triggers a mailbox-permission check the app does not want.
+  Whether Exchange Online exposes a delegated equivalent is undetermined and does not need to be determined: no delegated Graph value exists here, and a delegated Exchange token reaches Epistole only as a foreign `get_token` object, which carries its own explicit `scope=`.
+  A future `Login` value would be the first delegated Graph value, and it reopens the question.
 - `msal.ManagedIdentityClient` needs an `http_client` with the `requests.Session` shape, so the `httpx2` adapter from ADR-0009 satisfies that shape too.
 - No password-file or keyring helpers.
   `os.environ[...]` is one line, and `keyring` is a library the caller can call.
@@ -86,4 +90,5 @@ The values here are the door: a future `Login` value would be one more construct
 - `Password` is not deprecated anywhere in Epistole; it is disabled on one tenant type, and the documentation names the tenant, not the mechanism.
 - Epistole maintains the input formats of two vendor constructors.
 - The glossary's *Credential* widens to cover a password and none at all, and gains *Token source* for what `connect()` builds.
-- Whether Gmail's `me` resolves to the delegated subject on the `send` endpoint needs a live test, alongside the other Gmail fog on #2.
+- Two Gmail facts are settled only by a real send, and implementation settles them: whether `me` resolves to the delegated subject on the `send` endpoint, and whether `messages.send` preserves a client-supplied `Message-ID`.
+  Neither moves a rule here. `SendResult.message_id` is the id Epistole stamped either way (ADR-0004), so the second one decides a docstring sentence about what a recipient sees.

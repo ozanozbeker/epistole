@@ -108,4 +108,5 @@ Additive later if a use appears.
 - The glossary's *Message* entry lists "draft" under *Avoid* as the server-side resource v1 rules out.
   The draft here is transient, created and removed inside one send, and never a Epistole concept; the entry stands.
 - ADR-0010's claim that Graph's small path carries the same bytes as SMTP is withdrawn there; its decision is unchanged.
-- Live tests, on [#23](https://github.com/ozanozbeker/epistole/issues/23): whether `internetMessageId` survives; the exact request cap and attachment cut; the shared-mailbox `403`.
+- Three facts here are verifiable only against a real tenant, and implementation settles them: whether `internetMessageId` survives to the wire, the exact request cap and attachment cut, and the shared-mailbox `403`.
+  None of the three moves a public surface, which is why each is written above as a private constant or a documentation line rather than a rule waiting on evidence.

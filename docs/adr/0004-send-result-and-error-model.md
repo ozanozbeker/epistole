@@ -137,4 +137,5 @@ Epistole never sleeps and never retries.
 - [#14](https://github.com/ozanozbeker/epistole/issues/14) settled the spellings: `SendResult`, `Refusal`, and the seven class names as written here.
 - [#16](https://github.com/ozanozbeker/epistole/issues/16) decides what `__cause__` is on the HTTP backends; the contract here is only that it is the transport's own exception.
 - [#17](https://github.com/ozanozbeker/epistole/issues/17) can add an unsupported-feature leaf; the hierarchy is flat, so nothing here forecloses it.
-- What Gmail does when the `From` header names neither the account nor a verified alias stays fog on [#2](https://github.com/ozanozbeker/epistole/issues/2), and its mapping is unknown until a live send.
+- What Gmail does when the `From` header names neither the account nor a verified alias needs a real send, so its mapping is unknown until implementation.
+  Rewrite, reject, and send-as-given each land on a different leaf above; ADR-0001 carries the same open question from the sender-identity side.
