@@ -4,6 +4,12 @@ Research for [issue #3](https://github.com/ozanozbeker/epistole/issues/3), check
 Every claim cites a primary source: Microsoft Learn, Google's developer documentation, the Python documentation, the CPython 3.13 source, or a published RFC.
 Where a source is silent or two sources disagree, the text says so instead of guessing.
 
+**Amended 2026-09-09 under [#22](https://github.com/ozanozbeker/epistole/issues/22).**
+Four claims were wrong and are corrected in place: three about Graph's 4 MB cap, which this file recorded as S/MIME-specific and undocumented, and one about SMTP AUTH's authorization model, which this file recorded as absent.
+One addition: `Mail.ReadWrite` has a second, independent trigger above 3 MB of attachment.
+The corrections were first raised on [this comment on #3](https://github.com/ozanozbeker/epistole/issues/3#issuecomment-5589707723) and re-verified against the sources on 2026-09-09.
+Amended passages are marked **Corrected 2026-09-09**.
+
 ## What this means for epistole
 
 **`send()` cannot return a provider message id.**
@@ -54,7 +60,7 @@ Failures there arrive as a non-delivery report in the sender's Inbox, not as an 
 | --- | --- | --- | --- |
 | Send call | `SMTP.send_message(msg)` over `MAIL`/`RCPT`/`DATA` | `POST /gmail/v1/users/{userId}/messages/send` | `POST /me/sendMail` or `POST /users/{id}/sendMail` |
 | Payload | RFC 5322 bytes, `\r\n` line endings | JSON `Message` with `raw` = base64url RFC 5322 | JSON `{message, saveToSentItems}` or base64 MIME as `text/plain` |
-| Max size | Server `SIZE` extension | 36,700,160 bytes (35 MiB) via the upload endpoint | Not documented for `sendMail`; 150 MB upload per 5 minutes per app and mailbox |
+| Max size | Server `SIZE` extension | 36,700,160 bytes (35 MiB) via the upload endpoint | 4 MB per write request, with `message.body.content` inside it |
 | Success | Reply `250` after `DATA` | `200 OK` | `202 Accepted` |
 | Success body | Reply text, discarded by `smtplib` | `Message` with `id`, `threadId`, `labelIds` | Empty |
 | Message id | None reachable | `id`, immutable, mailbox-scoped | None |
@@ -63,7 +69,7 @@ Failures there arrive as a non-delivery report in the sender's Inbox, not as an 
 | Retry hint | None in the protocol | Not documented | `Retry-After` header |
 | Partial failure | Yes, dict of refused recipients | No | No |
 | From address | Envelope and header set independently; server policy decides | Pinned to the account; aliases need verification | Pinned to the mailbox; `from` override needs a Send As or Send on Behalf grant |
-| Least-privilege credential | SMTP AUTH, no scope model | `https://www.googleapis.com/auth/gmail.send` | `Mail.Send` |
+| Least-privilege credential | none in `smtplib`; Exchange Online scopes it with the `Application SMTP.SendAsApp` RBAC role | `https://www.googleapis.com/auth/gmail.send` | `Mail.Send`, plus `Mail.ReadWrite` above 3 MB of attachment |
 
 Each row is cited in the per-backend sections below.
 
@@ -154,13 +160,33 @@ RFC 5322 section 3.6.2 governs the header side: `Sender` must appear when `From`
 
 ### SMTP credentials
 
-There is no scope model.
+**Corrected 2026-09-09.**
+This section previously opened "There is no scope model", which is true of `smtplib` and false of Exchange Online.
+
+The Python library has no such model.
 `SMTP.login(user, password)` negotiates AUTH and raises `SMTPAuthenticationError` on rejection, `SMTPNotSupportedError` when the server does not advertise AUTH, and `SMTPException` when no mutually supported mechanism exists ([docs](https://docs.python.org/3/library/smtplib.html#smtplib.SMTP.login)).
 
 `login` only tries CRAM-MD5, PLAIN, and LOGIN, in that order, and drops CRAM-MD5 when `hmac.digest` rejects MD5 under a FIPS build ([CPython 3.13 `Lib/smtplib.py`](https://github.com/python/cpython/blob/3.13/Lib/smtplib.py)).
 XOAUTH2 is not implemented.
 Reaching it means calling `SMTP.auth("XOAUTH2", authobject)` with a callable epistole supplies ([docs](https://docs.python.org/3/library/smtplib.html#smtplib.SMTP.auth)).
 This matters because both Gmail and Exchange Online now steer SMTP clients toward OAuth.
+
+The server side is a different story, and the absence is in the library rather than in the protocol as Microsoft implements it.
+Exchange Online authorizes SMTP client submission through Exchange RBAC for Applications, and the role is scopable to a subset of mailboxes: `New-ManagementRoleAssignment -Name RBAC -Role 'Application SMTP.SendAsApp' -App {App ID} -CustomResourceScope 'RBAC Scope'` ([Configure SMTP onboarding to App RBAC](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/smtp-app-rbac-onboarding)).
+The role itself is documented as "Allows the app to use SMTP Client Submission to submit mails to user outbox folder" ([Application RBAC](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac)).
+So least privilege for SMTP against Exchange Online is a role assignment against a resource scope, not an OAuth scope on the token.
+
+Two caveats, because the correction that prompted this edit overstated the case.
+
+The onboarding page names no delegated `SMTP.Send` scope.
+It asks for the opposite: "Refrain from adding any permissions to your application, as this process does not require any claims.
+Including the SMTP.SendAsApp claim would trigger an unnecessary check for mailbox permissions."
+The token scope it names is `https://outlook.office365.com/.default`.
+Whether a delegated equivalent exists is undetermined, and is carried below.
+
+The Application RBAC page contradicts itself on protocol.
+It lists `Application SMTP.SendAsApp` with a Protocol column reading "MS Graph", while its own Supported Protocols section names only MS Graph and EWS.
+SMTP is not in that list, on the page that documents the SMTP role.
 
 ## Gmail API
 
@@ -314,13 +340,29 @@ After the message is sent, you cannot modify the headers." ([`message` resource]
 The MIME path matters for epistole.
 It accepts the exact bytes the SMTP backend would send, so one serializer can feed both.
 It preserves headers the JSON model cannot express.
-It is also the S/MIME path, and S/MIME payloads are "currently limited to 4 MB.
-Submission attempts that exceed this limit will result in an `HTTP 413 Request Entity Too Large` error response" ([create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages)).
 
 Recipients cap at 500 across `toRecipients`, `ccRecipients`, and `bccRecipients` for a single message from an Exchange Online mailbox ([`message` resource](https://learn.microsoft.com/en-us/graph/api/resources/message)).
 
-No overall size limit is documented for `sendMail`.
-The nearest hard number is a throttling limit: 150 MB of upload across `PATCH`, `POST`, and `PUT` in a 5-minute period per app and mailbox ([Outlook throttling limits](https://learn.microsoft.com/en-us/graph/throttling-limits)).
+**Corrected 2026-09-09.**
+This section previously read the 4 MB figure as an S/MIME footnote and said no overall size limit was documented for `sendMail`.
+Both were wrong.
+It is the platform-wide write-request cap: "Write requests in the Microsoft Graph API have a size limit of 4 MB.
+Requests exceeding the size limit fail with the status code HTTP 413, and the error message 'Request entity too large' or 'Payload too large'" ([Use the Microsoft Graph API](https://learn.microsoft.com/en-us/graph/use-the-api)).
+The statement sits under the general HTTP-methods heading, so it covers `POST /me/sendMail`, `POST /me/messages` and `PATCH /me/messages/{id}` alike, and `message.body.content` rides inside the request.
+The S/MIME note on [create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages) restates the same number for one path rather than being its source.
+
+Read 4 MB as a ceiling rather than a promise.
+The same passage adds that "in some cases, the actual write request size limit is lower than 4 MB" and names 3 MB for `POST /me/events/{id}/attachments`.
+No lower figure is documented for the mail endpoints.
+
+There is no path past it for a body.
+The `uploadSession` resource covers OneDrive, SharePoint document libraries, and "Outlook event and message items as attachments" ([uploadSession](https://learn.microsoft.com/en-us/graph/api/resources/uploadsession)); the word "body" does not appear on that page.
+`PATCH` on a draft replaces `body` rather than appending to it, and is itself a 4 MB write request, so a body cannot be assembled across calls.
+The MIME path is tighter still rather than looser: a file is base64-encoded inside the MIME part and the whole message base64-encoded again for the request body, which fits roughly 2.1 MB of original bytes inside a 4 MB request.
+
+The 150 MB figure that this section previously offered as the nearest hard number is a throttling window, not a per-message cap: 150 MB of upload across `PATCH`, `POST`, and `PUT` in a 5-minute period per app and mailbox ([Outlook throttling limits](https://learn.microsoft.com/en-us/graph/throttling-limits)).
+
+The consequences for an HTML body are worked through in [`html-bodies-in-email.md`](html-bodies-in-email.md), and the two send paths this forces on the Graph backend are settled in [#20](https://github.com/ozanozbeker/epistole/issues/20).
 
 ### What a Graph send returns
 
@@ -487,6 +529,15 @@ Graph has no consumer-consentable send permission, which makes the Graph onboard
 
 Creating a draft needs `Mail.ReadWrite` on top ([create message](https://learn.microsoft.com/en-us/graph/api/user-post-messages)), so the id-returning workaround widens epistole's permission ask from send-only to read-write.
 
+**Added 2026-09-09.**
+`Mail.ReadWrite` has a second, independent trigger, and it is a likelier one than wanting an id.
+Any attachment over 3 MB forces the draft plus upload-session flow: "if the file size is between 3 MB and 150 MB, create an upload session", and "make sure to request `Mail.ReadWrite` permission to create the uploadSession for a message" ([Attach large files](https://learn.microsoft.com/en-us/graph/outlook-large-attachments)).
+
+That makes 3 MB a privacy boundary rather than a size one.
+`Mail.ReadWrite` "Allows the app to create, read, update, and delete email in all mailboxes without a signed-in user.
+Doesn't include permission to send mail" ([Application RBAC](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac)), so it is additional to `Mail.Send` rather than a substitute.
+One large attachment moves an application from "can send" to "can send and can read every message in scope", which is a change a security reviewer will notice.
+
 ## Things that make a uniform interface hard
 
 Ranked by how much design they force.
@@ -503,7 +554,7 @@ Ranked by how much design they force.
 4. **The message model differs at the boundary.**
    SMTP and Gmail take RFC 5322 bytes.
    Graph takes either bytes or a JSON object.
-   Feeding Graph the same bytes keeps one serializer, but it costs the JSON-only features and it is the S/MIME path with its 4 MB limit.
+   Feeding Graph the same bytes keeps one serializer, but it costs the JSON-only features and it fits less: base64 inside the MIME part and base64 again for the request body puts roughly 2.1 MB of original bytes inside the same 4 MB cap.
 5. **Transport-layer quotas are invisible to the API.**
    Exchange Online's 30 messages per minute and Gmail's 2,000 messages per day both live below the send call.
    Gmail surfaces its as a delayed `429`; Exchange surfaces its as an NDR that epistole never sees.
@@ -536,6 +587,15 @@ Ranked by how much design they force.
   Whether Gmail keeps a client-supplied `Message-ID` on the `raw` payload, and whether Graph's MIME path keeps one while its JSON path assigns its own `internetMessageId`, is stated nowhere I could find.
   The Graph draft examples all show an Exchange-generated `internetMessageId`, which suggests the JSON path assigns one.
   This is load-bearing if epistole plans to return its own `Message-ID` as the uniform identifier, so test it first.
-- **No overall `sendMail` size limit is published for Graph.**
-  The 4 MB figure is S/MIME-specific and the 150 MB figure is a throttling window, not a per-message cap.
-  I could not find a documented per-message maximum for `POST /me/sendMail`.
+- ~~**No overall `sendMail` size limit is published for Graph.**~~ **Resolved 2026-09-09.**
+  It is 4 MB, the platform-wide write-request cap.
+  See the corrected [Graph request shape](#graph-request-shape).
+- **Whether Graph's "4 MB" means 4,000,000 or 4,194,304 bytes.**
+  Microsoft writes "4 MB" and never disambiguates. [#20](https://github.com/ozanozbeker/epistole/issues/20) picked `4_000_000` as the conservative reading, which is a choice rather than a citation.
+- **Whether Graph applies a write cap below 4 MB to the mail endpoints.**
+  Microsoft says the limit is "in some cases" lower and names only a calendar endpoint.
+  Nothing states that `sendMail` is or is not one of those cases.
+- **Whether Exchange Online exposes a delegated OAuth scope for SMTP AUTH.**
+  The application side is documented and resource-scopable.
+  No Microsoft page found names an `SMTP.Send` delegated scope, and the onboarding page tells you to add no claims at all.
+  Only a live token settles it.
