@@ -106,7 +106,7 @@ It also keeps `html2text`'s licence with the caller who chose it.
 - Three ways in, one field each, and each field has one spelling, so ADR-0002's constructor rule survives with three keywords instead of one.
 - The glossary gains *Content* and *Plain text*, and *Complete message* now reads "plain text present, and HTML present whenever the content entered as HTML or Markdown".
 - `Message(...)` can raise `ImportError`, and the `html_to_text` extractor runs on every HTML construction.
-- `MemoryBackend` tests read `outbox[0].text` on any entry and see what a text client sees.
+- `MemoryBackend` tests read `submissions[0].message.text` on any entry and see what a text client sees (ADR-0015).
 - The first optional dependency that is not a backend, `epistole[markdown]`, lands with the implementation.
 - [#21](https://github.com/ozanozbeker/epistole/issues/21) documents `markdown=` as the entry for hand-written mail and `html=` for rendered reports.
 - The `data:` rewrite in ADR-0003 and the `cid:` check in ADR-0002 run only when HTML exists.

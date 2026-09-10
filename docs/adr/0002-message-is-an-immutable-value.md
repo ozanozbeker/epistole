@@ -4,6 +4,7 @@ No Python email library chains, and the two that come closest mutate while doing
 Epistole chains anyway, and every builder method returns a new `Message` instead of `self`.
 A `Message` is a closed value: nothing it holds changes, nothing it holds is read later, and nothing can be removed from it.
 Decided on [#10](https://github.com/ozanozbeker/epistole/issues/10), building on the prototype verdict in [#8](https://github.com/ozanozbeker/epistole/issues/8).
+Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the stamped copy is gone, and `Connection.send` builds a `Submission` that carries the identity instead (ADR-0015).
 
 ## Why
 
@@ -39,11 +40,11 @@ Porting the look without the semantics imports a bug R does not have, so chainin
 - **Content enters only through the constructor, as `html=`, `markdown=`, or `text=` (ADR-0008), and preparation runs there.**
   Subject, recipients, reply-to, and attachments arrive only through methods, so each field has one spelling.
   Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)` whenever the content is HTML, so every copy shares the result and the loop above derives nothing per subscriber.
-  `Connection.send` checks addressing and `cid:` references, stamps submission identity, and hands off to the transport.
+  `Connection.send` checks addressing and `cid:` references, then builds the submission it hands to the transport (ADR-0015).
   The derived text and the rewritten HTML are readable the moment the object exists.
 - **Submission identity is never on the value.**
   `Message-ID` and `Date` describe one submission, not the content.
-  `Connection.send` stamps them on the copy it gives `Transport.submit`, and the send result carries the id back.
+  `Connection.send` stamps them on the `Submission` it gives `Transport.submit`, never on the message, and the send result carries the id back (ADR-0015).
   One message sent twice is two submissions with two ids.
 - **Equal by content, hashable.**
   The plain-text renderer runs at construction and is not stored, so two messages built the same way compare equal whatever callable produced their text.
@@ -71,7 +72,7 @@ Porting the look without the semantics imports a bug R does not have, so chainin
   Attachments and derived text are shared by reference between copies, so the copy is cheap.
 - A Django reader expects `.attach()` to mutate, and it does not.
   The return value must be used, and the docstrings say so.
-- `MemoryBackend` needs no deep copy on the way into its outbox, because nothing can change a stored message afterwards.
+- `MemoryBackend` needs no deep copy on the way into `submissions`, because nothing can change a stored message afterwards.
   Django's locmem backend deep-copies for exactly that reason.
 - The constructor does work and can raise.
   A renderer error or a malformed `data:` URI surfaces at the line that supplied the HTML.

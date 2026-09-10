@@ -323,6 +323,7 @@ Above 3 MB of attachment Graph needs a draft, which needs `Mail.ReadWrite`, whic
 Keep attachments under 3 MB if you send through Graph and a security reviewer will thank you.
 
 `ConsoleBackend` and `MemoryBackend` are backends like any other; swapping one in is the same one-word change.
+`MemoryBackend` records what it accepted as `backend.submissions`, so a test reads `submissions[0].message.to_`, and `ConsoleBackend` prints a readable rendering rather than the raw bytes of any one backend's wire form.
 
 Limits quoted on 2026-09-08 and they move; re-check before relying on one.
 Sources: [Graph request limits](https://learn.microsoft.com/en-us/graph/use-the-api), [Graph large attachments](https://learn.microsoft.com/en-us/graph/outlook-large-attachments), [Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits), [Gmail sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace), [Exchange rebuilds MIME](https://learn.microsoft.com/en-us/graph/outlook-things-to-know-about-send-mail), [SMTP `SIZE`, RFC 1870](https://datatracker.ietf.org/doc/html/rfc1870), [SMTP AUTH on Exchange Online](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission).

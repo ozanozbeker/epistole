@@ -63,27 +63,29 @@ A caller who already has one hands it in as a credential and Epistole uses it un
 _Avoid_: token credential (the vendor's name for the same shape), provider, authenticator
 
 **Transport**: The wire object a backend opens and a connection holds: the only code that speaks SMTP, the Gmail API, or Microsoft Graph.
-It submits complete messages and closes; a third-party backend supplies one and nothing else.
+It submits submissions and closes, answering with the refusals the mail service gave and nothing more; a third-party backend supplies one and nothing else.
 _Avoid_: driver, dialect, wire, link, adapter, backend (the configuration that opens one), connection (the object that holds one)
 
 **Send**: What a caller asks a backend or a connection to do with a message: prepare it, then have the transport submit it.
 A backend sends one message over a connection it opens and closes; a connection sends many.
 _Avoid_: deliver, transmit, execute (the SQLAlchemy analogue)
 
-**Submit**: Hand a complete message to the mail service over a transport.
+**Submit**: Hand a submission to the mail service over a transport.
 It is the transport's half of a send, and success means the service accepted the message, not that anyone received it.
 _Avoid_: send (the caller's verb, which includes preparation), deliver
 
-**Submission**: One message handed to one transport once.
-It carries its own `Message-ID` and `Date`, so sending the same message twice makes two submissions.
-_Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb)
+**Submission**: One message handed to one transport once, together with the from address it goes out under and the `Message-ID` and `Date` the send stamped on it.
+It is the frozen value a connection builds and a transport receives, so sending the same message twice makes two submissions with two ids.
+`MemoryBackend` keeps every one it accepted, in `submissions`.
+_Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb), outbox (a mail client's outbox holds what has not gone yet, which is the reverse)
 
 **Complete message**: A message that has passed preparation and can be submitted: at least one recipient, plain text present, HTML present whenever the content entered as HTML or Markdown, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
-A transport receives nothing else.
+A submission carries nothing else.
 _Avoid_: prepared message, rendered message
 
 **Send result**: What a send hands back: the record that the service accepted one submission.
 It carries the submission's `Message-ID` and `Date` and any refusals, and it never implies that anyone received the message.
+A connection builds it from the submission it stamped and the refusals the transport answered with; a transport never builds one.
 _Avoid_: receipt (reads as a delivery receipt), result (the Rust-style success-or-failure container), response, status, sent message
 
 **Refusal**: A mail service's no to one recipient of an accepted submission, with the code and reason it gave.

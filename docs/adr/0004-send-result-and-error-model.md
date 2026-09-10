@@ -6,6 +6,7 @@ A recipient the service refused while accepting the rest rides on the send resul
 Every failure is one of seven flat subclasses of `EpistoleError`, with the native exception as `__cause__`, and only `ThrottledError` carries `retry_after`.
 Decided on [#12](https://github.com/ozanozbeker/epistole/issues/12) as `Receipt`, renamed `SendResult` on [#14](https://github.com/ozanozbeker/epistole/issues/14) because the owner read "receipt" as a delivery receipt, and grounded by the send-boundary research in `docs/research/send-boundary-semantics.md`.
 Amended on [#26](https://github.com/ozanozbeker/epistole/issues/26) with the `SMTPUTF8` row of the SMTP mapping, which ADR-0014 left unmapped by deciding not to check an address's character set.
+Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): `Connection.send` builds every send result, from the submission it stamped plus the refusals `Transport.submit` returns, so no transport constructs one (ADR-0015).
 
 ## Why
 
@@ -59,6 +60,7 @@ Epistole never sleeps and never retries.
 - **`SendResult` is frozen and has three fields.**
   `message_id` and `date`, the `Message-ID` and `Date` `send` stamped, and `refused`, a mapping of address to `Refusal(code, reason)`.
   `reason` is text, never bytes.
+  `Connection.send` is the only place one is constructed, and `Refusal` is public because `MemoryBackend(refuse=...)` takes one (ADR-0015).
 - **Seven leaves under `EpistoleError`.**
 
   | Class | Meaning |

@@ -39,7 +39,7 @@ That is why the connection carries no lock: two threads on one SMTP socket seria
   The loop `with backend.connect() as c:` must survive a backend swap unchanged.
   On HTTP the connection holds a token and, where the transport allows it, one keep-alive link.
   It refreshes the token through the caller's credential object on each send, so an expired token in a long notebook session is not an error; only a failed refresh is.
-  On the test doubles it is a no-op that delegates to the backend, and `MemoryBackend`'s outbox lives on the backend so it survives the `with`.
+  On the test doubles it is a no-op that delegates to the backend, and `MemoryBackend.submissions` lives on the backend so it survives the `with` (ADR-0015).
 - **Two classes, one Protocol.**
   `Backend` and `Connection` are Epistole classes; `Transport` is the Protocol a backend author implements.
   ADR-0006 records the shape; this ADR owns the lifecycle rules above, which are unchanged by it.
