@@ -114,7 +114,7 @@ Title your pull requests in the conventional format, or pick merge commits over 
 ## Releasing
 
 Releases are automated.
-You never edit `version` in `pyproject.toml` or `CHANGELOG.md` by hand.
+You never edit `version` in `pyproject.toml`, `uv.lock`, or `CHANGELOG.md` by hand.
 
 1. Merge your work to `main`.
 2. [release-please](https://github.com/googleapis/release-please) opens or updates a pull request titled `chore(main): release X.Y.Z`, containing the version bump and the changelog entry.
@@ -126,6 +126,36 @@ You never edit `version` in `pyproject.toml` or `CHANGELOG.md` by hand.
    The `pypi` environment lists you as a required reviewer, so the upload waits until you click through.
 
 The publish job is gated on `release_created`, so ordinary pushes to `main` only maintain the release pull request and never publish.
+
+### Never pass `release-type` to the action
+
+Every release setting lives in `release-please-config.json`.
+The workflow passes no inputs at all, and that is what makes the file load.
+
+`release-please-action` branches on one input.
+Set `release-type:` in its `with:` block and it builds its settings from action inputs alone, never opening `release-please-config.json`.
+Nothing merges and nothing warns.
+Release pull requests keep opening and keep looking right, so the loss surfaces a release or two later as a wrong changelog or a stale lockfile.
+
+The input duplicates a value the file already sets, which is what makes it tempting.
+Four of the six settings in that file have no action input at all: `bump-minor-pre-major`, `bump-patch-for-minor-pre-major`, `changelog-sections`, and `extra-files`.
+The schema carries 34 per-package settings and the action exposes 4 of them.
+Every input other than `release-type` is safe to add.
+
+### Why `extra-files` points at `uv.lock`
+
+uv records the project's own version in the lockfile as well as in `pyproject.toml`, so a release that touches only `pyproject.toml` leaves `uv lock --check` failing.
+The `extra-files` entry bumps both together.
+
+Its JSONPath reads like a typo and is not one:
+
+```json
+"$.package[?(@.name.value=='epistole')].version"
+```
+
+release-please parses TOML into nodes shaped `{start, end, value}`, so the filter has to reach through `.name.value`.
+The write path then works on plain JSON, so the target has to stay `.version`.
+Making the two agree looks like the fix and silently stops the update.
 
 ### Why publishing lives in the same workflow
 
