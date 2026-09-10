@@ -5,7 +5,7 @@ This glossary is the vocabulary the spec and the implementation share.
 
 ## Language
 
-**Message**: The immutable value a caller builds: its content, its addressing, and its attachments.
+**Message**: The immutable value a caller builds: its content, its addressing, its attachments, and any custom headers.
 It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
 _Avoid_: email, draft (the server-side resource v1 rules out), mail
 
@@ -28,6 +28,11 @@ _Avoid_: embedded image, body image, related part
 **Content id**: The name an inline image answers to, unique within one message and deliberately not unique across messages.
 It never carries an `@domain`.
 _Avoid_: cid (the URL scheme), Content-ID (the header spelling)
+
+**Custom header**: A `Name: value` line the caller supplies and Epistole passes through untouched, such as `List-Unsubscribe` or a private `X-` tag.
+It is never one of the headers Epistole writes itself, so setting a name Epistole owns raises rather than overriding it.
+A message holds at most one value per name, and Graph carries only names starting with `x-`.
+_Avoid_: header on its own (the addressing and MIME lines are headers too), metadata, extra, field (RFC 5322's word for both kinds)
 
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
 It owns the credentials, the from address, and every setting only its mail service understands; the message owns everything else, and a connection owns the live link.

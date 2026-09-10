@@ -5,6 +5,7 @@ Epistole chains anyway, and every builder method returns a new `Message` instead
 A `Message` is a closed value: nothing it holds changes, nothing it holds is read later, and nothing can be removed from it.
 Decided on [#10](https://github.com/ozanozbeker/epistole/issues/10), building on the prototype verdict in [#8](https://github.com/ozanozbeker/epistole/issues/8).
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the stamped copy is gone, and `Connection.send` builds a `Submission` that carries the identity instead (ADR-0015).
+Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): `.headers(mapping)` joins the field-named methods that replace, and it takes the at-least-one rule address methods already have (ADR-0016).
 
 ## Why
 
@@ -38,7 +39,7 @@ Porting the look without the semantics imports a bug R does not have, so chainin
   `.attach(Path(...))` reads the file when called, an open file object is read when passed and left open for the caller, and address lists become tuples.
   A message sent twice sends the same bytes twice, and a missing file fails at the line that named it.
 - **Content enters only through the constructor, as `html=`, `markdown=`, or `text=` (ADR-0008), and preparation runs there.**
-  Subject, recipients, reply-to, and attachments arrive only through methods, so each field has one spelling.
+  Subject, recipients, reply-to, attachments, and custom headers arrive only through methods, so each field has one spelling.
   Plain-text derivation and the rewrite of `data:` images into inline images happen in `Message(...)` whenever the content is HTML, so every copy shares the result and the loop above derives nothing per subscriber.
   `Connection.send` checks addressing and `cid:` references, then builds the submission it hands to the transport (ADR-0015).
   The derived text and the rewritten HTML are readable the moment the object exists.

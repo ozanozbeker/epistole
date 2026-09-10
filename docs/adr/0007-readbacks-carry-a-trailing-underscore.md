@@ -1,9 +1,10 @@
 # Readbacks carry a trailing underscore
 
-`.to()`, `.cc()`, `.bcc()`, `.reply_to()`, and `.subject()` are the builder methods (ADR-0002), so `message.to` is a bound method and the value needs a second name.
-The value reads back as the same name plus a trailing underscore: `to_`, `cc_`, `bcc_`, `reply_to_`, `subject_`.
+`.to()`, `.cc()`, `.bcc()`, `.reply_to()`, `.subject()`, and `.headers()` are the builder methods (ADR-0002), so `message.to` is a bound method and the value needs a second name.
+The value reads back as the same name plus a trailing underscore: `to_`, `cc_`, `bcc_`, `reply_to_`, `subject_`, `headers_`.
 `recipients` has no underscore, because no method claims it; it is `to_ + cc_ + bcc_` in that order with duplicates kept, as Django's `recipients()`.
 Decided on [#14](https://github.com/ozanozbeker/epistole/issues/14).
+Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): `.headers()` joins the builder methods, so `headers_` joins the readbacks, produced by the mechanical rule with no exception (ADR-0016).
 
 ## Why
 

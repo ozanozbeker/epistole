@@ -5,6 +5,7 @@ Under 4 MB of encoded request it calls `POST /me/sendMail`.
 Over that it creates a JSON draft, adds each attachment by its own call, sends the draft, and deletes the draft if anything fails in between.
 The switch is automatic and has no constructor knob: the tenant's permission grant is the gate, and a draft path without `Mail.ReadWrite` fails as `AuthenticationError`.
 Decided on [#20](https://github.com/ozanozbeker/epistole/issues/20), grounded by `docs/research/attachment-and-inline-rules.md` and `docs/research/send-boundary-semantics.md`.
+Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the custom-header pre-check now has the surface it was waiting for, and `singleValueExtendedProperties` is named as its reopener (ADR-0016).
 
 ## Why
 
@@ -101,7 +102,12 @@ Additive later if a use appears.
 - On Graph the recipient's text part is Exchange's, not Epistole's.
   The Graph backend docstring and the README say so in one sentence.
 - Custom headers on Graph must start with `x-` at every size.
-  The headers decision on #2 inherits this pre-check.
+  [#27](https://github.com/ozanozbeker/epistole/issues/27) took the inheritance and specified the surface: `.headers(mapping)` on the message, and `GraphTransport` raises `RejectedError` naming the offending header before it writes (ADR-0016).
+  `Importance` and read receipts do not ride on it, because both are non-`x-`; Graph expresses those meanings as the `importance` and `isReadReceiptRequested` properties instead, and neither gets a v1 surface.
+- Graph's `singleValueExtendedProperties` with the `PS_INTERNET_HEADERS` namespace does set arbitrary internet headers, including non-`x-` ones.
+  It is undocumented for this use and needs a live tenant to verify, so it is the named reopener for the header gap rather than part of v1.
+- Microsoft's `message` resource marks `internetMessageHeaders` **Read-only** in its property table while the same page says to add custom headers when creating a message.
+  Implementation verifies which is true, along with whether Exchange caps the header count or total size, which is documented nowhere found.
 - Epistole does not control where Exchange places inline parts relative to the alternative body; `cid:` references are guaranteed, the MIME layout around them is not.
 - A large send costs `Mail.ReadWrite` and `2 + N` round trips plus upload chunks, and writes against Graph's 150 MB per five minutes per app and mailbox budget.
 - A delegated credential cannot add a large attachment to a message in a shared or delegated mailbox (Graph known issue, `403`); it surfaces as `AuthenticationError`.

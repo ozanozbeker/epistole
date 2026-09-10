@@ -5,6 +5,7 @@ Epistole ships neither.
 A setting only one mail service understands is a keyword argument on that backend's constructor, a message never carries one, and `send` takes the message alone.
 A feature a backend cannot carry is refused before writing as `RejectedError` with `__cause__` `None`, the rule ADR-0004 already states, and nothing downgrades it to a warning.
 Decided on [#17](https://github.com/ozanozbeker/epistole/issues/17).
+Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the custom-header consequence is discharged (ADR-0016).
 
 ## Why
 
@@ -38,7 +39,9 @@ Each backend is its own class, so those knobs are already keyword arguments with
 
 - A backend constructor grows a keyword argument for each provider-only setting worth exposing, and it is typed and documented there.
   Anything not exposed is out of scope, and the caller drops to the provider's REST API.
-- Per-message provider features that are MIME headers (`Importance`, read receipts) ride on custom headers, which #2 still has to specify.
+- Per-message provider features that are MIME headers (`Importance`, read receipts) were expected to ride on custom headers.
+  [#27](https://github.com/ozanozbeker/epistole/issues/27) closed that as a no: both names are non-`x-`, so both raise on Graph like any other custom header, and neither gets a v1 surface (ADR-0016).
+  Custom headers themselves are in, as `.headers(mapping)` on the message, because a header is message content rather than provider configuration.
 - A third-party transport (ADR-0006) that cannot carry part of a message raises `RejectedError` itself; there is no base-class hook to call.
 - #20 decided that every Graph request is JSON (ADR-0012).
   A MIME-built draft with attachments uploaded afterwards would shrink the gap; it is untested and recorded there as the reopener.
