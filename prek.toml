@@ -98,4 +98,13 @@ hooks = [
     types = ["python"],
     pass_filenames = false,
   },
+  {
+    id = "pytest",
+    name = "pytest",
+    entry = "uv run pytest",
+    language = "system",
+    stages = ["pre-commit"],
+    always_run = true,
+    pass_filenames = false,
+  },
 ]

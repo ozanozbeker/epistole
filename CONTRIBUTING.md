@@ -35,6 +35,22 @@ Individual tools, when you want a faster loop:
 
 Most hooks fix in place, so a failed commit often just needs `git add` and a retry.
 
+## Tests
+
+Tests live in `tests/` and `uv run pytest` runs them.
+The `pytest` hook runs the whole suite on every commit, not only on commits that stage a Python file.
+Deleting `src/epistole/py.typed` is the case that forces this.
+No file-type filter matches that path, so a filtered hook would not run the suite, and the test that checks for the marker would never fail.
+
+Annotate every test parameter, including fixtures and `parametrize` values.
+Ruff never asks for this, because `ruff.toml` turns off `ANN` under `**/tests/**`.
+Pyrefly does ask, because `preset = "strict"` reports an unannotated parameter as `implicit-any-parameter`, and `pyrefly.toml` sets no exception for tests.
+That difference is deliberate.
+An annotated fixture lets pyrefly check the test body against the real type, so a misspelled field name fails `pyrefly check` instead of reaching the test run.
+
+Return annotations are the part of `ANN` you do skip.
+`-> None` on every test function says nothing.
+
 ## Prose
 
 The package has two spellings in prose, and each means one thing.
