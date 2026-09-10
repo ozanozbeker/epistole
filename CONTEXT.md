@@ -22,6 +22,7 @@ _Avoid_: file, part, MIME part
 
 **Inline image**: An attachment the HTML body displays in place by naming its content id after `cid:`, never listed as a file.
 A caller embeds one under a name the HTML already uses; Epistole makes one by rewriting a `data:` image it found.
+_Inline_ names this mechanism alone; copying stylesheet rules onto `style` attributes is rewriting CSS, which Epistole never does.
 _Avoid_: embedded image, body image, related part
 
 **Content id**: The name an inline image answers to, unique within one message and deliberately not unique across messages.

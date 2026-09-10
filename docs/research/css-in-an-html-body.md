@@ -9,6 +9,8 @@ Local runs were done on 2026-09-09, macOS arm64, CPython 3.14.7 free-threading b
 
 ## What this means for epistole's design
 
+The size warning recommended here was not adopted: [ADR-0013](../adr/0013-css-stays-as-written-and-size-is-documented.md) took the rest and stays silent on size.
+
 Do not inline.
 Warn about size, not about CSS.
 Document the limitation with a one-line recipe the caller can run themselves.
