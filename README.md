@@ -8,6 +8,8 @@ Switching providers means changing configuration, not rewriting your code.
 
 This is an early project and the API is not yet stable.
 
+> **Epistole** (ἐπιστολή, epistolē) is the Greek word for a letter or written message sent from one person to another. The word is also the source of the English epistle.
+
 ## User guide
 
 Work in progress.
@@ -205,12 +207,6 @@ Keep attachments under 3 MB if you send through Graph and a security reviewer wi
 Limits quoted on 2026-09-08 and they move; re-check before relying on one.
 Sources: [Graph request limits](https://learn.microsoft.com/en-us/graph/use-the-api), [Graph large attachments](https://learn.microsoft.com/en-us/graph/outlook-large-attachments), [Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits), [Gmail sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace), [Exchange rebuilds MIME](https://learn.microsoft.com/en-us/graph/outlook-things-to-know-about-send-mail), [SMTP `SIZE`, RFC 1870](https://datatracker.ietf.org/doc/html/rfc1870), [SMTP AUTH on Exchange Online](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission).
 Fuller working is in `docs/research/send-boundary-semantics.md` and `docs/research/attachment-and-inline-rules.md`.
-
-## About the name
-
-An epistole was a stone marker set at crossroads and roadsides in ancient Greece.
-Travelers used them to tell which road led where.
-The name fits a library whose job is to take one message and direct it down whichever road you have chosen.
 
 ## Credit
 
