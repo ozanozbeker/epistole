@@ -4,6 +4,7 @@
 Neither vendor SDK is a dependency.
 A backend takes a credential, and the connection owns one `httpx2.Client` that every request, token or send, goes through.
 Decided on [#16](https://github.com/ozanozbeker/epistole/issues/16), grounded by `docs/research/sdk-versus-rest.md`.
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the `401` refresh is per request rather than per send, and a backend constructor names the extra its credential value needs even when that value comes from another backend's module.
 
 ## Why
 
@@ -46,11 +47,19 @@ The retry re-sends only a request the service has not accepted, so it cannot dou
 - **`from epistole import GmailBackend` always works.**
   The vendor imports happen in the backend constructor, which raises `ImportError` naming the extra to install, the ADR-0008 shape.
   A misconfigured job dies at construction, not on its first send.
+- **The backend constructor names the extra its credential value needs, whichever module the value came from.**
+  `SMTPBackend(credential=OAuth(credential=graph.ClientSecret(...)))` needs `msal`, so `SMTPBackend` raises `ImportError` naming `epistole[graph]`.
+  The check belongs to the constructor that received the value, because ADR-0011 keeps the values themselves inert.
+  It over-installs `httpx2` for a caller who only wanted SMTP, which is 3 MB and the only extra that names the library they need.
 - **`connect()` builds one `httpx2.Client` and acquires a token.**
   It makes no request to the mail endpoint.
   The connection holds the client; `close()` closes it.
-- **Every `send` asks the credential for the header, then `POST`s on the connection's client.**
-  On `401` it refreshes once and retries the same request once; a second `401` is `AuthenticationError`.
+- **Every request asks the credential for the header, then goes out on the connection's client.**
+  On `401` that one request refreshes once and retries itself once; a second `401` on it is `AuthenticationError`.
+  The budget is per request, not per send, because Graph's draft path makes `2 + N` requests and a token can expire partway through one send.
+  This is what `azure-core`'s bearer policy does: re-acquire once per `401` challenge, on the request that got it.
+  A retry re-sends only a request the service did not accept, so a long draft sequence cannot double-submit or leave a second draft.
+  The upload `PUT`s carry no bearer, so they are outside this rule and their statuses map under ADR-0004 like any other.
 - **Timeout is 60 s** on connect, read, write, and pool, for send and token requests alike.
   No constructor knob in v1.
 - **No caller-supplied `httpx2.Client` in v1.**

@@ -3,17 +3,21 @@
 Epistole is one API for building an email message and sending it through SMTP, the Gmail API, or Microsoft Graph without changing the calling code.
 This glossary is the vocabulary the spec and the implementation share.
 
+An _Avoid_ list names the words this project does not use for that concept in prose.
+A public name may still spell one, where the name comes from a vendor, from an RFC, or from a neighbouring concept, and the entry says which.
+`TokenCredential`, `.embed(cid=)`, `.headers()`, `SenderRefusedError`, and the auth adapters over `httpx2` are the five that do.
+
 ## Language
 
 **Message**: The immutable value a caller builds: its content, its addressing, its attachments, and any custom headers.
 It never carries a From address, a backend, or the identity of a submission, and every way of changing it hands back a new message.
-_Avoid_: email, draft (the server-side resource v1 rules out), mail
+_Avoid_: email, draft (Epistole exposes none; the Graph large-attachment path creates and deletes one inside a single send, and that is the only use of the word), mail
 
 **Content**: What a message says: HTML the caller supplied or Epistole rendered from Markdown, together with plain text; or plain text alone.
 _Avoid_: body (the HTML element, blastula's middle section, and RFC 5322's everything after the headers), payload, copy
 
 **Plain text**: The readable text every message carries: what the caller wrote, the Markdown source, or what Epistole derived from the HTML.
-It ships alongside the HTML or alone, and a text-only client shows nothing else.
+It ships alongside the HTML or alone, except where a mail service substitutes its own, and a text-only client shows nothing else.
 _Avoid_: fallback (it is the whole message when there is no HTML), alternative (the MIME spelling), text part
 
 **Attachment**: Bytes with a filename and a content type that travel with a message.
@@ -27,12 +31,12 @@ _Avoid_: embedded image, body image, related part
 
 **Content id**: The name an inline image answers to, unique within one message and deliberately not unique across messages.
 It never carries an `@domain`.
-_Avoid_: cid (the URL scheme), Content-ID (the header spelling)
+_Avoid_: cid (the URL scheme, which `.embed(cid=)` names deliberately because that is what the HTML writes), Content-ID (the header spelling)
 
 **Custom header**: A `Name: value` line the caller supplies and Epistole passes through untouched, such as `List-Unsubscribe` or a private `X-` tag.
 It is never one of the headers Epistole writes itself, so setting a name Epistole owns raises rather than overriding it.
 A message holds at most one value per name, and Graph carries only names starting with `x-`.
-_Avoid_: header on its own (the addressing and MIME lines are headers too), metadata, extra, field (RFC 5322's word for both kinds)
+_Avoid_: header on its own (the addressing and MIME lines are headers too, so `.headers()` and `headers_` are RFC 5322's word and carry the caller's set alone), metadata, extra, field (RFC 5322's word for both kinds)
 
 **Backend**: One configured route to a mail service, including the test doubles that stand in for one.
 It owns the credentials, the from address, and every setting only its mail service understands; the message owns everything else, and a connection owns the live link.
@@ -56,7 +60,7 @@ _Avoid_: addressee, target, destination
 **From address**: The mailbox a backend sends from, with an optional display name.
 It belongs to the backend, never to the message, and the mail service decides whether the backend may use it.
 It is an address like any other, taking the same type and the same check, run when the backend is constructed.
-_Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header), from_, user_id, mailbox
+_Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header; `SenderRefusedError` names the service's no to this address and is the one place the word appears), from_, user_id, mailbox
 
 **Credential**: What a backend holds to prove who it is to a mail service: a username and password, or the inputs from which a token source is built (a client secret, a certificate, a service account file, a user's saved consent, or the machine's own identity).
 An anonymous relay takes none.
@@ -65,11 +69,11 @@ _Avoid_: client (the vendor SDK object), token (one short-lived output of a cred
 
 **Token source**: What Epistole builds from a credential at connect time: the object that produces a fresh access token on demand, in the shape `get_token` defines.
 A caller who already has one hands it in as a credential and Epistole uses it unchanged.
-_Avoid_: token credential (the vendor's name for the same shape), provider, authenticator
+_Avoid_: token credential (the vendor's name for the same shape; `TokenCredential` is the exported Protocol spelling it, kept so an `azure-identity` object is recognisable), provider, authenticator
 
 **Transport**: The wire object a backend opens and a connection holds: the only code that speaks SMTP, the Gmail API, or Microsoft Graph.
 It submits submissions and closes, answering with the refusals the mail service gave and nothing more; a third-party backend supplies one and nothing else.
-_Avoid_: driver, dialect, wire, link, adapter, backend (the configuration that opens one), connection (the object that holds one)
+_Avoid_: driver, dialect, wire, link, adapter (an auth adapter is the separate shim that makes a vendor token library speak to `httpx2`, never a transport), backend (the configuration that opens one), connection (the object that holds one)
 
 **Send**: What a caller asks a backend or a connection to do with a message: prepare it, then have the transport submit it.
 A backend sends one message over a connection it opens and closes; a connection sends many.
@@ -84,7 +88,8 @@ It is the frozen value a connection builds and a transport receives, so sending 
 `MemoryBackend` keeps every one it accepted, in `submissions`.
 _Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb), outbox (a mail client's outbox holds what has not gone yet, which is the reverse)
 
-**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, plain text present, HTML present whenever the content entered as HTML or Markdown, every `data:` image already an inline image, and every `cid:` the HTML names matched by an inline image the message holds.
+**Complete message**: A message that has passed preparation and can be submitted: at least one recipient, plain text present, HTML present whenever the content entered as HTML or Markdown, and every `cid:` the HTML names matched by an inline image the message holds.
+Building the message guarantees the two content clauses; the send checks the other two.
 A submission carries nothing else.
 _Avoid_: prepared message, rendered message
 
@@ -93,6 +98,7 @@ It carries the submission's `Message-ID` and `Date` and any refusals, and it nev
 A connection builds it from the submission it stamped and the refusals the transport answered with; a transport never builds one.
 _Avoid_: receipt (reads as a delivery receipt), result (the Rust-style success-or-failure container), response, status, sent message
 
-**Refusal**: A mail service's no to one recipient of an accepted submission, with the code and reason it gave.
-Only SMTP can refuse some recipients and accept the rest; the two APIs accept or refuse the whole message.
+**Refusal**: A mail service's no to one recipient, with the code and reason it gave.
+Some recipients refused with the rest accepted rides on the send result; every recipient refused raises instead.
+Only an SMTP service, and the double that stands in for one, can refuse some and accept the rest; the two APIs accept or refuse the whole message.
 _Avoid_: bounce (the non-delivery report that arrives later, which Epistole never sees), rejection (the whole-message case)

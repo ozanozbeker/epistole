@@ -8,8 +8,14 @@ When the content is plain text, that is the whole message.
 `text=` alongside `html=` or `markdown=` wins outright, and `text_renderer=` swaps Epistole's extractor for the caller's.
 Decided on [#15](https://github.com/ozanozbeker/epistole/issues/15), grounded by `docs/research/html-to-plain-text.md`.
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the plain text reads back as `submissions[0].message.text`, because the doubles record a `Submission` rather than a stamped message (ADR-0015).
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): derived plain text may be empty, so the non-empty rule holds for `text=` alone.
 
 ## Why
+
+**Every message carries a plain-text field, and it is a `str` that may be empty.**
+An image-only body and a body whose only text sits in `<style>` both derive to `""`, and this audience sends both.
+Raising there would make a legitimate report unsendable, and substituting a placeholder would put words in the sender's mail that nobody wrote.
+So the invariant is that `.text` is always a `str`, not that it always holds characters.
 
 **Epistole derives, and no other Python library does.** red-mail, python-emails, Django, and Flask-Mail take `text` and `html` separately and leave the text to the caller.
 Epistole's audience sends rendered reports, and a rendered report has no hand-written text twin and never will.
@@ -56,7 +62,8 @@ It also keeps `html2text`'s licence with the caller who chose it.
   It receives the HTML after the `data:` rewrite (ADR-0003).
   Passing it with `text=` or with `markdown=` is a `TypeError`, because it would be silently ignored otherwise.
   An exception it raises propagates unwrapped at the line that built the message, and is not a `EpistoleError` (ADR-0004).
-  A return that is not a `str`, or is `""`, is rejected the same way `text=` is.
+  A return that is not a `str` is a `ValueError`.
+  A return of `""` is not, because the renderer stands in for `html_to_text` and inherits its answer for HTML with no text.
 - **Plain text from Markdown is the source, verbatim.**
   Raw HTML blocks in the source, which CommonMark allows, ship as written.
   The alternative is a sniff, rejected above.

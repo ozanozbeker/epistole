@@ -39,7 +39,34 @@ smtp.send(
 
 The backend opens a connection, authenticates, submits, and closes, all inside that one call.
 A wrong password raises `AuthenticationError` on that line.
-Swap `SMTPBackend` for `GraphBackend` or `GmailBackend` and nothing else changes.
+
+The message you build and the code that sends it are the same on every backend.
+The constructor is where they differ:
+
+```python
+from epistole import GmailBackend, GraphBackend, SMTPBackend
+from epistole import gmail, graph, smtp
+
+SMTPBackend(
+    host="mail.corp.example",
+    port=587,
+    security="starttls",
+    from_address="reports@corp.example",
+    credential=smtp.Password(username="reports", password=...),
+)
+
+GraphBackend(
+    from_address="reports@corp.example",
+    credential=graph.ClientSecret(tenant_id=..., client_id=..., client_secret=...),
+)
+
+GmailBackend(
+    from_address="reports@corp.example",
+    credential=gmail.ServiceAccount(
+        path=Path("service-account.json"), subject="reports@corp.example"
+    ),
+)
+```
 
 ### One report, many recipients
 
@@ -56,7 +83,7 @@ with smtp.connect() as connection:
 ```
 
 One authentication, then one send per subscriber over the same connection.
-`.to()` replaces the recipient list on a copy, so each subscriber sees only their own address and the PDF is encoded once.
+`.to()` replaces the recipient list on a copy, so each subscriber sees only their own address, and the PDF is read from disk once at `.attach()` rather than once per subscriber.
 
 If subscriber 140 has a dead mailbox, that send raises `RecipientsRefusedError` and the connection stays open, so wrap the send in `try` and log it.
 If the mail server restarts at subscriber 200, that send raises `TransportError`, the loop ends, and the connection closes quietly on the way out.
@@ -84,7 +111,7 @@ connection.send(report)
 
 Raises `ValueError`, because the connection is closed.
 This is a mistake in the calling code, not a mail failure, so it is not a `EpistoleError` and `except EpistoleError` does not swallow it.
-A connection is one link, used once; to send again, call `connect()` again.
+A connection cannot be reopened; to send again, call `connect()` again.
 
 ### Notebook, two cells, Graph
 
@@ -103,15 +130,18 @@ connection.send(message)
 ```
 
 The connection refreshes its token through the credential you gave the backend, so an expired token is not an error.
-Only a refresh that itself fails raises `AuthenticationError`, and the connection stays open either way.
-Leaving the connection unclosed at the end of a notebook leaks nothing on Graph or Gmail.
-On SMTP it leaves a socket open until the server times it out, which is why the loop above uses `with`.
+A refresh that fails on its own terms raises `AuthenticationError` and leaves the connection open.
+A refresh that fails on the network raises `TransportError`, which closes it, as any transport failure does.
+Leaving a connection unclosed holds a socket on SMTP and a connection pool on Graph and Gmail, in each case until the object is garbage collected.
+Use `with backend.connect()` for a loop, or `backend.send()` for one message, which closes for you.
 
 ### Threads
 
 A backend is immutable and safe to share.
 A connection is not: use one per thread, the same rule as a DB-API connection.
 Epistole does not lock a connection for you; two threads on one connection is a bug in the caller.
+The one exception is `MemoryBackend.submissions`, which every send appends to.
+Appending is atomic, so the list cannot be corrupted, but concurrent sends land in completion order; a test that asserts on order sends from one thread.
 
 ### Markdown instead of HTML
 
@@ -218,6 +248,7 @@ Message(html=body).embed(Path("logo.png"))
 ```
 
 The content id defaults to the filename, so the HTML refers to it as `<img src="cid:logo.png">`.
+Two embeds under one content id raise `ValueError`, so give each image a distinct filename or pass `cid=`.
 
 ### Style from a `<style>` block in `<head>`
 
@@ -293,7 +324,7 @@ Use **SMTP** unless something stops you.
 It works with every mail system, it carries the largest messages, and it sends exactly the MIME Epistole built.
 
 Use **Graph** when your tenant has turned SMTP AUTH off, or when you need a retry hint on throttling.
-Accept its 4 MB body limit before you choose it.
+Accept its body limit before you choose it: Epistole treats it as 4 MB, taken conservatively from Microsoft's unitless "4 MB" and not yet measured against a live tenant.
 
 Use **Gmail** when you are already authenticated against a Google account and would rather not manage an SMTP credential.
 
@@ -301,18 +332,23 @@ Use **Gmail** when you are already authenticated against a Google account and wo
 | --- | --- | --- | --- |
 | Mail systems served | any | Google accounts | Exchange Online |
 | Largest body | whole-message limit | whole-message limit | **4 MB, no path past it** |
-| Largest message | server `SIZE`, 35 MB on a default Exchange Online tenant | 25 MB before encoding | 35 MB default, 1 MB to 150 MB configurable |
+| Largest message | server `SIZE`, 35 MB on a default Exchange Online tenant | 25 MB of attachment, 35 MB of request | 35 MB default, 1 MB to 150 MB configurable |
 | Largest attachment | shares the message limit | shares the message limit | 150 MB, via upload session |
 | Per-recipient refusals | visible | not expressible | not expressible |
 | Retry hint | none | none documented | `Retry-After` |
 | MIME you send | is what arrives | is what arrives | rebuilt by Exchange |
 | Recipients per message | server policy | 500 | 500 |
-| Credentials | anonymous, password, or OAuth | Google credentials | token credential |
+| Credentials | anonymous, `Password`, or `OAuth` | `ServiceAccount` or `AuthorizedUser` | `ClientSecret`, `Certificate`, or `ManagedIdentity` |
+
+Gmail and Graph also take any object with `get_token`, the `TokenCredential` shape `azure-identity` implements; SMTP takes one inside `OAuth`, with an explicit `scope=`.
+Epistole pre-checks only what a vendor documents: Gmail's 35 MiB request and 500 recipients, Graph's 150 MB attachment and 500 recipients.
+SMTP gets none, because `smtplib` already negotiates `SIZE` with the server.
+Everywhere else the service answers and the reply maps onto the same error a pre-check would have raised.
 
 Four things decide it.
 
 **Body size.**
-Graph caps the entire write request at 4 MB and has no chunked path for a message body, so a large embedded HTML report cannot be sent through it at all.
+Graph caps the entire write request at 4 MB, a figure Microsoft publishes without units, and has no chunked path for a message body, so a large embedded HTML report cannot be sent through it at all.
 SMTP and Gmail measure against the whole message, so a body of several MB is routine on both.
 If you send through Graph, attach the report as a file and keep the body small.
 
@@ -327,11 +363,13 @@ Graph takes a flat JSON array and Exchange serializes the MIME later, so Epistol
 In exchange, Graph is the only backend that tells you how long to wait when it throttles you.
 
 **What the permission costs.**
-For a plain send the three are comparable: `SMTP.SendAsApp`, the `gmail.send` scope, `Mail.Send`.
-Above 3 MB of attachment Graph needs a draft, which needs `Mail.ReadWrite`, which grants reading every message in scope.
-Keep attachments under 3 MB if you send through Graph and a security reviewer will thank you.
+For a plain send the three are comparable: an Exchange Online SMTP OAuth grant with no claim added, the `gmail.send` scope, `Mail.Send`.
+SMTP through Gmail is the exception; XOAUTH2 there requires `https://mail.google.com/`, which grants full mailbox access, so the Gmail backend asks for less than SMTP does.
+Once a Graph message serializes past 4 MB, Epistole takes the draft path, which needs `Mail.ReadWrite`, which grants reading every message in scope.
+Keep the whole message under 4 MB if you send through Graph and a security reviewer will thank you.
+The 3 MB figure you may have seen is a second, internal cut: inside the draft path it decides whether an attachment goes in one call or by upload session, and it changes no permission.
 
-`ConsoleBackend` and `MemoryBackend` are backends like any other; swapping one in is the same one-word change.
+`ConsoleBackend` and `MemoryBackend` are backends like any other; swapping one in changes the constructor and nothing else.
 `MemoryBackend` records what it accepted as `backend.submissions`, so a test reads `submissions[0].message.to_`, and `ConsoleBackend` prints a readable rendering rather than the raw bytes of any one backend's wire form.
 
 Limits quoted on 2026-09-08 and they move; re-check before relying on one.

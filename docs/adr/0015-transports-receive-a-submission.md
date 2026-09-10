@@ -5,6 +5,7 @@ It now takes a frozen `Submission(message, from_address, message_id, date)` and 
 `MemoryBackend.submissions` is a `list[Submission]` on the backend, and `ConsoleBackend` renders a submission rather than any one backend's wire bytes.
 Decided on [#28](https://github.com/ozanozbeker/epistole/issues/28), which amends ADR-0002, ADR-0004, ADR-0005, ADR-0006, ADR-0007, and ADR-0008.
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the rendering carries the caller's custom headers, alongside the addressing (ADR-0016).
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the stamps get their generators, and `MemoryBackend` records a submission only when a recipient accepted it.
 
 ## Why
 
@@ -59,19 +60,30 @@ The entries are `Submission` values, so the attribute and the type agree, as `Se
 - **`Submission` is frozen and has four fields.**
   `message`, `from_address`, `message_id`, `date`.
   No `refused`: it does not exist until the transport answers.
+- **The stamps have one generator each.**
+  `message_id` is `email.utils.make_msgid(domain=...)`, the domain taken from the addr-spec of the backend's from address, and it keeps its angle brackets so the value reads the same in a log, in the header, and in Graph's `internetMessageId`.
+  The domain comes from the from address rather than from `make_msgid`'s default, which resolves through `socket.getfqdn()` and would put the sending machine's internal hostname in every message a scheduled job sends.
+  `date` is `email.utils.localtime()`: timezone-aware, carrying the sending machine's offset, which is what a mail client writes and what a recipient reading a timestamp expects.
 - **`Transport` is `submit(submission, /) -> Mapping[str, Refusal]` and `close() -> None`.**
   Positional-only as ADR-0006 requires.
   An accepted submission with nothing refused returns an empty mapping.
 - **`Connection.send` builds both records.**
   It checks the message, builds the `Submission`, calls `submit`, then constructs the `SendResult` from the submission's `message_id` and `date` plus the returned mapping.
   A transport never constructs a `SendResult`.
-- **Every recipient refused raises `RecipientsRefusedError`.**
-  Unchanged from ADR-0004, but the rule lives in `Connection.send`, so it holds on every backend including the doubles.
+- **Every recipient refused raises `RecipientsRefusedError`, and `Connection.send` is the only place it is raised.**
+  A transport answers with refusals and never raises this leaf, `SMTPTransport` included: it catches `SMTPRecipientsRefused` and returns its `.recipients` as data.
+  The rule then holds on every backend including the doubles, which is why it moved here (ADR-0004).
 - **`MemoryBackend.submissions` is a live `list[Submission]`.**
-  On the backend, in send order, surviving every connection the backend opens (ADR-0005).
+  On the backend, surviving every connection the backend opens (ADR-0005).
   No reset method: `list.clear()` already exists, and a fresh backend per test starts empty.
+  It is the one mutable thing a backend holds.
+  `list.append` is atomic under both the GIL and a free-threaded build, so the list cannot be corrupted; what concurrency costs is order, because entries land in submit-completion order rather than call order.
+  A test that asserts on order sends from one thread.
+- **`MemoryBackend` records a submission only when a recipient accepted it.**
+  `refuse` is applied first, and a submission every recipient refused is not appended.
+  Otherwise the double would hold a record of a send that raised `RecipientsRefusedError`, whose meaning is that nothing was submitted, and `CONTEXT.md`'s "keeps every one it accepted" would be false on the one backend a test can inspect.
 - **`MemoryBackend(from_address=..., refuse=...)`.**
-  `refuse` maps an address to a `Refusal` and is applied at submit.
+  `refuse` maps an address to a `Refusal`, matched against each recipient's addr-spec, and is applied at submit.
   Nothing else is injectable.
 - **`ConsoleBackend(from_address=..., stream=None)`.**
   `None` means `sys.stdout` looked up at write time, never captured in `__init__`, because pytest's `capsys` and Jupyter both swap it after import and an eagerly bound stream writes where the test cannot see.

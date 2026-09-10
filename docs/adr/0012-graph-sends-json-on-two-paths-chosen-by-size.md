@@ -1,22 +1,31 @@
 # Graph sends JSON on every request, and picks one of two paths by encoded size
 
 `GraphTransport` speaks JSON to Microsoft Graph on every request and never uses the `text/plain` MIME form.
-Under 4 MB of encoded request it calls `POST /me/sendMail`.
+Under 4 MB of encoded request it calls `POST /users/{addr-spec}/sendMail`.
 Over that it creates a JSON draft, adds each attachment by its own call, sends the draft, and deletes the draft if anything fails in between.
 The switch is automatic and has no constructor knob: the tenant's permission grant is the gate, and a draft path without `Mail.ReadWrite` fails as `AuthenticationError`.
 Decided on [#20](https://github.com/ozanozbeker/epistole/issues/20), grounded by `docs/research/attachment-and-inline-rules.md` and `docs/research/send-boundary-semantics.md`.
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the custom-header pre-check now has the surface it was waiting for, and `singleValueExtendedProperties` is named as its reopener (ADR-0016).
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): every request addresses the mailbox as `/users/{addr-spec}`, because `/me` resolves against a signed-in user and no credential this ADR offers has one.
 
 ## Why
 
+**`/me` cannot work, and `/users/{addr-spec}` works everywhere.**
+`/me` resolves against a signed-in user.
+An app-only token has none, so Graph answers `400 BadRequest: /me request is only valid with delegated authentication flow`, and every credential `GraphBackend` accepts under `https://graph.microsoft.com/.default` is app-only.
+Routing through `/me` would mean no documented `GraphBackend` configuration reaches its first response.
+`POST /users/{id | userPrincipalName}/sendMail` is the app-only form, and a delegated token reaches its own mailbox through it too, so one path serves both and Epistole never has to guess whether a foreign `get_token` object is delegated.
+The addr-spec is the one `email.utils.getaddresses` already produced when the backend checked `from_address`, which ADR-0014 names as the same mechanism that splits recipients for `toRecipients`.
+It is percent-encoded into the path, because a local part may legally hold characters a URL path may not.
+
 **Two paths, because Graph has two.**
 Every Graph write request is capped at 4 MB after encoding, and `sendMail` is one write request.
-The only way past it is the draft sequence: `POST /me/messages`, then `POST /me/messages/{id}/attachments` for a file under 3 MB or `createUploadSession` and ranged `PUT` for a file from 3 MB to 150 MB, then `POST /me/messages/{id}/send`.
+The only way past it is the draft sequence: `POST /users/{addr-spec}/messages`, then `POST /users/{addr-spec}/messages/{id}/attachments` for a file under 3 MB or `createUploadSession` and ranged `PUT` for a file from 3 MB to 150 MB, then `POST /users/{addr-spec}/messages/{id}/send`.
 Neither path covers the other: an upload session on a file under 3 MB fails with `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize`, and the draft path needs `Mail.ReadWrite` on top of `Mail.Send`.
 Shipping the small path alone would cap Graph attachments near 2 MB, below one PDF report, and `docs/choosing-a-backend.md` already promises 150 MB.
 
 **JSON everywhere, not MIME on the small path.**
-`sendMail` and `POST /me/messages` both accept the whole RFC 5322 message base64-encoded under `Content-Type: text/plain`, the bytes the SMTP backend writes.
+`sendMail` and `POST /users/{addr-spec}/messages` both accept the whole RFC 5322 message base64-encoded under `Content-Type: text/plain`, the bytes the SMTP backend writes.
 That form keeps the stamped `Message-ID`, any custom header, the caller's own plain text next to the HTML, and Epistole's `multipart/related` layout.
 It was the first choice for the small path and it lost.
 Whether attachments can be added to a MIME-built draft is undocumented, so the large path is JSON either way, and a MIME small path would make one message send at 3 MB and raise at 5 MB because of a header.
@@ -27,7 +36,7 @@ What it gives up is edge-case fidelity, listed under Consequences.
 **Automatic, with no flag.**
 The alternative was a constructor boolean that keeps the draft path off until the caller turns it on, so that the `Mail.ReadWrite` grant is visible where the backend is built, the way the Send As grant is.
 Rejected because the tenant already enforces the permission.
-An app without `Mail.ReadWrite` gets `403` on `POST /me/messages` before any draft exists, and ADR-0004 maps that to `AuthenticationError`.
+An app without `Mail.ReadWrite` gets `403` on `POST /users/{addr-spec}/messages` before any draft exists, and ADR-0004 maps that to `AuthenticationError`.
 A flag would be a second copy of a gate the tenant owns, and one more Graph-only setting for a library that has avoided them (ADR-0009's fixed timeout, ADR-0010's no-flag rule).
 The docstring names the permission and the size that triggers it.
 
@@ -49,22 +58,26 @@ A failure after draft creation leaves a draft in the mailbox, and a nightly job 
 The delete is best effort and its own failure is swallowed, so the original error is never masked (ADR-0005).
 
 **`saveToSentItems` stays unexposed.**
-`sendMail` takes it; `POST /me/messages/{id}/send` does not, and a sent draft always lands in Sent Items.
+`sendMail` takes it; `POST /users/{addr-spec}/messages/{id}/send` does not, and a sent draft always lands in Sent Items.
 Exposing it would make behaviour depend on size again.
 Additive later if a use appears.
 
 ## Rules
 
-- **Path selection.**
+- **Every request names the mailbox.**
+  `POST /users/{addr-spec}/sendMail`, `POST /users/{addr-spec}/messages`, and the attachment and send calls under it, where the addr-spec is the from address's, percent-encoded.
+  There is no `/me` request on any path.
+- **Path selection measures; it never estimates.**
   Serialize the `sendMail` JSON body first.
   If it is under `4_000_000` bytes, send it.
   Otherwise take the draft path.
+  Every size gate in this ADR reads bytes that already exist, so no expansion factor is applied anywhere.
 - **Draft path.**
-  `POST /me/messages` with the message minus attachments.
-  Then, per attachment in message order: raw size under `3_000_000` bytes is one `POST /me/messages/{id}/attachments`; otherwise `createUploadSession` and sequential `PUT`s of `3_000_000` bytes each, `Content-Range: bytes {start}-{end}/{total}`, no bearer, through the connection's client (ADR-0009).
-  Then `POST /me/messages/{id}/send`.
+  `POST /users/{addr-spec}/messages` with the message minus attachments.
+  Then, per attachment in message order: raw size under `3_000_000` bytes is one `POST /users/{addr-spec}/messages/{id}/attachments`; otherwise `createUploadSession` and sequential `PUT`s of `3_000_000` bytes each, `Content-Range: bytes {start}-{end}/{total}`, no bearer, through the connection's client (ADR-0009).
+  Then `POST /users/{addr-spec}/messages/{id}/send`.
 - **Cleanup.**
-  Any failure after the draft exists: `DELETE {uploadUrl}` if a session is open, then `DELETE /me/messages/{id}`, each best effort with the failure swallowed.
+  Any failure after the draft exists: `DELETE {uploadUrl}` if a session is open, then `DELETE /users/{addr-spec}/messages/{id}`, each best effort with the failure swallowed.
   Then the original error is raised; a `TransportError` closes the connection after cleanup (ADR-0005).
 - **Pre-checks**, `RejectedError` with `__cause__` `None` (ADR-0004): an attachment over `150_000_000` raw bytes; more than 500 recipients; a custom header not starting with `x-`.
   The tenant message limit (1 MB to 150 MB, default 35 MB) is not knowable and has no pre-check; a message over it bounces as a non-delivery report Epistole never sees.

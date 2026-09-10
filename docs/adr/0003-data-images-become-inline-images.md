@@ -5,6 +5,7 @@ Every `<img>` whose `src` is a `data:` URI is rewritten to a `cid:` reference, a
 No flag turns it off.
 The content id Epistole generates is a digest with no `@domain` part, against RFC 2045.
 Decided on [#11](https://github.com/ozanozbeker/epistole/issues/11), building on the prototype findings in [#8](https://github.com/ozanozbeker/epistole/issues/8).
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the digest covers the media type as well as the bytes, so the content id is unique per dedupe key by construction.
 
 ## Why
 
@@ -44,8 +45,10 @@ No RFC records either bug.
 - **One inline image per distinct (media type, bytes).**
   A logo in the header and the footer travels once.
   This is not the `.attach(x).attach(x)` rule: that covers a caller action written twice, and here the caller wrote one image referenced twice.
-- **Content id is `{sha256 hex, first 16}.{ext}`**, extension from `mimetypes.guess_extension`, none if unknown.
+- **Content id is `{sha256 hex, first 16}.{ext}`**, the digest taken over the media type, a `NUL` byte, and the payload, with the extension from `mimetypes.guess_extension` and none if unknown.
   Deterministic from content, so two messages built from the same HTML compare equal (ADR-0002), which rules out `make_msgid()` and uuid.
+  Hashing the media type alongside the bytes keeps the id unique per dedupe key.
+  Without it, `image/jpeg` and `image/pjpeg` over identical bytes share an extension and a digest, so one message holds two inline images under one id.
   The same string is the attachment filename, so MIME `filename=`, Graph `name`, and the `cid:` reference are one value.
   Stored bare; angle brackets are added only when a MIME header is written.
 - **Rewrite runs before the plain-text renderer.**

@@ -7,6 +7,7 @@ The value holds inputs only; `connect()` builds the `msal` or `google-auth` obje
 SMTP OAuth takes a Graph or Gmail value and derives its scope from that value's issuer.
 Consent flows and token storage stay out of scope, as [#2](https://github.com/ozanozbeker/epistole/issues/2) says.
 Decided on [#18](https://github.com/ozanozbeker/epistole/issues/18).
+Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): a confidential client requests a scope and a managed identity requests a resource, the Gmail REST backend requests `gmail.send` rather than the SMTP scope, `Certificate` requires one complete form, and `TokenCredential` and `AccessToken` are exported as Protocols.
 
 ## Why
 
@@ -28,14 +29,26 @@ Two of the five shapes across the three backends appeared only after the first p
 **The public token shape is Azure's, and it is the only door.**
 `get_token(*scopes) -> AccessToken` is what `azure-identity` implements, managed identity included, so those objects work with no dependency on `azure-core`.
 `google-auth` and `msal` do not implement it; Epistole adapts both privately, as ADR-0009 already requires.
+Both names are exported as `typing.Protocol`s, because they annotate three public constructors and a name a caller cannot import is not a usable annotation.
+The shape is fixed outside this repo, so the commitment costs nothing to maintain.
 A bare token string is rejected because it expires within an hour and a scheduled job would fail silently on its second run.
 A bare callable is rejected because it carries no expiry and no type.
 
-**Scope comes from the issuer, never from the host.**
-Graph fixes `https://graph.microsoft.com/.default`.
-SMTP OAuth needs `https://outlook.office365.com/.default` for a Graph value and `https://mail.google.com/` for a Gmail value, which the value's module already tells Epistole.
+**The audience comes from the issuer, never from the host.**
+Each issuer fixes one audience: `https://graph.microsoft.com` for Graph, `https://outlook.office365.com` for SMTP against Exchange Online, and `https://mail.google.com/` for SMTP against Gmail.
 A foreign `get_token` object has no issuer Epistole knows, so `OAuth(..., scope=...)` is required there and `TypeError` otherwise.
-Inferring scope from `host=` would be a guess.
+Inferring an audience from `host=` would be a guess.
+
+**One audience, two spellings, because msal has two clients.**
+`ConfidentialClientApplication.acquire_token_for_client` takes `scopes=["<audience>/.default"]`.
+`ManagedIdentityClient.acquire_token_for_client` takes `resource="<audience>"` and does not accept a scope at all.
+So a single declared scope for all three Graph credentials leaves `ManagedIdentity` with no token path.
+The private token-source adapter picks the spelling from the credential's own type, and the same rule covers `smtp.OAuth(credential=graph.ManagedIdentity(...))`.
+
+**The Gmail REST backend asks for less than SMTP does.**
+`messages.send` needs `https://www.googleapis.com/auth/gmail.send`.
+SMTP XOAUTH2 needs `https://mail.google.com/`, which Google's own SMTP page requires and which grants full mailbox read and delete.
+Using the wider one on both paths would give a library that only sends the right to empty a mailbox, so the two paths ask for different scopes and an administrator granting domain-wide delegation for both grants two.
 
 **Consent flows and storage stay out.**
 Owning them means `google-auth-oauthlib` and `msal-extensions`, an encrypted store per operating system (DPAPI, Keychain, libsecret, which headless Linux often lacks), a cache rewrite after any send that refreshed, and a Google Cloud OAuth client per user because a shipped client secret is public.
@@ -50,8 +63,17 @@ The values here are the door: a future `Login` value would be one more construct
   `OAuth(username, credential, scope=None)`, where `credential` is a Graph value, a Gmail value, or a `get_token` object; `scope` is required for the last and forbidden for the first two.
   XOAUTH2 through `smtplib.SMTP.auth`, auth string `user={username}\x01auth=Bearer {token}\x01\x01`.
 - `GraphBackend(from_address=, credential=)` with `ClientSecret(tenant_id, client_id, client_secret)`, `Certificate(tenant_id, client_id, pfx=, passphrase=None)` or `Certificate(tenant_id, client_id, private_key=, thumbprint=)`, the two forms `msal` accepts and mutually exclusive, `ManagedIdentity(client_id=None)` for system- or user-assigned, or any `get_token` object.
+- **`Certificate` takes exactly one complete form.**
+  Either `pfx` with an optional `passphrase`, or `private_key` and `thumbprint` together.
+  Neither form, both forms, either half of the second form alone, and `passphrase` without `pfx` are each a `TypeError` at construction.
+  All four fields default to `None`, so without the enumeration half the combinations a caller can write have no rule.
+- **A confidential client asks for a scope; a managed identity asks for a resource.**
+  `ClientSecret` and `Certificate` request `<audience>/.default`; `ManagedIdentity` requests `<audience>`.
+  The audience is `https://graph.microsoft.com` on `GraphBackend` and `https://outlook.office365.com` on `smtp.OAuth` with a Graph value.
+  The adapter picks the spelling; neither appears in a signature.
 - `GmailBackend(from_address=, credential=)` with `ServiceAccount(path, subject)` for domain-wide delegation or `AuthorizedUser(path)` for a saved user consent.
   The API path is always `users/me`; with a delegated service account `me` resolves to `subject`.
+  It requests `https://www.googleapis.com/auth/gmail.send`; `smtp.OAuth` with a Gmail value requests `https://mail.google.com/`.
   Application Default Credentials are not offered: sending as a mailbox from ADC needs a signed delegation JWT that keyless ADC cannot produce.
 - Every value is a frozen dataclass of inputs.
   Importing a value imports no vendor library; the backend constructor raises `ImportError` naming the extra (ADR-0009), and `connect()` builds the vendor object.
