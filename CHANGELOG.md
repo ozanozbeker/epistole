@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.4](https://github.com/ozanozbeker/epistole/compare/v0.0.3...v0.0.4) (2026-09-10)
+
+
+### Features
+
+* build and compare a message ([54f8430](https://github.com/ozanozbeker/epistole/commit/54f84303e7d1c11b47f6b65e1e8bbdbc4fbbc55c)), closes [#34](https://github.com/ozanozbeker/epistole/issues/34)
+
+
+### Documentation
+
+* repair the citation and name drift in the spec and the adrs ([fbf7a36](https://github.com/ozanozbeker/epistole/commit/fbf7a36757bbb1f85a75db15dd66244771243b77))
+* resolve the v1 spec review findings ([649dcfa](https://github.com/ozanozbeker/epistole/commit/649dcfaa23cc42877d7e71e74f8cd1d76d294c0a))
+
 ## [0.0.3](https://github.com/ozanozbeker/epistole/compare/v0.0.2...v0.0.3) (2026-09-10)
 
 
