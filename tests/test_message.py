@@ -1,11 +1,16 @@
 import re
 import sys
+from pathlib import Path
 
 import pytest
 
-from epistole import Address, Message
+from epistole import Address, Attachment, Message
 
 ADDRESS_METHODS = ("to", "cc", "bcc", "reply_to")
+
+PDF = b"%PDF-1.7 weekly numbers"
+PNG = b"\x89PNG\r\n\x1a\n logo"
+LOGO_HTML = '<p><img src="cid:logo.png" alt="Logo"></p>'
 
 # A quoted local part may hold an @, and Epistole never checks character set (ADR-0014).
 GOOD = (
@@ -276,8 +281,16 @@ def test_recipients_keep_duplicates():
 
 
 def test_two_messages_built_the_same_way_are_equal_and_hash_equal():
-    first = Message(text="hi").to("ada@example.com").subject("Weekly numbers")
-    second = Message(text="hi").to("ada@example.com").subject("Weekly numbers")
+    def build() -> Message:
+        return (
+            Message(html=LOGO_HTML)
+            .to("ada@example.com")
+            .subject("Weekly numbers")
+            .attach(PDF, filename="weekly.pdf")
+            .embed(PNG, cid="logo.png")
+        )
+
+    first, second = build(), build()
 
     assert first == second
     assert hash(first) == hash(second)
@@ -311,3 +324,230 @@ def test_a_message_refuses_attribute_deletion():
 
     with pytest.raises(AttributeError, match="immutable"):
         del message.subject_
+
+
+def test_attach_adds_an_attachment_typed_by_its_filename():
+    message = Message(text="hi").attach(PDF, filename="weekly.pdf")
+
+    assert message.attachments == (
+        Attachment(
+            filename="weekly.pdf",
+            content_type="application/pdf",
+            data=PDF,
+            content_id=None,
+        ),
+    )
+
+
+def test_attach_reads_a_path_when_called_and_names_the_attachment_after_it(
+    tmp_path: Path,
+):
+    path = tmp_path / "weekly.pdf"
+    path.write_bytes(PDF)
+
+    message = Message(text="hi").attach(path)
+    path.write_bytes(b"changed after the call")
+
+    assert message.attachments[0].filename == "weekly.pdf"
+    assert message.attachments[0].data == PDF
+
+
+def test_filename_overrides_the_name_of_a_path(tmp_path: Path):
+    path = tmp_path / "tmp4f2a.pdf"
+    path.write_bytes(PDF)
+
+    message = Message(text="hi").attach(path, filename="weekly.pdf")
+
+    assert message.attachments[0].filename == "weekly.pdf"
+
+
+def test_attach_reads_a_binary_file_and_leaves_it_open(tmp_path: Path):
+    path = tmp_path / "weekly.pdf"
+    path.write_bytes(PDF)
+
+    with path.open("rb") as file:
+        message = Message(text="hi").attach(file, filename="weekly.pdf")
+
+        assert not file.closed
+
+    assert message.attachments[0].data == PDF
+
+
+def test_attach_never_names_an_attachment_after_an_open_file(tmp_path: Path):
+    path = tmp_path / "weekly.pdf"
+    path.write_bytes(PDF)
+
+    with path.open("rb") as file:
+        with pytest.raises(TypeError, match="filename="):
+            Message(text="hi").attach(file)
+
+        assert file.tell() == 0
+
+
+@pytest.mark.parametrize("filename", [None, "weekly.pdf"])
+def test_a_str_source_raises_naming_path(filename: str | None):
+    with pytest.raises(TypeError, match=re.escape("Path()")):
+        Message(text="hi").attach("weekly.pdf", filename=filename)  # pyrefly: ignore
+
+
+@pytest.mark.parametrize("source", [bytearray(PDF), memoryview(PDF)])
+def test_a_mutable_buffer_raises_naming_bytes(source: bytearray | memoryview):
+    with pytest.raises(TypeError, match=re.escape("bytes()")):
+        Message(text="hi").attach(source, filename="weekly.pdf")  # pyrefly: ignore
+
+
+def test_a_text_mode_file_raises_naming_binary_mode(tmp_path: Path):
+    path = tmp_path / "weekly.csv"
+    path.write_text("week,sent\n38,1200\n", encoding="utf-8")
+
+    with (
+        path.open(encoding="utf-8") as file,
+        pytest.raises(TypeError, match="'rb'"),
+    ):
+        Message(text="hi").attach(file, filename="weekly.csv")  # pyrefly: ignore
+
+
+# Every case holds PDF bytes, so a result other than application/pdf shows the bytes were never sniffed.
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("logo.PNG", "image/png"),
+        ("weekly.epistole", "application/octet-stream"),
+        # mimetypes reads this as text/csv with a gzip encoding.
+        ("weekly.csv.gz", "application/octet-stream"),
+    ],
+)
+def test_attach_infers_the_content_type_from_the_filename_alone(
+    filename: str, content_type: str
+):
+    message = Message(text="hi").attach(PDF, filename=filename)
+
+    assert message.attachments[0].content_type == content_type
+
+
+def test_content_type_overrides_the_inferred_one():
+    message = Message(text="hi").attach(
+        PDF, filename="weekly.bin", content_type="application/pdf"
+    )
+
+    assert message.attachments[0].content_type == "application/pdf"
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "text/csv; charset=utf-8",
+        "csv",
+        "text/",
+        "text/csv\r\nBcc: eve@example.com",
+    ],
+)
+def test_content_type_must_be_a_media_type_without_parameters(content_type: str):
+    with pytest.raises(ValueError, match=re.escape(repr(content_type))):
+        Message(text="hi").attach(PDF, filename="weekly.csv", content_type=content_type)
+
+
+def test_embed_names_an_inline_image_after_its_path(tmp_path: Path):
+    path = tmp_path / "logo.png"
+    path.write_bytes(PNG)
+
+    message = Message(html=LOGO_HTML).embed(path)
+
+    assert message.inline_images == (
+        Attachment(
+            filename="logo.png",
+            content_type="image/png",
+            data=PNG,
+            content_id="logo.png",
+        ),
+    )
+    assert message.attachments == ()
+
+
+@pytest.mark.parametrize(
+    ("filename", "cid", "expected"),
+    [
+        ("logo.png", None, ("logo.png", "logo.png")),
+        (None, "logo.png", ("logo.png", "logo.png")),
+        ("logo.png", "header", ("logo.png", "header")),
+    ],
+)
+def test_embed_defaults_filename_and_cid_to_each_other(
+    filename: str | None, cid: str | None, expected: tuple[str, str]
+):
+    image = (
+        Message(html=LOGO_HTML).embed(PNG, filename=filename, cid=cid).inline_images[0]
+    )
+
+    assert (image.filename, image.content_id) == expected
+    assert image.content_type == "image/png"
+
+
+def test_a_path_names_an_inline_image_under_another_content_id(tmp_path: Path):
+    path = tmp_path / "logo.png"
+    path.write_bytes(PNG)
+
+    image = Message(html=LOGO_HTML).embed(path, cid="header").inline_images[0]
+
+    assert (image.filename, image.content_id) == ("logo.png", "header")
+
+
+def test_embed_needs_a_filename_or_a_content_id_for_bytes():
+    with pytest.raises(TypeError, match="cid="):
+        Message(html=LOGO_HTML).embed(PNG)
+
+
+@pytest.mark.parametrize(
+    ("cid", "content_type"),
+    [("weekly.pdf", None), ("logo", None), ("logo.png", "application/pdf")],
+)
+def test_embed_needs_an_image_content_type(cid: str, content_type: str | None):
+    with pytest.raises(ValueError, match=re.escape("image/*")):
+        Message(html=LOGO_HTML).embed(PNG, cid=cid, content_type=content_type)
+
+
+@pytest.mark.parametrize("content_type", ["image/png", "Image/PNG"])
+def test_embed_takes_an_image_content_type_override_in_any_case(content_type: str):
+    image = (
+        Message(html=LOGO_HTML)
+        .embed(PNG, cid="logo", content_type=content_type)
+        .inline_images[0]
+    )
+
+    assert image.content_type == content_type
+
+
+@pytest.mark.parametrize("data", [PNG + b" retina", PNG])
+def test_embed_raises_on_a_content_id_the_message_already_holds(data: bytes):
+    message = Message(html=LOGO_HTML).embed(PNG, cid="logo.png")
+
+    with pytest.raises(ValueError, match=re.escape("'logo.png'")):
+        message.embed(data, cid="logo.png")
+
+
+def test_attach_and_embed_append_in_call_order_and_leave_the_receiver_unchanged():
+    base = Message(html=LOGO_HTML)
+
+    message = (
+        base.attach(PDF, filename="weekly.pdf")
+        .embed(PNG, cid="logo.png")
+        .attach(PDF, filename="weekly.pdf")
+        .embed(PNG, cid="footer.png")
+    )
+
+    assert [one.filename for one in message.attachments] == ["weekly.pdf", "weekly.pdf"]
+    assert [one.content_id for one in message.inline_images] == [
+        "logo.png",
+        "footer.png",
+    ]
+    assert base.attachments == ()
+    assert base.inline_images == ()
+
+
+def test_messages_differing_in_attachments_are_not_equal():
+    base = Message(html=LOGO_HTML)
+    attached = base.attach(PNG, filename="logo.png")
+
+    assert attached != base
+    assert attached != base.attach(PNG, filename="header.png")
+    assert base.embed(PNG, cid="logo.png") != base

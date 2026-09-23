@@ -220,10 +220,11 @@ class Attachment:
   Every other source needs `filename=`, and its absence is a `TypeError`.
   Epistole does not read `.name` on a file object.
 - `content_type` is inferred from the filename and falls back to `application/octet-stream`.
+  A compressed filename such as `weekly.csv.gz` falls back too, because its bytes are gzip and not `text/csv`.
   It is always explicit in the sent message.
   `content_type=` overrides it.
   Epistole never sniffs the bytes.
-  A media type with parameters is a `ValueError`.
+  A media type with parameters is a `ValueError`, as is any other `content_type=` that is not a bare `type/subtype` in RFC 6838's grammar.
 - `.embed()`: `filename` and `cid` default to each other, so `.embed(Path("logo.png"))` resolves `<img src="cid:logo.png">`.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
   The content type must be `image/*` after inference or override, else `ValueError`.

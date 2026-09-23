@@ -10,6 +10,7 @@ Bytes are never sniffed.
 A `str` is never read as a path.
 `.embed()` adds an inline image under a content id that must be unused.
 Decided on [#30](https://github.com/ozanozbeker/epistole/issues/30), which found the whole block in `docs/spec.md` citing [#11](https://github.com/ozanozbeker/epistole/issues/11) and ADR-0003, neither of which covers any of it.
+Amended on [#37](https://github.com/ozanozbeker/epistole/issues/37): a compressed filename falls back to `application/octet-stream`, and `content_type=` must match RFC 6838's `type/subtype` grammar.
 
 ## Why
 
@@ -80,8 +81,12 @@ This does not amend ADR-0002's append rule.
   Its absence is a `TypeError`.
   `.name` on a file object is never read.
 - **The content type is inferred from the filename and falls back to `application/octet-stream`.**
+  A compressed filename falls back too.
+  `mimetypes` reads `weekly.csv.gz` as `text/csv` with a gzip encoding.
+  The bytes are gzip, and MIME has no header to mark the compression.
   `content_type=` overrides the inference.
-  A media type with parameters is a `ValueError`.
+  A media type with parameters is a `ValueError`, as is any other value that is not a bare `type/subtype` in RFC 6838's grammar.
+  So a malformed value such as `csv` fails at the call, not inside a backend.
   The type is written explicitly on SMTP, Gmail, and Graph alike.
   Bytes are never inspected.
 - **`.embed()` defaults `filename` and `cid` to each other**, so `.embed(Path("logo.png"))` matches `<img src="cid:logo.png">`.

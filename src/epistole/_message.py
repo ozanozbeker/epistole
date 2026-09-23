@@ -1,7 +1,11 @@
-"""`Message` is the immutable value a caller builds and a backend sends."""
+"""`Message` is the immutable value a caller builds and a backend sends. `Attachment` holds the bytes, filename, and content type of one attachment or inline image."""
 
 from __future__ import annotations
 
+import mimetypes
+import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from epistole._address import check_address
@@ -9,14 +13,18 @@ from epistole._text import html_to_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from typing import BinaryIO
+
+# The type and the subtype each match RFC 6838's restricted-name.
+_MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
 
 
 class Message:
-    """A message holds the content, addressing, and subject a caller builds, as one frozen value.
+    """A message holds the content, addressing, subject, and attachments a caller builds, as one frozen value.
 
     It compares and hashes by content. Every builder method returns a new message and leaves the receiver unchanged.
 
-    A method named for a field replaces that field, so `.to("a").to("b")` addresses `b` alone. Nothing removes a field, so each address method takes at least one address. See ADR-0002.
+    A method named for a field replaces that field, so `.to("a").to("b")` addresses `b` alone. `.attach()` and `.embed()` append instead. Nothing removes a field, so each address method takes at least one address. See ADR-0002.
 
     A builder method's value is an attribute with the method's name plus a trailing underscore, because the plain name is the method. See ADR-0007.
 
@@ -41,6 +49,10 @@ class Message:
         The HTML the caller supplied or Epistole rendered from `markdown`, or `None` on a text-only message.
     text
         The plain text. It is the Markdown source for `markdown=`. It is `""` for `text=""`, and also for HTML that holds no text, such as a lone image with no alt text.
+    attachments
+        What `.attach()` added, in call order.
+    inline_images
+        What `.embed()` added, in call order.
 
     Raises
     ------
@@ -53,9 +65,11 @@ class Message:
     """
 
     __slots__ = (
+        "attachments",
         "bcc_",
         "cc_",
         "html",
+        "inline_images",
         "reply_to_",
         "subject_",
         "text",
@@ -69,6 +83,8 @@ class Message:
     subject_: str | None
     html: str | None
     text: str
+    attachments: tuple[Attachment, ...]
+    inline_images: tuple[Attachment, ...]
 
     def __init__(
         self,
@@ -121,6 +137,8 @@ class Message:
                 "subject_": None,
                 "html": html,
                 "text": text,
+                "attachments": (),
+                "inline_images": (),
             },
         )
 
@@ -143,6 +161,87 @@ class Message:
     def subject(self, subject: str, /) -> Message:
         """Return a copy with the subject set, replacing any earlier subject."""
         return self._copy(subject_=subject)
+
+    def attach(
+        self,
+        source: Path | bytes | BinaryIO,
+        /,
+        *,
+        filename: str | None = None,
+        content_type: str | None = None,
+    ) -> Message:
+        """Return a copy with `source` appended as an attachment.
+
+        Parameters
+        ----------
+        source
+            The bytes, or a `Path` or binary file object to read them from. Epistole reads it at call time. A `Path` supplies its own filename. A file object is read from its current position and left open.
+        filename
+            The name the recipient sees. Bytes and a file object need one, because Epistole never reads a file object's `.name`.
+        content_type
+            A bare media type such as `application/pdf`. It defaults to the type `filename` implies, or to `application/octet-stream` when the filename implies none or names a compressed file. Epistole never inspects the bytes.
+
+        Raises
+        ------
+        TypeError
+            When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. See ADR-0018.
+        ValueError
+            When `content_type` is not a bare `type/subtype`, such as one with parameters.
+        """
+        name: str = _filename(source, filename)
+        attachment = Attachment(
+            filename=name,
+            content_type=_content_type(name, content_type),
+            data=_read(source),
+            content_id=None,
+        )
+        return self._copy(attachments=(*self.attachments, attachment))
+
+    def embed(
+        self,
+        source: Path | bytes | BinaryIO,
+        /,
+        *,
+        filename: str | None = None,
+        cid: str | None = None,
+        content_type: str | None = None,
+    ) -> Message:
+        """Return a copy with `source` appended as an inline image, which the HTML names as `cid:` plus its content id.
+
+        Parameters
+        ----------
+        source
+            The image, read now, as for `.attach()`.
+        filename
+            The name the recipient sees. It defaults to a `Path` source's own name, or else to `cid`.
+        cid
+            The content id. It defaults to `filename`, so `.embed(Path("logo.png"))` matches `<img src="cid:logo.png">`.
+        content_type
+            As for `.attach()`, and it must be `image/*`.
+
+        Raises
+        ------
+        TypeError
+            As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
+        ValueError
+            When the content type is not `image/*`, or when the message already holds an inline image under the same content id. See ADR-0018.
+        """
+        name: str = _filename(source, filename, cid)
+        kind: str = _content_type(name, content_type)
+        # RFC 2045 makes a media type case-insensitive.
+        if not kind.lower().startswith("image/"):
+            msg = f"an inline image needs an image/* content type, and {name!r} has {kind!r}. Pass content_type=, or add it with .attach()."
+            raise ValueError(msg)
+
+        content_id: str = name if cid is None else cid
+        if any(image.content_id == content_id for image in self.inline_images):
+            msg = f"the message already holds an inline image under content id {content_id!r}. Pass cid= to embed this one under another."
+            raise ValueError(msg)
+
+        image = Attachment(
+            filename=name, content_type=kind, data=_read(source), content_id=content_id
+        )
+        return self._copy(inline_images=(*self.inline_images, image))
 
     @property
     def recipients(self) -> tuple[str, ...]:
@@ -180,6 +279,8 @@ class Message:
             self.subject_,
             self.html,
             self.text,
+            self.attachments,
+            self.inline_images,
         )
 
     def _copy(self, **changes: object) -> Message:
@@ -189,6 +290,30 @@ class Message:
             copy, {name: getattr(self, name) for name in Message.__slots__} | changes
         )
         return copy
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """An attachment is bytes with a filename and a content type that a message carries.
+
+    `Message.attach()` and `Message.embed()` build one. See ADR-0018.
+
+    Attributes
+    ----------
+    filename
+        The name the recipient sees.
+    content_type
+        A bare media type, with no parameters.
+    data
+        The bytes, which the builder method reads at call time.
+    content_id
+        The name the HTML uses after `cid:` on an inline image, or `None` on an attachment.
+    """
+
+    filename: str
+    content_type: str
+    data: bytes
+    content_id: str | None
 
 
 def _write(message: Message, fields: Mapping[str, object]) -> None:
@@ -204,3 +329,58 @@ def _checked(address: str, more: tuple[str, ...]) -> tuple[str, ...]:
         check_address(one)
 
     return addresses
+
+
+def _filename(
+    source: Path | bytes | BinaryIO, filename: str | None, cid: str | None = None
+) -> str:
+    """Check the type of `source`, then return `filename`, or else a `Path` source's own name, or else `cid`."""
+    if isinstance(source, str):
+        msg = "Epistole never reads a str as a path. Wrap it in Path()."
+        raise TypeError(msg)
+
+    if not isinstance(source, Path | bytes) and not hasattr(source, "read"):
+        msg = f"source is a {type(source).__name__}, not a Path, bytes, or binary file. Convert a bytearray or memoryview with bytes()."
+        raise TypeError(msg)
+
+    if filename is not None:
+        return filename
+
+    if isinstance(source, Path):
+        return source.name
+
+    if cid is not None:
+        return cid
+
+    msg = f"a {type(source).__name__} source needs filename=, because only a Path supplies its own filename. .embed() takes cid= as well."
+    raise TypeError(msg)
+
+
+def _content_type(filename: str, content_type: str | None) -> str:
+    """Return `content_type` once checked, or else the type `filename` implies, or else `application/octet-stream`."""
+    if content_type is None:
+        guessed, encoding = mimetypes.guess_file_type(filename)
+        # A compressed file's bytes are not its inner type, and MIME has no header to mark the compression.
+        return guessed if guessed and not encoding else "application/octet-stream"
+
+    if _MEDIA_TYPE.fullmatch(content_type) is None:
+        msg = f"content_type={content_type!r} is not a media type without parameters, such as 'application/pdf'"
+        raise ValueError(msg)
+
+    return content_type
+
+
+def _read(source: Path | bytes | BinaryIO) -> bytes:
+    """Return the bytes of `source`, reading it now."""
+    if isinstance(source, Path):
+        return source.read_bytes()
+
+    if isinstance(source, bytes):
+        return source
+
+    data: object = source.read()
+    if not isinstance(data, bytes):
+        msg = f"{type(source).__name__}.read() returned {type(data).__name__}, not bytes. Open the file in binary mode, with 'rb'."
+        raise TypeError(msg)
+
+    return data
