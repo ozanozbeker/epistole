@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.4](https://github.com/ozanozbeker/epistole/compare/v0.0.3...v0.0.4) (2026-09-23)
+
+
+### Features
+
+* build and compare a message ([54f8430](https://github.com/ozanozbeker/epistole/commit/54f84303e7d1c11b47f6b65e1e8bbdbc4fbbc55c)), closes [#34](https://github.com/ozanozbeker/epistole/issues/34)
+* send a message through MemoryBackend ([57f6518](https://github.com/ozanozbeker/epistole/commit/57f651821f1105a567b261a35a382229a142e737)), closes [#35](https://github.com/ozanozbeker/epistole/issues/35)
+
+
+### Documentation
+
+* repair the citation and name drift in the spec and the adrs ([fbf7a36](https://github.com/ozanozbeker/epistole/commit/fbf7a36757bbb1f85a75db15dd66244771243b77))
+* resolve the v1 spec review findings ([649dcfa](https://github.com/ozanozbeker/epistole/commit/649dcfaa23cc42877d7e71e74f8cd1d76d294c0a))
+* rewrite the prose to the writing guidelines ([#49](https://github.com/ozanozbeker/epistole/issues/49)) ([04f9126](https://github.com/ozanozbeker/epistole/commit/04f91261b24fe5ba22f6558bb733a0879123189c))
+
 ## [0.0.3](https://github.com/ozanozbeker/epistole/compare/v0.0.2...v0.0.3) (2026-09-10)
 
 
