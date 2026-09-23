@@ -178,9 +178,7 @@ class Attachment:
 - `text=` may be passed with `html=` or `markdown=`, or alone.
   Epistole sends it verbatim and never merges it.
   It overrides anything Epistole would have derived.
-  `text=""` is a `ValueError`.
-  A caller never means to send empty plain text.
-  Treating it as absent would make `""` and `None` synonyms.
+  `text=""` sends empty plain text, for a caller who puts the whole message in the subject.
 - HTML with no `text=`: `text` is `text_renderer(rewritten_html)` when given, else `html_to_text(rewritten_html)`.
   The renderer runs once at construction, on the HTML after the `data:` rewrite.
   The message does not store it.

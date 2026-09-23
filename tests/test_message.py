@@ -32,14 +32,110 @@ def test_a_message_carries_the_text_it_was_built_with():
     assert Message(text="Weekly numbers").text == "Weekly numbers"
 
 
-def test_empty_text_raises():
-    with pytest.raises(ValueError, match="text="):
-        Message(text="")
+def test_the_text_of_an_html_message_is_derived():
+    message = Message(html="<p>Weekly <b>numbers</b></p>")
+
+    assert message.html == "<p>Weekly <b>numbers</b></p>"
+    assert message.text == "Weekly numbers"
+
+
+def test_text_supplied_with_html_is_kept_verbatim():
+    message = Message(html="<p>Weekly numbers</p>", text="  Hand-written\n\ttext  ")
+
+    assert message.html == "<p>Weekly numbers</p>"
+    assert message.text == "  Hand-written\n\ttext  "
+
+
+def test_text_renderer_runs_once_on_the_html():
+    calls: list[str] = []
+
+    def render(html: str) -> str:
+        calls.append(html)
+        return "Rendered"
+
+    message = Message(html="<p>Weekly numbers</p>", text_renderer=render)
+    message = message.to("ada@example.com").subject("Weekly numbers")
+
+    assert message.text == "Rendered"
+    assert calls == ["<p>Weekly numbers</p>"]
+
+
+def test_a_message_does_not_keep_its_text_renderer():
+    rendered = Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: "Rendered")
+    supplied = Message(html="<p>Weekly numbers</p>", text="Rendered")
+
+    assert rendered == supplied
+    assert hash(rendered) == hash(supplied)
+
+
+def test_an_error_from_text_renderer_propagates_unchanged():
+    error = LookupError("no template")
+
+    def render(html: str) -> str:
+        raise error
+
+    with pytest.raises(LookupError) as raised:
+        Message(html="<p>Weekly numbers</p>", text_renderer=render)
+
+    assert raised.value is error
+
+
+def test_text_renderer_returning_a_non_str_raises():
+    with pytest.raises(ValueError, match="bytes"):
+        Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: b"Rendered")  # pyrefly: ignore
+
+
+def test_text_renderer_may_return_empty_text():
+    assert Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: "").text == ""
+
+
+@pytest.mark.parametrize(
+    "html",
+    ['<img src="cid:chart.png">', "<style>p { color: #333; }</style>"],
+)
+def test_text_derived_from_html_holding_none_is_empty(html: str):
+    assert Message(html=html).text == ""
+
+
+def test_a_text_only_message_has_no_html():
+    assert Message(text="Weekly numbers").html is None
+
+
+def test_messages_differing_in_html_are_not_equal():
+    assert Message(html="<p>Weekly numbers</p>") != Message(
+        html="<b>Weekly numbers</b>"
+    )
+
+
+def test_empty_text_sends_the_subject_alone():
+    message = Message(text="").subject("The nightly export failed")
+
+    assert message.text == ""
+    assert message.html is None
 
 
 def test_a_message_without_content_raises():
     with pytest.raises(TypeError, match="content"):
         Message()
+
+
+def test_html_with_markdown_raises():
+    with pytest.raises(TypeError, match="not both"):
+        Message(html="<p>Weekly numbers</p>", markdown="Weekly numbers")
+
+
+def test_text_renderer_with_markdown_raises():
+    with pytest.raises(TypeError, match="text_renderer="):
+        Message(markdown="Weekly numbers", text_renderer=lambda _: "Rendered")
+
+
+def test_text_renderer_with_text_raises():
+    with pytest.raises(TypeError, match="text_renderer="):
+        Message(
+            html="<p>Weekly numbers</p>",
+            text="Weekly numbers",
+            text_renderer=lambda _: "Rendered",
+        )
 
 
 def test_the_attributes_start_empty():

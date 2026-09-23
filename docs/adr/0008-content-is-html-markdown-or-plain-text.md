@@ -12,13 +12,15 @@ When the content is plain text, that is the whole message.
 Decided on [#15](https://github.com/ozanozbeker/epistole/issues/15), based on `docs/research/html-to-plain-text.md`.
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): a test reads the plain text as `submissions[0].message.text`, because the doubles record a `Submission` rather than a message with those headers set (ADR-0015).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): derived plain text may be empty, so the non-empty rule holds for `text=` alone.
+Amended on [#36](https://github.com/ozanozbeker/epistole/issues/36): `text=""` is allowed, because some callers send the subject alone.
 
 ## Why
 
 **Every message carries a plain-text field, and it is a `str` that may be empty.**
 An image-only body and a body whose only text is in `<style>` both derive to `""`.
-This audience sends both.
-Raising there would make a legitimate report unsendable.
+A caller who puts the whole message in the subject passes `text=""`.
+This audience sends all three.
+Raising on any of them would make a legitimate message unsendable.
 Substituting a placeholder would send words that nobody wrote.
 So the invariant is that `.text` is always a `str`, not that it always holds characters.
 
@@ -82,9 +84,8 @@ It also keeps `html2text`'s licence with the caller who chose it.
 - **`text=` takes precedence.**
   Supplied plain text ships verbatim.
   Epistole never checks it against the HTML, never merges, and never derives.
-  `text=""` is a `ValueError`.
-  Nobody means to send empty plain text.
-  Treating it as absent would make `""` and `None` synonyms.
+  `text=""` is allowed and sends empty plain text, because some callers put the whole message in the subject.
+  It differs from `None`: with `html=`, `None` derives the plain text and `""` sends none.
 - **Plain text from HTML is `text_renderer(rewritten_html)` when given, else `epistole.html_to_text(rewritten_html)`.**
   The renderer is `Callable[[str], str]` and runs once at construction.
   It is not stored on the value, so equality stays by content (ADR-0002).
@@ -131,6 +132,9 @@ It also keeps `html2text`'s licence with the caller who chose it.
 - **Require `text` for a multipart message.**
   It is the cheapest option, and every Python library does it.
   Rejected because the audience never has a text version, so the real outcome is HTML-only mail.
+- **Raise on `text=""`.**
+  This was the rule until [#36](https://github.com/ozanozbeker/epistole/issues/36), on the reasoning that nobody means to send empty plain text.
+  Reversed because a caller who puts the whole message in the subject means exactly that.
 - **Put the extractor in an extra.**
   Rejected above: the absent branch needs a real extractor anyway.
 - **Depend on `inscriptis` or `html2text`.**

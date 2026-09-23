@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from epistole._address import check_address
+from epistole._text import html_to_text
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 
 class Message:
@@ -19,26 +20,42 @@ class Message:
 
     A builder method's value is an attribute with the method's name plus a trailing underscore, because the plain name is the method. See ADR-0007.
 
+    Parameters
+    ----------
+    html
+        The HTML. Epistole derives the plain text from it with `html_to_text`, unless the caller supplies `text` or `text_renderer`.
+    markdown
+        Not supported yet. Supplying it raises `NotImplementedError`.
+    text
+        The plain text. Epistole sends it verbatim and derives nothing from `html`. It may be `""` when the subject holds the whole message.
+    text_renderer
+        Derives the plain text from `html` in place of `html_to_text`. It runs once, at construction. The message does not keep it, so equality compares content alone. An exception it raises propagates unchanged.
+
     Attributes
     ----------
     to_, cc_, bcc_, reply_to_
         The addresses the builder method of the same name set.
     subject_
         The subject `.subject()` set, or `None`.
+    html
+        The HTML, or `None` on a text-only message.
     text
-        The plain text.
+        The plain text. It is `""` for `text=""`. It is also `""` for HTML that holds no text, such as a lone image with no alt text.
 
     Raises
     ------
     TypeError
-        When no content is supplied.
+        When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`.
     ValueError
-        When `text` is empty. See ADR-0008.
+        When `text_renderer` returns something other than a `str`. See ADR-0008.
+    NotImplementedError
+        When `markdown` is supplied.
     """
 
     __slots__ = (
         "bcc_",
         "cc_",
+        "html",
         "reply_to_",
         "subject_",
         "text",
@@ -50,16 +67,42 @@ class Message:
     bcc_: tuple[str, ...]
     reply_to_: tuple[str, ...]
     subject_: str | None
+    html: str | None
     text: str
 
-    def __init__(self, *, text: str | None = None) -> None:
-        if text is None:
-            msg = "Message() needs content: pass text="
+    def __init__(
+        self,
+        *,
+        html: str | None = None,
+        markdown: str | None = None,
+        text: str | None = None,
+        text_renderer: Callable[[str], str] | None = None,
+    ) -> None:
+        if html is not None and markdown is not None:
+            msg = "Message() takes html= or markdown=, not both"
             raise TypeError(msg)
 
-        if not text:
-            msg = "text= cannot be empty. Build the message without it instead."
-            raise ValueError(msg)
+        if html is None and markdown is None and text is None:
+            msg = "Message() needs content: pass html=, markdown=, or text="
+            raise TypeError(msg)
+
+        if text_renderer is not None and (text is not None or markdown is not None):
+            msg = "text_renderer= applies to html= alone, so pass it without text= or markdown="
+            raise TypeError(msg)
+
+        if markdown is not None:
+            msg = "markdown= is not supported yet"
+            raise NotImplementedError(msg)
+
+        if text is None and html is not None:
+            rendered: object = (
+                html_to_text if text_renderer is None else text_renderer
+            )(html)
+            if not isinstance(rendered, str):
+                msg = f"text_renderer= returned {type(rendered).__name__}, not str"
+                raise ValueError(msg)
+
+            text = rendered
 
         _write(
             self,
@@ -69,6 +112,7 @@ class Message:
                 "bcc_": (),
                 "reply_to_": (),
                 "subject_": None,
+                "html": html,
                 "text": text,
             },
         )
@@ -121,7 +165,15 @@ class Message:
 
     def _key(self) -> tuple[object, ...]:
         """Return every field in a fixed order, for `__eq__` and `__hash__`."""
-        return (self.to_, self.cc_, self.bcc_, self.reply_to_, self.subject_, self.text)
+        return (
+            self.to_,
+            self.cc_,
+            self.bcc_,
+            self.reply_to_,
+            self.subject_,
+            self.html,
+            self.text,
+        )
 
     def _copy(self, **changes: object) -> Message:
         """Return a shallow copy with `changes` applied, without running `__init__` again."""
