@@ -1,8 +1,6 @@
-"""Every error a mail service's no becomes: one base and seven classes under it.
+"""`epistole` does not re-export `EpistoleError` or its seven subclasses, so a caller imports them from here.
 
-The one module in the public surface that `epistole` does not re-export. A caller writes `from epistole.exceptions import ThrottledError`, or `from epistole import exceptions` and then `exceptions.ThrottledError`.
-
-Named for `Exception` rather than for `Error` because `Warning` is an `Exception` too, so a warning Epistole raises later lands here without the module name going wrong. `polars.exceptions`, `numpy.exceptions`, and `sqlalchemy.exc` each hold both; `pandas.errors` is the counterexample.
+`docs/spec.md` records why the module is named for `Exception` rather than `Error`.
 """
 
 from __future__ import annotations
@@ -17,23 +15,14 @@ if TYPE_CHECKING:
 
 
 class EpistoleError(Exception):
-    """What a mail service said no with, or what the wire under it failed with.
+    """An `EpistoleError` reports an error reply from a mail service, or a network failure.
 
-    A mistake Epistole finds before touching the wire is a `TypeError` or a `ValueError` instead, never one of these: no recipient, a `send` on a closed connection, an address that is not an address.
-
-    The hierarchy is flat. Seven classes sit directly under this one and nothing sits between them, so a caller catches the one it can act on and this base for the rest. The transient set is `(ThrottledError, TransportError, ProviderError)`, written out at the call site rather than expressed as a base class, because the other four are permanent for reasons that do not group.
-
-    Parameters
-    ----------
-    message
-        Positional, so `raise RejectedError("...")` keeps the shape every Python exception has.
-    backend
-        The route that failed. A raise site leaves it out: a transport receives a submission and nothing else, so it has no backend to name.
+    Epistole raises `TypeError` or `ValueError` instead for a mistake it finds before any network call. A retry loop catches the transient set `(ThrottledError, TransportError, ProviderError)` by name. See ADR-0004.
 
     Attributes
     ----------
     backend
-        The backend the error came from. `Connection.send` and `Backend.connect` each set it on the way out, so it is `None` only on an error inspected before it has propagated.
+        The backend the error came from. `Connection.send` and `Backend.connect` set it, so it is `None` only on an error inspected before it propagates.
     """
 
     backend: Backend | None
@@ -43,51 +32,36 @@ class EpistoleError(Exception):
         self.backend = backend
 
     def __reduce__(self) -> tuple[object, ...]:
-        """Rebuild through `_rebuild` when pickled, going around `__init__`.
+        """Pickle through `_rebuild`, so unpickling skips `__init__`.
 
-        `BaseException.__reduce__` answers with `(cls, self.args)`, and `args` holds the message alone. Unpickling therefore calls `cls(message)`, which `RecipientsRefusedError` refuses because `refused` is required. The error then dies on its way home from a worker process, and the caller sees `BrokenProcessPool` instead of the refusal.
-
-        `__cause__`, `__context__`, and `__traceback__` do not survive, exactly as they do not survive pickling any other exception.
-
-        Returns
-        -------
-        The rebuilder, the class, the positional args, and the attribute state.
+        With the default reduction, unpickling calls `cls(message)`, which raises `TypeError` for `RecipientsRefusedError` because `refused` is required. A process pool would then raise `BrokenProcessPool` instead of the refusal. As with any exception, pickling drops `__cause__`, `__context__` and `__traceback__`.
         """
         return (_rebuild, (type(self), self.args, self.__dict__))
 
 
 class RejectedError(EpistoleError):
-    """The service refused the message as invalid, or a backend pre-check did.
+    """The service rejected the message as invalid, or the message failed a backend pre-check.
 
-    Permanent. The two share a class because the same message succeeds on another backend either way, and the caller should see one class whether Epistole or the service noticed first. A pre-check raises with `__cause__` of `None`.
+    The error is permanent. A pre-check raises it with no `__cause__`. See ADR-0004.
     """
 
 
 class SenderRefusedError(EpistoleError):
-    """The service will not send as the backend's from address.
+    """The service refused to send as the backend's from address.
 
-    Apart from `RejectedError` because the fix is an administrator's grant, not the message.
-
-    RFC 5322 `Sender` names the transmitter, which is a different header and not what this means. The word appears here alone.
+    The fix is an administrator's grant, not a change to the message. "Sender" here does not mean RFC 5322's `Sender` header.
     """
 
 
 class RecipientsRefusedError(EpistoleError):
-    """Every recipient was refused, so nothing was submitted.
+    """The service refused every recipient, so nothing was submitted.
 
-    `Connection.send` raises it and nothing else does, on every backend including the doubles. A transport answers with refusals and never raises it, so the check is Epistole's own and `__cause__` is `None`.
-
-    Some recipients refused with the rest accepted is not this error. It rides on `SendResult.refused`.
-
-    Parameters
-    ----------
-    refused
-        Keyword-only, and required: the error means nothing without the reasons.
+    Only `Connection.send` raises it, so its `__cause__` is `None`. When the service refuses only some recipients, the send returns them in `SendResult.refused` instead.
 
     Attributes
     ----------
     refused
-        Each recipient's refusal, keyed by the caller's own recipient string.
+        Each recipient's refusal, keyed by the caller's recipient string.
     """
 
     refused: Mapping[str, Refusal]
@@ -105,26 +79,21 @@ class RecipientsRefusedError(EpistoleError):
 
 
 class AuthenticationError(EpistoleError):
-    """The credential was rejected, or the permission behind it is insufficient.
+    """The service rejected the credential, or the credential lacks a permission.
 
-    Both are permanent until someone changes a setting, which is why an expired token that refreshes cleanly is not an error and a refresh that failed is.
+    Both are permanent until someone changes a setting. So an expired token that refreshes cleanly is not an error, and a failed refresh is.
     """
 
 
 class ThrottledError(EpistoleError):
-    """The provider asked for a slower rate.
+    """The service throttled the request.
 
-    Epistole never sleeps and never retries. SMTP never raises it: the protocol cannot tell a throttle from a hiccup.
-
-    Parameters
-    ----------
-    retry_after
-        Seconds, parsed from either RFC 9110 form of the `Retry-After` header.
+    Epistole never sleeps or retries. The SMTP backend never raises this error. See ADR-0004.
 
     Attributes
     ----------
     retry_after
-        What the response asked for, or `None` when it carried no header.
+        Seconds from the `Retry-After` header in either RFC 9110 form, or `None` when the response had none.
     """
 
     retry_after: float | None
@@ -142,16 +111,16 @@ class ThrottledError(EpistoleError):
 
 
 class TransportError(EpistoleError):
-    """The wire failed: connect, TLS, disconnect, or timeout.
+    """The link to the service failed at connect, in TLS, by disconnect or by timeout.
 
-    The one error that closes the connection, because the link under it is gone. A client-side timeout is this; a `504` is a status the service returned and so `ProviderError`.
+    It is the only error that closes the connection. A `504` is a `ProviderError`, because the service returned it. See ADR-0004.
     """
 
 
 class ProviderError(EpistoleError):
-    """The provider's own `5xx`, or a reply the mapper does not know.
+    """The service returned its own `5xx`, or a reply that no mapping table matches.
 
-    Every mapping table falls back here, so the mapper never raises on its own.
+    See ADR-0004 for the mapping tables.
     """
 
 
@@ -162,11 +131,7 @@ def _rebuild(
 ) -> EpistoleError:
     """Rebuild a pickled error without calling its `__init__`.
 
-    `cls.__new__` allocates, `Exception.__init__` sets `args` so `str()` reads right, and the state carries `backend` plus whatever else the class holds. No constructor runs, so a required keyword-only argument cannot stop the rebuild.
-
-    Returns
-    -------
-    The error as it was pickled.
+    `Exception.__init__` still runs, to set the `args` that `str()` reads.
     """
     error: EpistoleError = cls.__new__(cls)
     Exception.__init__(error, *args)

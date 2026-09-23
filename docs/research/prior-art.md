@@ -1,6 +1,6 @@
 # Prior art: one API across many mail backends
 
-Research for [#6](https://github.com/ozanozbeker/epistole/issues/6).
+This page records the research for [#6](https://github.com/ozanozbeker/epistole/issues/6).
 Everything below comes from reading the source, not from summaries of it.
 
 ## What was read, and at what version
@@ -13,19 +13,19 @@ Everything below comes from reading the source, not from summaries of it.
 | blastula | 0.3.6 on CRAN, published 2025-04-03 | [rstudio/blastula](https://github.com/rstudio/blastula) |
 
 Django is mid-migration.
-The email API epistole should study is not the one in the 5.2 docs.
+The email API for Epistole to study is not the one in the 5.2 docs.
 See "Django is replacing `get_connection()` right now" below.
 
 ## Django
 
-Django splits the work in one sentence, and states it plainly in the docs:
+Django's docs state plainly how it splits the work:
 
 > `EmailMessage` is responsible for creating the email message itself.
 > The email backend is then responsible for sending the email.
 
 Source: `docs/topics/email.txt` around line 476.
 
-### The message owns everything except the wire
+### The message owns everything except the transport
 
 `django/core/mail/message.py`, line 260:
 
@@ -53,10 +53,10 @@ def attach_alternative(self, content, mimetype):
     """Attach an alternative content representation."""
 ```
 
-Recipients, subject, body, attachments and extra headers all live on the message.
-Only the transport lives on the backend.
+The message holds the recipients, subject, body, attachments and extra headers.
+The backend holds only the transport.
 
-Django refuses a bare string for every address list.
+Django raises an error when any address-list argument is a bare string.
 `message.py`, line 278:
 
 ```python
@@ -68,17 +68,19 @@ if to:
 
 The same four-line block repeats for `cc`, `bcc` and `reply_to`.
 The message never parses an address.
-It stores the string and hands it to `email.headerregistry` at serialization time.
-Only the SMTP backend parses, in `prep_address()` (`backends/smtp.py`, line 227), and only to get the addr-spec for the envelope.
+It stores the string and passes it to `email.headerregistry` at serialization time.
+Only the SMTP backend parses an address, in `prep_address()` (`backends/smtp.py`, line 227).
+It parses only to get the addr-spec for the envelope.
 
-`recipients()` is the seam that makes this work (`message.py`, line 375):
+This design depends on one seam, `recipients()` (`message.py`, line 375):
 
 ```python
 def recipients(self):
     return [email for email in (self.to + self.cc + self.bcc) if email]
 ```
 
-The docs call this out as the extension point: a subclass that invents a new way to name recipients must override `recipients()`, because the SMTP envelope needs the full list.
+The docs name it as the extension point.
+A subclass that adds a new way to name recipients must override `recipients()`, because the SMTP envelope needs the full list.
 
 ### Attachments are a three-tuple or a `MIMEPart`
 
@@ -93,11 +95,13 @@ def attach_file(self, path, mimetype=None):
 ```
 
 `attach()` overloads on the type of its first argument.
-Pass a `MIMEPart` and it goes in whole; pass a filename and content and Django guesses the mimetype from the filename.
+Pass a `MIMEPart`, and Django adds it whole.
+Pass a filename and content, and Django guesses the mimetype from the filename.
 `attach_file(path)` is the filesystem convenience: it reads the bytes and delegates to `attach()`.
 
 Django has no inline-image helper.
-The documented way to get a `cid:` reference is nine lines of `email.message.MIMEPart` by hand, quoted in full in `docs/topics/email.txt` around line 655.
+The documented way to get a `cid:` reference is nine lines of `email.message.MIMEPart` by hand.
+`docs/topics/email.txt` quotes them in full, around line 655.
 Anymail exists partly to fix this.
 
 ### The backend owns the connection, and only three methods
@@ -113,7 +117,7 @@ def send_messages(self, email_messages):
 ```
 
 `send_messages()` is the only method a subclass must implement.
-`open()` and `close()` default to no-ops, which is why the console, locmem and dummy backends are 10 to 46 lines each.
+`open()` and `close()` default to no-ops, so the console, locmem and dummy backends are 10 to 46 lines each.
 
 The lifecycle rule is worth copying exactly.
 From `backends/smtp.py`, line 183:
@@ -129,22 +133,23 @@ with self._lock:
 
 `send_messages()` opens the connection if it is closed and closes it again only if it opened it.
 A caller who opened the connection keeps it.
-That single rule gives both the one-off send and the batch loop without a separate API for each.
-The docs say it out loud: "`send_messages()` will not open or close the connection if it is already open".
+That single rule supports both the one-off send and the batch loop without a separate API for each.
+The docs state the rule directly: "`send_messages()` will not open or close the connection if it is already open".
 
-`__enter__` returns `self`, and `__exit__` closes.
+`__enter__` returns `self`.
+`__exit__` closes.
 `__enter__` also closes on a failed `open()`, so a broken connect does not leak a socket.
 
-### Two objects can call `send`, and only one of them means it
+### Two objects can call `send`, and only the backend sends
 
-`EmailMessage.send()` exists as sugar (`message.py`, line 382).
+`EmailMessage.send()` is a convenience method (`message.py`, line 382).
 It builds a one-element list and calls the backend:
 
 ```python
 return connection.send_messages([self])
 ```
 
-Django's own comment shows where this is heading:
+A comment in Django's source shows the planned replacement:
 
 ```python
 # RemovedInDjango2028Warning: replace the remainder of this method
@@ -154,14 +159,16 @@ Django's own comment shows where this is heading:
 #   return mailer.send_messages([self])
 ```
 
-So `message.send()` will survive, but only as a lookup plus a delegation.
+So Django keeps `message.send()`, but only as a lookup plus a delegation.
 The backend stays the thing that sends.
 
 ### Django is replacing `get_connection()` right now
 
-This is the most useful thing in the survey, and it postdates every tutorial.
+This is the most useful thing in the survey.
+It postdates every tutorial.
 
-Django 6.1 added a `MAILERS` setting shaped like `DATABASES` and `CACHES`, and deprecated the whole `EMAIL_*` family.
+Django 6.1 added a `MAILERS` setting shaped like `DATABASES` and `CACHES`.
+It deprecated the whole `EMAIL_*` family.
 From the 6.1 release notes:
 
 > The `EMAIL_BACKEND`, `EMAIL_FILE_PATH`, `EMAIL_HOST`, `EMAIL_HOST_PASSWORD`, `EMAIL_HOST_USER`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_USE_SSL`, `EMAIL_SSL_CERTFILE`, `EMAIL_SSL_KEYFILE`, and `EMAIL_TIMEOUT` settings are deprecated.
@@ -195,11 +202,12 @@ class MailersHandler:
 
 and the call site becomes `email.send(using="notifications")`.
 
-Three details are worth stealing whole.
+Three details are worth copying whole.
 
-**A named alias beats an object handle.**
-Fifteen years of `connection=` taught Django that threading a backend instance through call sites couples the caller to construction.
-An alias is a string; it survives serialization, config files, and being passed to a logging handler.
+**A named alias is better than an object handle.**
+Fifteen years of `connection=` showed that passing a backend instance through call sites couples the caller to construction.
+An alias is a string.
+It can be serialized, written in a config file, and passed to a logging handler.
 
 **Config errors get their own exception type, with the alias in the message.**
 `django/core/mail/exceptions.py`:
@@ -222,11 +230,12 @@ Every backend validates its own options at construction and raises `InvalidMaile
 `backends/smtp.py` line 84: `raise InvalidMailer("OPTIONS must define 'host'.", alias=self.alias)`.
 Compare the pre-`MAILERS` path, which silently ignored unknown kwargs.
 
-**Unknown options are an error, not a shrug.**
-`backends/base.py` raises `InvalidMailer(f"Unknown options {kwarg_names}.", alias=alias)` when a mailer config carries a key the backend does not know.
+**An unknown option raises an error instead of being ignored.**
+`backends/base.py` raises `InvalidMailer(f"Unknown options {kwarg_names}.", alias=alias)` when a mailer config carries a key the backend does not define.
 A typo in `use_tsl` fails at startup instead of sending unencrypted.
 
-Django also deprecated `fail_silently`, which is a verdict on the pattern: an argument that turns exceptions into a silent `return 0` was not worth its cost.
+Django also deprecated `fail_silently`, an argument that turns exceptions into a silent `return 0`.
+The deprecation shows the pattern was not worth keeping.
 
 ### The test backends
 
@@ -245,14 +254,17 @@ def send_messages(self, messages):
     return msg_count
 ```
 
-Three decisions in ten lines.
-It calls `message.message()` first so header validation still fires, meaning a test catches a malformed address even though nothing goes on the wire.
-It deep-copies, so a test asserting on `outbox[0]` cannot be fooled by later mutation of the original.
-It stamps `sent_using = self.alias`, so a test can assert *which* mailer a code path chose.
-That third one is new in 6.1 and directly answers epistole's open question about what `MemoryBackend` should record.
+These ten lines contain three decisions.
+It calls `message.message()` first, so header validation still runs.
+A test then catches a malformed address even though nothing is sent.
+It deep-copies, so later mutation of the original cannot change the `outbox[0]` a test asserts on.
+It sets `sent_using = self.alias`, so a test can assert *which* mailer a code path used.
+The third decision is new in 6.1.
+It is a direct answer to Epistole's open question about what `MemoryBackend` should record.
 
-`EmailMultiAlternatives.body_contains(text)` (`message.py`, line 687) is a test helper on the message: it returns `False` unless the text appears in the plain body *and* in every `text/*` alternative.
-It exists because the classic bug is updating the HTML and forgetting the plain-text fallback.
+`EmailMultiAlternatives.body_contains(text)` (`message.py`, line 687) is a test helper on the message.
+It returns `False` unless the text appears in the plain body *and* in every `text/*` alternative.
+It exists because the classic bug is updating the HTML and forgetting the plain text.
 
 `filebased` subclasses `console` and overrides only `open`, `close` and `write_message`.
 `console` holds a `threading.RLock` and flushes after each message.
@@ -260,12 +272,12 @@ It exists because the classic bug is updating the HTML and forgetting the plain-
 
 ## django-anymail
 
-Not in the issue's list, and it should be.
-Anymail is the working answer to epistole's exact premise: send through fourteen different providers with the calling code unchanged.
-Version 15.2 shipped 2026-09-05, so it is live prior art, not a museum piece.
+It is not in the issue's list, and it should be.
+Anymail is a working implementation of Epistole's exact premise: send through fourteen different providers with the calling code unchanged.
+Version 15.2 shipped on 2026-09-05, so the project is active, not abandoned.
 
-Its shape: it does not invent a message class.
-It ships `EmailBackend` subclasses and reads Django's own `EmailMessage`, plus optional attributes.
+Anymail defines no message class of its own.
+It ships `EmailBackend` subclasses that read Django's own `EmailMessage`, plus optional attributes.
 `anymail/message.py` line 12:
 
 ```python
@@ -289,13 +301,14 @@ class AnymailMessageMixin(EmailMessage):
 The docstring says the mixin is optional and exists for type checkers.
 Setting the bare attributes on a plain `EmailMessage` works identically.
 
-### Three ideas epistole will need
+### Three ideas Epistole will need
 
-**A named escape hatch.**
+**Offer a named escape hatch.**
 `esp_extra` is a dict passed through to the provider's API untouched.
-It gives users provider-specific features without epistole promising to normalize them, and it keeps them off the shared surface.
+It gives users provider-specific features that Epistole does not have to normalize.
+It also keeps those features off the shared surface.
 
-**An explicit failure when a backend cannot do what the message asks.**
+**Raise an explicit error when a backend cannot support a feature the message uses.**
 `anymail/backends/base.py` line 401:
 
 ```python
@@ -316,11 +329,15 @@ The exception docstring states the policy precisely:
 > It's generally *not* raised for ESP-specific limitations, like the number of tags allowed on a message.
 > Anymail expects the ESP to return an API error for these where appropriate, and tries to avoid duplicating each ESP's validation logic locally.
 
-Loud by default, silenceable by setting.
-That second paragraph is the harder half: Anymail refuses to re-implement each provider's validation locally, and lets the provider's own error surface.
-Epistole faces the identical choice for `from_`, which SMTP lets you set freely and which Gmail and Graph derive from the authenticated account.
+Anymail raises by default, and a setting silences the error.
+The second paragraph is the harder half.
+Anymail does not re-implement each provider's validation locally.
+It relies on the provider's own error instead.
+Epistole has the identical choice to make for `from_`.
+SMTP lets the caller set it freely.
+Gmail and Graph derive it from the authenticated account.
 
-**A normalized result object attached to the message.**
+**Attach a normalized result object to the message.**
 `anymail/message.py` lines 103 and 113:
 
 ```python
@@ -339,10 +356,11 @@ class AnymailRecipientStatus:
     def __init__(self, message_id, status):
 ```
 
-`AnymailStatus` aggregates per-recipient statuses and collapses `message_id` to a scalar when every recipient shares one.
+`AnymailStatus` aggregates per-recipient statuses.
+It collapses `message_id` to a scalar when every recipient shares one.
 Django's `send()` returns an `int`.
-Anymail keeps that return value and puts the real answer on `message.anymail_status`.
-Epistole is designing this return value from scratch and does not have to inherit the `int`.
+Anymail keeps that return value and sets the detailed status on `message.anymail_status`.
+Epistole's return value is a new design, so it need not follow Django's `int`.
 
 ### The inline-image helper Django lacks
 
@@ -361,20 +379,21 @@ def attach_inline_image(
     return unquote(content_id)  # Without <...>, for use as the <img> tag src
 ```
 
-Two details epistole will otherwise rediscover the hard way.
-The function returns the content id already stripped of angle brackets, because that is what goes in `src="cid:..."`, and forgetting to strip is the classic bug.
-And the default `domain` is the literal string `"inline"` rather than the hostname, because Gmail blocks a Content-ID ending in `.com` when the provider reuses Content-ID as a filename.
-`attach_inline_image_file(path)` is the path-taking sibling.
+Two details here prevent bugs that Epistole would otherwise repeat.
+The function returns the content id already stripped of angle brackets, because the bare id is the part `src="cid:..."` uses.
+Forgetting to strip them is the classic bug.
+The default `domain` is the literal string `"inline"` rather than the hostname, because Gmail blocks a Content-ID ending in `.com` when the provider reuses Content-ID as a filename.
+`attach_inline_image_file(path)` is the variant that takes a path.
 
 ## redmail
 
-Read from the 0.6.0 sdist.
+The source read here is the 0.6.0 sdist.
 Treat it as a record, not a model.
 
-**Staleness, confirmed.**
-Last release v0.6.0 on 2023-02-25.
-Last commit 2024-04-18, and it fixes a broken link in the docs index.
-26 open issues, not archived.
+**The facts confirm that redmail is stale.**
+The last release is v0.6.0, on 2023-02-25.
+The last commit is from 2024-04-18, and it fixes a broken link in the docs index.
+The repository has 26 open issues and is not archived.
 
 ### One class, and defaults on the instance
 
@@ -414,9 +433,11 @@ def send(self,
 
 There is no message class.
 Everything is a `send()` keyword.
-`send()` calls `get_message()`, which returns a stdlib `email.message.EmailMessage`, then calls `send_message(msg)`.
+`send()` calls `get_message()`, which returns a stdlib `email.message.EmailMessage`.
+It then calls `send_message(msg)`.
 
-Every field can also be set as a default on the sender instance, and `send()` wins:
+A caller can also set every field as a default on the sender instance.
+The argument to `send()` overrides the default:
 
 ```python
 subject = subject or self.subject
@@ -435,7 +456,7 @@ def get_sender(self, sender: Union[str, None]) -> str:
 The three-level fallback for `sender` is the good part: an explicit argument, then an instance default, then the authenticated username.
 Epistole has the same problem and can reuse that precedence.
 
-The bad part is that the defaults are plain mutable attributes with no `__init__` parameters and no validation.
+Worse, the defaults are plain mutable attributes, with no `__init__` parameters and no validation.
 `EmailSender.__init__` sets nine of them to `None` by hand.
 The logging handler has to work around this with `getattr` checks (`redmail/log.py` line 45):
 
@@ -473,13 +494,15 @@ gmail.password = "<APP PASSWORD>"
 
 Setting a password on a module-level singleton makes credentials process-wide state.
 Two libraries in one process cannot both use `redmail.gmail`.
-Epistole wants the convenience (`host` and `port` presets for Gmail and Outlook are genuinely useful) without the singleton.
+`host` and `port` presets for Gmail and Outlook are genuinely useful.
+Epistole should offer that convenience without the singleton.
 A factory function or a frozen preset constant gives the same ergonomics with none of the aliasing.
 
-### Attachments: real type dispatch, and one trap
+### Attachments: real type dispatch, and one inconsistency
 
 `redmail/email/attachment.py`.
-The dispatch is keyed on the *container*, and a `str` means two different things depending on it.
+The dispatch is keyed on the *container*.
+A `str` means two different things, depending on the container.
 
 In a list or as a bare value, `_get_bytes()` treats `str` as a path:
 
@@ -502,10 +525,12 @@ def _get_bytes_named(self, item, name: str) -> bytes:
         return item
 ```
 
-That is a real trap.
-`attachments=["report.csv"]` reads a file; `attachments={"report.csv": "report.csv"}` attaches the six characters `report`.
+A caller can easily get this wrong.
+`attachments=["report.csv"]` reads a file.
+`attachments={"report.csv": "report.csv"}` attaches the ten characters `report.csv`.
 
-The pandas and matplotlib support is confirmed, and it dispatches on the *file extension in the dict key*:
+The source confirms the pandas and matplotlib support.
+It dispatches on the *file extension in the dict key*:
 
 ```python
 elif has_pandas and isinstance(item, (pd.DataFrame, pd.Series)):
@@ -533,8 +558,9 @@ elif has_matplotlib and isinstance(item, plt.Figure):
 ```
 
 So `attachments={'data.xlsx': df}` writes Excel and `attachments={'data.csv': df}` writes CSV from the identical object.
-The filename carries the format decision.
-That reads beautifully in a report script and it is the single best ergonomic idea in the library.
+The filename sets the format.
+That reads beautifully in a report script.
+It is the single best ergonomic idea in the library.
 
 The optional imports that make it work are three lines (`redmail/email/utils.py`):
 
@@ -545,14 +571,16 @@ pd: "pandas_lib" = import_from_string("pandas", if_missing="ignore")
 css_inline: "css_inline_lib" = import_from_string("css_inline", if_missing="ignore")
 ```
 
-Every dispatch branch is guarded by `has_pandas`, `has_pillow`, `has_matplotlib`.
-The core stays dependency-free and the branch simply does not exist when the package is absent.
-That is exactly epistole's zero-dependency-core constraint, solved.
+`has_pandas`, `has_pillow` and `has_matplotlib` guard every dispatch branch.
+The core stays dependency-free.
+When a package is absent, its branch never runs.
+This pattern solves Epistole's zero-dependency-core constraint exactly.
 
 ### Embedded images go through Jinja variable names, not `cid:`
 
 `body_images` is a dict.
-The key is a Jinja variable in the HTML; the value is the image.
+The key is a Jinja variable in the HTML.
+The value is the image.
 `redmail/email/body.py` line 176:
 
 ```python
@@ -567,8 +595,8 @@ html_images = {
 The user never types `cid:`.
 `attach_imgs()` then dispatches the value: bytes, `BytesIO`, a dict of `{"maintype", "subtype", "content"}`, a `Path`, a path-like `str`, a `plt.Figure`, or a `PIL.Image.Image`.
 
-The cost is that the HTML must be a Jinja template.
-`use_jinja` defaults to `True` and every body is rendered:
+But the HTML must be a Jinja template.
+`use_jinja` defaults to `True`, so redmail renders every body:
 
 ```python
 if self.use_jinja:
@@ -576,12 +604,13 @@ if self.use_jinja:
 ```
 
 Epistole's brief is "takes an email you have already composed as HTML".
-Running caller-supplied HTML through a template engine by default would break any body containing a literal `{{`, and it is a template injection surface if the HTML came from anywhere but the developer.
+Running caller-supplied HTML through a template engine by default would break any body containing a literal `{{`.
+It is also a template injection surface if the HTML came from anywhere but the developer.
 The redmail approach only works because templating is the whole point of the library.
 
 ### The `css-inline` extra is much narrower than it sounds
 
-The extra is named `style`, not `css-inline` (`pyproject.toml`):
+redmail names the extra `style`, not `css-inline` (`pyproject.toml`):
 
 ```toml
 style = [
@@ -589,7 +618,7 @@ style = [
 ]
 ```
 
-And it is used in exactly one place, on pandas `Styler` objects only (`redmail/email/body.py` line 70):
+redmail uses it in exactly one place, on pandas `Styler` objects only (`redmail/email/body.py` line 70):
 
 ```python
 if isinstance(tbl, Styler):
@@ -605,11 +634,13 @@ redmail never inlines CSS on the email body.
 It inlines CSS on the HTML that `Styler.to_html()` produces, because pandas emits a `<style>` block that mail clients drop.
 
 The underlying problem is real and general.
-[`css-inline`](https://pypi.org/project/css-inline/) is a Rust library with Python bindings, built on components from Mozilla's Servo, and its README states it is "designed for scenarios such as preparing HTML emails or embedding HTML into third-party web pages".
+[`css-inline`](https://pypi.org/project/css-inline/) is a Rust library with Python bindings, built on components from Mozilla's Servo.
+Its README states it is "designed for scenarios such as preparing HTML emails or embedding HTML into third-party web pages".
 It claims 10x to 500x the speed of `premailer`.
-For epistole the decision is not "copy redmail".
+For Epistole, the decision is not "copy redmail".
 The library never solved this.
-The question is whether epistole inlines the whole body, warns, or does nothing, and it is unresolved by prior art.
+The question is whether Epistole inlines CSS across the whole HTML, warns, or does nothing.
+Prior art does not resolve it.
 
 ### Connection reuse works, but the context manager is broken
 
@@ -635,16 +666,18 @@ def __exit__(self, *args):
     self.close()
 ```
 
-The open-if-closed rule matches Django's, and it is the right rule.
+The open-if-closed rule matches Django's.
+It is the right rule.
 But `__enter__` returns `None`.
 `with sender as s:` binds `s = None`.
-The docs quietly work around it by writing `with email:` and never `as`.
+The docs work around it without comment, by writing `with email:` and never `as`.
 Django's base backend gets this right with `return self`.
 
 ## blastula
 
-The stated inspiration.
-Read from `main`; CRAN has 0.3.6, published 2025-04-03.
+blastula is the stated inspiration.
+The source read here is `main`.
+CRAN has 0.3.6, published 2025-04-03.
 
 ### The compose and send split is unusually clean
 
@@ -681,16 +714,18 @@ smtp_send <- function(
 
 Read the two lists side by side.
 `compose_email()` takes *content only*: three body regions plus an HTML `<title>`.
-No recipients, no subject, no sender, no credentials.
+It takes no recipients, no subject, no sender and no credentials.
 
 `smtp_send()` takes *everything addressed or authenticated*: `to`, `from`, `subject`, `cc`, `bcc`, `credentials`.
 
-Note where `subject` landed.
+Note where blastula puts `subject`.
 Most libraries treat the subject as part of the message.
-Here it counts as addressing, alongside `to` and `from`, which lets one composed body go to two audiences with two subjects and no recomposition.
-That is the whole argument for the split, and it is the design question epistole has to answer first.
+Here it counts as addressing, alongside `to` and `from`.
+So a caller can send one composed body to two audiences with two subjects, without recomposing it.
+That is the whole argument for the split.
+It is also the first design question Epistole must resolve.
 
-The result of `compose_email()` is an object with a class tag and four fields (`R/utils-html_manipulation.R` line 414):
+`compose_email()` returns an object with a class tag and four fields (`R/utils-html_manipulation.R` line 414):
 
 ```r
 structure(
@@ -704,7 +739,7 @@ structure(
 )
 ```
 
-Two HTML renderings are kept: one with `cid:` references for sending, one with data URIs for previewing.
+The object keeps two HTML renderings: one with `cid:` references for sending, one with data URIs for previewing.
 Printing the object shows the preview in the R viewer, so a user can look at the email before anyone else does.
 
 ### `smtp_send()` validates the message type up front
@@ -750,18 +785,20 @@ creds_key <- function(id) {
 creds_file <- function(file) {
 ```
 
-Plus `creds_anonymous()`.
-All five return a list tagged `c("<specific>", "blastula_creds")`, and `smtp_send()` checks for the shared tag, not the specific one:
+There is also `creds_anonymous()`.
+All five return a list tagged `c("<specific>", "blastula_creds")`.
+`smtp_send()` checks for the shared tag, not the specific one:
 
 ```r
 if (!inherits(credentials, "blastula_creds")) {
 ```
 
-So `credentials` is one parameter, and where the secret comes from is a separate, swappable decision.
-Five sources, one argument, one type check.
+So `credentials` is one parameter.
+Where the secret comes from is a separate, swappable decision.
+Five sources share one argument and one type check.
 This is the cleanest thing in the survey.
 
-Two supporting details.
+Two details support this design.
 
 `provider` is a preset that fills in `host`, `port` and `use_ssl` (`R/utils.R` line 4):
 
@@ -777,7 +814,7 @@ smtp_settings <- function() {
 }
 ```
 
-A named preset that fills defaults beats a mutable preconfigured instance.
+A named preset that fills defaults is better than a mutable preconfigured instance.
 It is a value, not shared state.
 
 The credentials object masks its own secret when printed (`R/creds_helpers.R` line 166):
@@ -789,18 +826,21 @@ format.blastula_creds <- function(x, ...) {
   }
 ```
 
-Epistole should write the `__repr__` that does this on day one, before anything gets pasted into an issue.
+Epistole should have the `__repr__` that does this from the first release, before anyone pastes a credential into an issue.
 
 `creds()` never takes a `password` argument.
-It reaches `create_credentials_list()`, whose default is `password = get_password()`, and R evaluates default arguments lazily, so it prompts on demand through `getPass::getPass()`.
-That trick has no Python equivalent and should not be emulated.
+It calls `create_credentials_list()`, whose default is `password = get_password()`.
+R evaluates default arguments lazily, so the call prompts on demand through `getPass::getPass()`.
+That trick has no Python equivalent.
+Epistole should not emulate it.
 
-The write-side functions are separate verbs: `create_smtp_creds_file(file, user, provider, ...)` and `create_smtp_creds_key(id, user, provider, ..., overwrite = FALSE)`, with `view_credential_keys()`, `delete_credential_key()` and `delete_all_credential_keys()` alongside.
+The write-side functions are separate verbs: `create_smtp_creds_file(file, user, provider, ...)` and `create_smtp_creds_key(id, user, provider, ..., overwrite = FALSE)`.
+Alongside them are `view_credential_keys()`, `delete_credential_key()` and `delete_all_credential_keys()`.
 Storing a credential and reading one are different operations with different names.
 
 ### `add_image()` is a text helper, not a message method
 
-This is the design epistole should look at hardest, because epistole's premise is caller-supplied HTML.
+Epistole should study this design most closely, because Epistole's premise is caller-supplied HTML.
 
 `R/add_image.R` line 50:
 
@@ -810,7 +850,7 @@ add_image <- function(file, alt = "", width = 520,
   float = c("none", "left", "right")) {
 ```
 
-Its documented return value:
+Its documentation describes the return value:
 
 > A character object with an HTML fragment that can be placed inside the message body wherever the image should appear.
 
@@ -830,8 +870,9 @@ get_image_uri <- function(file) {
 }
 ```
 
-The conversion to `cid:` happens once, at the end of `compose_email()`, in `cid_images()`.
-It walks every `<img src>` in the finished HTML, turns relative paths into data URIs, then rewrites every data URI into a `cid:` reference and collects the bytes:
+`cid_images()` does the conversion to `cid:` once, at the end of `compose_email()`.
+It walks every `<img src>` in the finished HTML and turns relative paths into data URIs.
+It then rewrites every data URI into a `cid:` reference and collects the bytes:
 
 ```r
 html_data_uri <-
@@ -851,10 +892,11 @@ if (is.null(cid)) {
 paste0("cid:", cid)
 ```
 
-Three consequences.
+This design has three consequences.
 The user never invents or tracks a Content-ID.
-Duplicate images are deduplicated by digest, so the same logo used four times is attached once.
-And the same code path handles `add_image()`, a hand-written `<img src="logo.png">`, and an image produced by a chart helper, because all three are just HTML by the time `compose_email()` sees them.
+The same logo used four times is attached once, because the conversion deduplicates images by digest.
+The same code path handles `add_image()`, a hand-written `<img src="logo.png">`, and an image produced by a chart helper.
+All three are just HTML by the time `compose_email()` receives them.
 
 The Content-ID format is deliberately non-standard, and the comment explains why:
 
@@ -864,10 +906,11 @@ The Content-ID format is deliberately non-standard, and the comment explains why
 paste0("img", idx, ".", content_type)
 ```
 
-Anymail hit the same class of bug from the other direction and chose a fake domain.
+Anymail had the same class of bug and fixed it the opposite way, with a fake domain.
 Both are evidence that the Content-ID string is a compatibility surface, not an implementation detail.
 
-`add_ggplot(plot_object, width = 5, height = 5, alt = NULL, ...)` writes a plot to a temp PNG and returns the same kind of HTML fragment, which is how the chart case stays uniform.
+`add_ggplot(plot_object, width = 5, height = 5, alt = NULL, ...)` writes a plot to a temp PNG and returns the same kind of HTML fragment.
+So the same code handles a chart and any other image.
 
 ### `add_attachment()` takes the email first, and returns a new one
 
@@ -886,18 +929,20 @@ add_attachment <- function(
 }
 ```
 
-Email first, return the email.
-That is what makes `email %>% add_attachment(...) %>% smtp_send(...)` read.
-R's copy-on-modify semantics mean the caller's original object is untouched, so the pipeline builds a new value at each step.
+It takes the email first and returns the email.
+That order makes `email %>% add_attachment(...) %>% smtp_send(...)` readable.
+R's copy-on-modify semantics leave the caller's original object untouched.
+The pipeline builds a new value at each step.
 
 Note the asymmetry with images.
 Attachments are a method on the message.
 Inline images are a function on text.
-That asymmetry is correct: an attachment has no position in the body, an inline image does.
+That asymmetry is correct.
+An attachment has no position in the body, and an inline image does.
 
 ### blastula has three backends and no backend protocol
 
-This is the mistake, and it is the one most relevant to epistole.
+This is the mistake most relevant to Epistole.
 
 `R/smtp_send.R`:
 
@@ -918,22 +963,25 @@ send_by_mailgun <- function(
 ) {
 ```
 
-Different name for the message (`message` versus `email`).
-Different name for the recipients (`recipients` versus `to`).
-No `cc`, no `bcc`.
-Credentials as two bare arguments instead of a `blastula_creds` object.
-Different argument order.
+The message has a different name (`message` versus `email`).
+The recipients have a different name (`recipients` versus `to`).
+There is no `cc` and no `bcc`.
+Credentials are two bare arguments instead of a `blastula_creds` object.
+The argument order differs.
 
-The Posit Connect path is a third shape entirely: `attach_connect_email()` attaches the message to an R Markdown render and Connect sends it later.
+The Posit Connect path is a third shape entirely.
+`attach_connect_email()` attaches the message to an R Markdown render, and Connect sends it later.
 
-So the package that inspired epistole has exactly the problem epistole exists to solve.
+So the package that inspired Epistole has exactly the problem Epistole exists to solve.
 Switching from SMTP to Mailgun in blastula means rewriting the send call.
-The message object is portable; the send is not.
-Every argument that appears on more than one backend must be spelled identically, or the promise fails on the second backend.
+The message object is portable.
+The send is not.
+Every argument that appears on more than one backend must be spelled identically.
+Otherwise the calling code has to change for the second backend.
 
 ## The skim four
 
-Read from sdists: yagmail 0.16.0 (2026-05-26), Envelopes 0.4 (2013-11-13), emails 1.1.2 (2026-05-18), flanker 0.9.11 (2019-12-05).
+The source for these four comes from sdists: yagmail 0.16.0 (2026-05-26), Envelopes 0.4 (2013-11-13), emails 1.1.2 (2026-05-18), flanker 0.9.11 (2019-12-05).
 
 ### yagmail: everything at the send call, and too much magic
 
@@ -960,7 +1008,7 @@ There is no message object at all.
 The client holds only the sender identity and the connection.
 
 `contents` is one argument that means five things.
-The dispatch lives in `get_mime_object` (`yagmail/message.py` line 200):
+The dispatch is in `get_mime_object` (`yagmail/message.py` line 200):
 
 ```python
 is_raw = type(content_string) is raw
@@ -988,8 +1036,8 @@ else:
         content_object["sub_type"] = "html"
 ```
 
-A string is an attachment if `os.path.isfile()` says so, and otherwise it is HTML.
-That means the meaning of `yag.send(to, subject, "report.csv")` depends on the working directory.
+A string is an attachment when `os.path.isfile()` is true for it, and HTML otherwise.
+So the meaning of `yag.send(to, subject, "report.csv")` depends on the working directory.
 Create the file and the argument silently changes from body text to an attachment.
 
 The escape hatches are `str` subclasses (`yagmail/utils.py` line 5):
@@ -1004,12 +1052,13 @@ class inline(str):
 ```
 
 and the dispatch tests `type(x) is raw`, not `isinstance`.
-Needing a marker type to turn the guessing off is the tell that the guessing was wrong.
+Needing a marker type to turn the guessing off shows that the guessing was wrong.
 
 `attachments` is not a separate path.
-It validates that each item is a path or an `io.IOBase`, then concatenates into `contents` and runs the identical dispatch (`message.py` line 66).
+It validates that each item is a path or an `io.IOBase`.
+It then concatenates the items into `contents` and runs the identical dispatch (`message.py` line 66).
 
-Inline images work but you do not control placement (`message.py` line 126):
+Inline images work, but you do not control placement (`message.py` line 126):
 
 ```python
 if type(content_string) is inline:
@@ -1017,10 +1066,12 @@ if type(content_string) is inline:
     content_object["mime_object"].add_header("Content-ID", f"<{hashed_ref}>")
 ```
 
-The tag is appended to the end of the HTML.
-The Content-ID is `str(abs(hash(alias)))`, derived from Python's salted `str.__hash__`, so it changes between runs.
+yagmail appends the tag to the end of the HTML.
+The Content-ID is `str(abs(hash(alias)))`.
+It derives from Python's salted `str.__hash__`, so it changes between runs.
 
-Recipients accept four shapes (`yagmail/headers.py` line 46), and the display-name form is a dict, `{addr: alias}`:
+The recipient arguments accept four shapes (`yagmail/headers.py` line 46).
+The display-name form is a dict, `{addr: alias}`:
 
 ```python
 if isinstance(x, str):
@@ -1034,8 +1085,9 @@ elif isinstance(x, dict):
     addresses[which] = ",".join(x.values())
 ```
 
-`"Name <a@b.com>"` is not parsed and fails validation, because `validate_email_with_regex` anchors on addr-spec only.
-And a bare username gets a domain appended (`headers.py` line 35):
+yagmail does not parse `"Name <a@b.com>"`.
+The string fails validation, because `validate_email_with_regex` anchors on addr-spec only.
+The same module appends a domain to a bare username (`headers.py` line 35):
 
 ```python
 if isinstance(email_addr, str):
@@ -1044,14 +1096,17 @@ if isinstance(email_addr, str):
 ```
 
 Credentials are the best part of the library.
-`yagmail/password.py` line 9 reads `keyring.get_password("yagmail", user)`, prompts if that is empty, then offers to save.
+`yagmail/password.py` line 9 reads `keyring.get_password("yagmail", user)`.
+If that is empty, it prompts for the password, then prompts to save it.
 `register(username, password)` writes to the keyring.
-`oauth2_file=` (`yagmail/oauth2.py` line 98) reads a JSON file, and walks a full Google consent flow if the file is missing, writing the refresh token back.
-It is the only library in the survey with a real OAuth story, which matters because two of epistole's three backends are OAuth-only.
+`oauth2_file=` (`yagmail/oauth2.py` line 98) reads a JSON file.
+If the file is missing, it runs a full Google consent flow and writes the refresh token back.
+It is the only library in the survey with real OAuth support.
+That matters because two of Epistole's three backends are OAuth-only.
 
 `SMTP = Client` at `sender.py` line 288 keeps the old name working.
 
-### Envelopes: the cleanest split, and dead since 2013
+### Envelopes: the cleanest split, and unmaintained since 2013
 
 `envelopes/envelope.py` line 92:
 
@@ -1080,9 +1135,11 @@ def send(self, envelope):
 
 The connection carries no addresses.
 The envelope carries no transport.
-Of the four skimmed, this is the cleanest division, and it matches Django's.
+Of the four skimmed, this is the cleanest division.
+It matches Django's.
 
-`Envelope.send()` also exists as sugar, and it is honest about what it does (`envelope.py` line 322):
+`Envelope.send()` is also a convenience method.
+Its docstring states exactly what it does (`envelope.py` line 322):
 
 ```python
 def send(self, *args, **kwargs):
@@ -1097,7 +1154,8 @@ def send(self, *args, **kwargs):
 ```
 
 It returns the connection it made, so the caller can reuse it.
-That is a reasonable answer to "the one-off send should not be a dead end", though returning a 2-tuple is a poor shape for it.
+That is a reasonable way to let the caller keep using the connection after a one-off send.
+Returning a 2-tuple is a poor shape for it, though.
 
 Attachments are a path and nothing else (`envelope.py` line 298):
 
@@ -1105,10 +1163,11 @@ Attachments are a path and nothing else (`envelope.py` line 298):
 def add_attachment(self, file_path, mimetype=None):
 ```
 
-No inline images at all.
-The root container is `MIMEMultipart('alternative')` with attachments appended as siblings, so there is no `multipart/related` subtree to hang a `cid:` part on.
+Envelopes has no inline images at all.
+The root container is `MIMEMultipart('alternative')`, with attachments appended as siblings.
+So there is no `multipart/related` subtree to hold a `cid:` part.
 
-Address forms are documented in the class docstring (`envelope.py` line 69):
+The class docstring documents the address forms (`envelope.py` line 69):
 
 ```text
 * ``"user@server.com"`` - just the e-mail address part as a string,
@@ -1117,15 +1176,17 @@ Address forms are documented in the class docstring (`envelope.py` line 69):
 ```
 
 Note the tuple order is `(address, name)`, which is backwards from `email.utils.parseaddr` and from every other library here.
-Worse, the `"Name <addr>"` string form is only split on the non-ASCII path, so an ASCII display-name string reaches `sendmail()` unsplit and goes into the SMTP envelope as `"Some User <a@b.com>"`.
+Worse, Envelopes splits the `"Name <addr>"` string form only on the non-ASCII path.
+So `sendmail()` receives an ASCII display-name string unsplit and puts it in the SMTP envelope as `"Some User <a@b.com>"`.
 
 The preconfigured connections are classes, not instances (`conn.py` lines 99 to 121): `GMailSMTP`, `SendGridSMTP`, `MailcatcherSMTP`.
 That is the right shape.
-`GMailSMTP('user', 'pass')` gives you a fresh object with the host and TLS already filled in, and no shared state.
+`GMailSMTP('user', 'pass')` creates a fresh object with the host and TLS already filled in, and no shared state.
 Compare redmail's `redmail.gmail` singleton.
 
-`envelopes/connstack.py` adds a thread-local connection stack borrowed from rq: `push_connection`, `pop_connection`, `use_connection`, `get_current_connection`, and a `Connection(conn)` context manager.
-It solves "the web request handler should not know which SMTP server is configured" without a global settings module.
+`envelopes/connstack.py` adds a thread-local connection stack copied from rq: `push_connection`, `pop_connection`, `use_connection`, `get_current_connection`, and a `Connection(conn)` context manager.
+It lets a web request handler send without naming the configured SMTP server.
+It needs no global settings module for this.
 Django solved the same problem with a settings alias instead.
 
 ### emails: the transformer is the reason to read it
@@ -1150,7 +1211,7 @@ def __init__(self,
              reply_to: _AddressList = None) -> None:
 ```
 
-`emails.html(**kwargs)` (`message.py` line 565) is a bare alias for `Message(**kwargs)`, so the friendly-looking constructor is not doing anything.
+`emails.html(**kwargs)` (`message.py` line 565) is a bare alias for `Message(**kwargs)`, so the friendly-looking constructor adds nothing.
 
 `Message.send` (`message.py` line 425):
 
@@ -1166,7 +1227,7 @@ def send(self,
          smtp: dict[str, Any] | SMTPBackend | None = None) -> Any:
 ```
 
-Recipients live on the message, but `send(to=...)` overwrites them by default (`message.py` line 396):
+The message holds the recipients, but `send(to=...)` overwrites them by default (`message.py` line 396):
 
 ```python
 if to:
@@ -1176,10 +1237,11 @@ if to:
         to_addrs = [a[1] for a in parse_name_and_email_list(to)]
 ```
 
-So the same `Message` object sent twice to two people ends up mutated, and the second send has the first recipient's `To:` header gone.
+So sending the same `Message` object twice, to two people, mutates it.
+The second send drops the first recipient's `To:` header.
 `set_mail_to=False` gets envelope-only delivery.
 A boolean that changes whether an argument mutates the receiver is a bad shape.
-The underlying need is real and epistole will hit it: sending one composed body to many recipients individually.
+The underlying need is real, and Epistole shares it: sending the same content to many recipients individually.
 
 Attachments are kwargs-only (`message.py` line 203):
 
@@ -1192,7 +1254,8 @@ def attach(self, **kwargs: Any) -> None:
 
 The real signature is `BaseFile.__init__`'s kwarg reads (`emails/store/file.py` line 34): `uri`, `absolute_url`, `filename`, `data`, `mime_type`, `headers`, `content_id`, `content_disposition`, `subtype`, `local_loader`.
 `data` takes bytes, str, or anything with `.read()`.
-There is no path argument; you open the file yourself.
+There is no path argument.
+You open the file yourself.
 MIME type resolution is three-tier: explicit, then `mimetypes.guess_type(filename)`, then content sniffing with `puremagic` on the first 128 bytes.
 
 Inline images are the same object with a different disposition (`store/file.py` line 138):
@@ -1211,9 +1274,12 @@ def content_id(self) -> str | None:
 ```
 
 The Content-ID defaults to the filename.
-So the author writes `<img src="cid:logo.png">` and attaches `filename="logo.png"`, and it works with no generated identifier anywhere.
-That is a genuinely nice trade: readable HTML, at the cost of a filename collision being a cid collision.
-Placement in the MIME tree follows the disposition (`message.py` line 330): inline parts go in the `multipart/related` subtree, the rest onto the root.
+So the author writes `<img src="cid:logo.png">` and attaches `filename="logo.png"`.
+It works with no generated identifier anywhere.
+That is a genuinely nice tradeoff.
+The HTML stays readable, but a filename collision becomes a cid collision.
+The disposition sets the placement in the MIME tree (`message.py` line 330).
+The library puts inline parts in the `multipart/related` subtree and the rest on the root.
 
 The transformer is the capability nothing else here has.
 `emails/transformer.py` line 290:
@@ -1230,7 +1296,13 @@ def load_and_transform(self,
                        **kw):
 ```
 
-Five steps: run premailer to inline external and `<style>` CSS onto `style=` attributes, download every `<img src>` and CSS `url()` into the attachment store and rewrite the src, strip `UNSAFE_TAGS = ['script', 'object', 'iframe', 'frame', 'base', 'meta', 'link', 'style']`, inject a content-type meta tag, and optionally flip every image to inline and rewrite to `cid:`.
+It runs five steps:
+
+1. Run premailer to inline external and `<style>` CSS onto `style=` attributes.
+2. Download every `<img src>` and CSS `url()` into the attachment store, and rewrite the src.
+3. Strip `UNSAFE_TAGS = ['script', 'object', 'iframe', 'frame', 'base', 'meta', 'link', 'style']`.
+4. Inject a content-type meta tag.
+5. Optionally, switch every image to inline and rewrite it to `cid:`.
 
 The rewrite is bidirectional (`transformer.py` line 360):
 
@@ -1247,11 +1319,13 @@ def _src_update_func(src, **kw):
 ```
 
 `emails/loader/__init__.py` builds on it: `from_html`, `from_url`, `from_directory`, `from_file`, `from_zip`, `from_rfc822`.
-Every loader runs the transformer during construction (`loader/__init__.py` line 54), so `from_url("https://.../campaign.html")` returns a `Message` whose CSS is already inlined and whose images are already downloaded.
-The whole thing needs lxml, premailer, requests and cssutils, which puts it outside epistole's zero-dependency core.
-It is the reference for what a `epistole[html]` extra could do.
+Every loader runs the transformer during construction (`loader/__init__.py` line 54).
+So `from_url("https://.../campaign.html")` returns a `Message` with its CSS already inlined and its images already downloaded.
+The whole thing needs lxml, premailer, requests and cssutils, so it cannot be part of Epistole's zero-dependency core.
+It is the reference for what an `epistole[html]` extra could do.
 
-Address parsing is the most permissive here, and it has one genuine ambiguity (`emails/utils.py` line 137):
+Address parsing here is the most permissive in the survey.
+It has one genuine ambiguity (`emails/utils.py` line 137):
 
 ```python
 if len(elements) == 2:
@@ -1266,12 +1340,14 @@ if len(elements) == 2:
             ]
 ```
 
-A 2-tuple is `(name, email)`; a 2-list is two addresses.
-The comment says "Let's do some guesses", which is the correct level of confidence and the wrong design.
+A 2-tuple is `(name, email)`.
+A 2-list is two addresses.
+The comment says "Let's do some guesses".
+That is the correct level of confidence and the wrong design.
 Tuple order here is `(name, email)`, the reverse of Envelopes.
 
-`"Name <addr@x.com>"` is parsed with stdlib `parseaddr`.
-Header injection is blocked explicitly (`message.py` line 245):
+Stdlib `parseaddr` parses `"Name <addr@x.com>"`.
+The library blocks header injection explicitly (`message.py` line 245):
 
 ```python
 if "\n" in value or "\r" in value:
@@ -1280,7 +1356,7 @@ if "\n" in value or "\r" in value:
     )
 ```
 
-The send result is a real object (`emails/backend/response.py` line 31):
+A send returns a real object (`emails/backend/response.py` line 31):
 
 ```python
 class SMTPResponse(Response):
@@ -1295,17 +1371,20 @@ class SMTPResponse(Response):
         self.refused_recipients: dict[str, tuple[int, bytes]] = {}
 ```
 
-`success` is `self._finished and self.status_code == 250`, and the base carries `.error` and `.raise_if_needed()`.
-`refused_recipients` is the field epistole will want: partial failure is the normal case when sending to a list.
-The bad part is that `fail_silently=True` is the backend default, so errors land on the response instead of raising, and the send can return `None` when there are no recipients.
+`success` is `self._finished and self.status_code == 250`.
+The base class carries `.error` and `.raise_if_needed()`.
+`refused_recipients` is the field Epistole will need, because partial failure is the normal case when sending to a list.
+The bad part is the backend default, `fail_silently=True`.
+The backend puts errors on the response instead of raising them.
+A send can also return `None` when there are no recipients.
 
 ### flanker: not a sender, and the only real address parser
 
-`grep -rn "smtplib\|sendmail\|SMTP"` over `flanker/` hits five comments about how SMTP servers mangle line endings, and nothing else.
+`grep -rn "smtplib\|sendmail\|SMTP"` over `flanker/` matches five comments about how SMTP servers mangle line endings, and nothing else.
 `setup.py` describes it as `'Mailgun Parsing Tools'`.
 It is here for two things.
 
-**Address parsing** (`flanker/addresslib/address.py` line 67):
+**flanker parses addresses** (`flanker/addresslib/address.py` line 67):
 
 ```python
 @metrics_wrapper()
@@ -1314,7 +1393,8 @@ def parse(address, addr_spec_only=False, strict=False, metrics=False):
 
 It returns an `EmailAddress`, a `UrlAddress`, or `None`.
 It never raises on bad input.
-The parser is a real PLY lex/yacc grammar under `flanker/addresslib/_parser/`, with pre-generated tables committed, not a regex.
+The parser is a real PLY lex/yacc grammar under `flanker/addresslib/_parser/`, not a regex.
+The pre-generated tables are committed.
 
 The relaxed fallback is worth noting (`address.py` line 117):
 
@@ -1329,13 +1409,18 @@ so `'Foo foo@example.com'` parses with `Foo` as the display name.
 `parse_list(address_list, strict=False, as_tuple=False, metrics=False)` (`address.py` line 188) returns an `AddressList`, or `(AddressList, unparsed)` with `as_tuple=True`.
 Returning the failures alongside the successes is better than raising on the first bad address in a list of a thousand.
 
-`EmailAddress` carries `.address`, `.display_name`, `.mailbox`, `.hostname`, `.ace_address`, `.ace_hostname`, `.full_spec()`, `.to_unicode()`, `.contains_non_ascii()`, `.requires_non_ascii()`, and defines `__eq__` and `__hash__`, so addresses work as set members and dict keys.
-`AddressList.__add__` returns a new `AddressList`, which is the only new-instance-returning operator anywhere in this survey.
+`EmailAddress` carries `.address`, `.display_name`, `.mailbox`, `.hostname`, `.ace_address`, `.ace_hostname`, `.full_spec()`, `.to_unicode()`, `.contains_non_ascii()` and `.requires_non_ascii()`.
+It defines `__eq__` and `__hash__`, so addresses work as set members and dict keys.
+`AddressList.__add__` returns a new `AddressList`.
+It is the only new-instance-returning operator anywhere in this survey.
 
-Validation is a separate tier, not part of parsing: `validate_address()` and `validate_list()` add DNS and MX lookups plus per-provider grammar plugins for aol, gmail, google, hotmail, icloud and yahoo, behind a `validator` extra.
-Splitting "is this a well-formed address" from "does this mailbox plausibly exist" is the right seam, and it is exactly the distinction epistole's open question about build-time versus send-time validation is groping for.
+Validation is a separate tier, not part of parsing.
+`validate_address()` and `validate_list()` add DNS and MX lookups plus per-provider grammar plugins for aol, gmail, google, hotmail, icloud and yahoo.
+They require the `validator` extra.
+Splitting "is this a well-formed address" from "does this mailbox plausibly exist" is the right seam.
+It is exactly the distinction that Epistole's open question about build-time versus send-time validation needs.
 
-**MIME construction** (`flanker/mime/create.py`):
+**flanker builds MIME** (`flanker/mime/create.py`):
 
 ```python
 def multipart(subtype):
@@ -1352,10 +1437,12 @@ def from_string(string):
 `body` is bytes or str, never a path.
 There is no cid helper.
 
-The package docstring states the selling point: about 50ms to parse an 11MB message against about 1s for the stdlib parser, and unchanged parts round-trip byte-identical.
-The tradeoff is stated too: the parser is strict and raises `MimeError` on broken MIME, with `mime.recover` as the lenient fallback.
+The package docstring states the selling point: about 50ms to parse an 11MB message, against about 1s for the stdlib parser.
+It also states that unchanged parts round-trip byte-identical.
+The docstring states the tradeoff too: the parser is strict and raises `MimeError` on broken MIME.
+`mime.recover` is the lenient fallback.
 
-## Where each thing lives
+## Where each library puts each thing
 
 M = on the message object.
 S = on the sender or backend.
@@ -1372,27 +1459,31 @@ C = at the send call.
 | emails | M, overwritten by C | M | M | M | C (`smtp=` dict) or S (`SMTPBackend`) | Message, given a backend |
 | flanker | n/a | n/a | n/a | n/a | n/a | Does not send |
 
-Three patterns, and they are not equally good.
+The table shows three patterns.
+They are not equally good.
 
-**Message holds content and addressing, backend holds transport.**
-Django, Anymail and Envelopes.
+**The message holds content and addressing, and the backend holds transport.**
+Django, Anymail and Envelopes do this.
 The message is a portable value.
 Any backend can send it.
-This is the only arrangement that survives the second backend.
+This is the only arrangement that works unchanged with a second backend.
 
-**Sender holds everything, with per-send overrides.**
-Seen in redmail and yagmail.
-Convenient for a script, and it collapses the moment you want to hand a composed message to something else.
-There is no object to hand.
+**The sender holds everything, with per-send overrides.**
+It is the pattern in redmail and yagmail.
+It is convenient for a script.
+It stops working as soon as you want to pass a composed message to something else.
+There is no object to pass.
 
-**Content on the message, addressing at the send.**
+**The message holds content, and the send call takes addressing.**
 Only blastula does this.
-It buys a genuine capability: one composed body, many audiences, without recomposing.
-It costs a longer send signature and it puts `subject` somewhere nobody expects.
+It gives a genuine capability: sending one composed body to many audiences without recomposing it.
+The downside is a longer send signature.
+It also puts `subject` somewhere nobody expects.
 
 ## Method chaining
 
-Almost nobody chains, and the two that do are instructive.
+Almost no library chains.
+The two that do are instructive.
 
 | Library | Chains | Mutates or returns new |
 | --- | --- | --- |
@@ -1406,84 +1497,102 @@ Almost nobody chains, and the two that do are instructive.
 | flanker | Only `AddressList.__add__`, which returns a new `AddressList` | New instance |
 
 So there is no Python precedent for a chaining email builder.
-Chaining works in blastula because the R pipe makes `f(x, ...)` read as `x %>% f(...)`, and because R copies values on modify, so each step is a new object for free.
+Chaining works in blastula for two reasons.
+The R pipe makes `f(x, ...)` read as `x %>% f(...)`.
+And R copies values on modify, so each step is a new object with no extra code.
 
-That matters for epistole.
+That matters for Epistole.
 A `return self` builder chains but mutates.
-Reusing a half-built message then becomes a foot-gun: two chains from the same base share state.
-R has no such problem, so copying blastula's *feel* without copying its *semantics* imports the bug.
+Reusing a half-built message is then error-prone, because two chains from the same base share state.
+R has no such problem.
+So copying blastula's *feel* without its *semantics* adds the bug.
 
-Two honest options.
-Either build a frozen message with a `replace`-style API where every step returns a new instance, or drop chaining and take Django's route of a constructor plus a few mutating methods.
-`emails` shows the halfway house is confusing: `sign()` chains and `attach()` does not, so the reader has to memorize which is which.
+There are two consistent options.
+The first is a frozen message with a `replace`-style API, where every step returns a new instance.
+The second drops chaining and follows Django: a constructor plus a few mutating methods.
+`emails` shows that a mix of the two is confusing.
+`sign()` chains and `attach()` does not, so the reader has to memorize which is which.
 
-One more data point.
-`attach_inline_image()` in Anymail returns the content id, not the message, and it has to, because the caller needs that id for the `src` attribute.
-Any inline-image method that returns `self` cannot also hand back the identifier.
+There is one more data point.
+`attach_inline_image()` in Anymail returns the content id, not the message.
+It has to, because the caller needs that id for the `src` attribute.
+Any inline-image method that returns `self` cannot also return the identifier.
 The question never arises in blastula, which generates no id the user sees.
 
-## Names worth stealing
+## Names worth copying
 
-**`backend`, for the thing that sends.**
+**Use `backend` for the thing that sends.**
 Django, Anymail and every third-party ESP package use it.
 `EmailBackend` is the class name in all five of Django's own modules.
-`transport` is smtplib's word and means the protocol; `sender` collides with the From address, which is exactly the collision redmail lives with (`EmailSender.sender`).
+`transport` is smtplib's word, and it means the protocol.
+`sender` collides with the From address.
+That is exactly the collision in redmail (`EmailSender.sender`).
 
-**`using=`, for choosing a backend at the send call.**
+**Use `using=` to choose a backend at the send call.**
 Django 6.1 chose it to match `QuerySet.using()`.
-It is short, it reads in place (`email.send(using="notifications")`), and it takes a string, so it survives config.
+It is short, and it reads well in place (`email.send(using="notifications")`).
+It takes a string, so a config file can hold it.
 
 **A configured backend gets an alias, not a variable.**
-Django's `MAILERS` dict with a `"default"` key.
-The alias is the stable name a caller refers to; the object is created on demand.
+Django does this with its `MAILERS` dict and a `"default"` key.
+The alias is the stable name a caller refers to.
+Django creates the object on demand.
 `DEFAULT_MAILER_ALIAS = "default"` is a named constant, not a bare string.
 
-**`credentials`, as one argument taking a tagged object with several constructors.**
-From blastula: `creds()`, `creds_key()`, `creds_file()`, `creds_envvar()`, `creds_anonymous()`.
-Where the secret lives is orthogonal to which backend uses it, so it should not be five backend arguments.
+**Make `credentials` one argument that takes a tagged object with several constructors.**
+The constructors in blastula are `creds()`, `creds_key()`, `creds_file()`, `creds_envvar()` and `creds_anonymous()`.
+Where the secret is stored is orthogonal to which backend uses it, so it should not be five backend arguments.
 
-**`provider`, for a host and port preset.**
+**Use `provider` for a host and port preset.**
 In blastula, `creds(provider = "gmail")` fills `host`, `port` and `use_ssl` from a table.
 A preset is data.
-Compare redmail's `redmail.gmail`, which is a preset baked into a mutable singleton.
+Compare redmail's `redmail.gmail`, a preset stored in a mutable singleton.
 
-**`attach_alternative(content, mimetype)`.**
-Django's name for the second body representation.
-It says what MIME calls it and it does not privilege HTML over text.
+**Copy `attach_alternative(content, mimetype)`.**
+It is Django's name for the second body representation.
+It uses MIME's own term.
+It does not privilege HTML over text.
 
-**`recipients()`, as a method that unions to, cc and bcc.**
-Django.
-The envelope needs the union; the headers need them apart.
-Naming the union makes the SMTP backend's job one call, and gives subclasses one thing to override.
+**Use `recipients()` as a method that unions to, cc and bcc.**
+Django defines it.
+The envelope needs the union.
+The headers need them apart.
+Naming the union makes the SMTP backend's job one call.
+It also gives subclasses one thing to override.
 
-**`sent_using`, on a recorded message.**
-Django's locmem backend stamps the alias onto each copy in the outbox.
-A test can then assert which mailer a code path chose, not just that it sent something.
+**Set `sent_using` on a recorded message.**
+Django's locmem backend sets the alias on each copy in the outbox.
+A test can then assert which mailer a code path used, not just that it sent something.
 
-**`esp_extra`, for the provider-specific escape hatch.**
-Anymail. epistole's equivalent would name the concept, not a vendor: something like `backend_extra`.
+**Model the provider-specific escape hatch on `esp_extra`.**
+Anymail defines it.
+Epistole's equivalent would name the concept, not a vendor: something like `backend_extra`.
 
-**`unsupported_feature(feature)`, as a method on the backend.**
-Anymail.
-One place to route "this backend cannot do that", one exception type, one setting to silence it.
+**Put `unsupported_feature(feature)` on the backend as a method.**
+Anymail defines it.
+It gives one place to route "this backend cannot do that", one exception type, and one setting to silence it.
 
-**`raw()` and `inline()` as marker types is a name worth stealing from a design worth avoiding.**
+**`raw()` and `inline()` as marker types are names worth copying from a design worth avoiding.**
 They exist because yagmail guesses.
-If epistole never guesses, it never needs them, but the words are the right words if a marker is ever necessary.
+If Epistole never guesses, it never needs them.
+The words are the right words if a marker is ever necessary.
 
 ## Mistakes worth avoiding
 
 **Do not guess what a string means.**
 In yagmail, a string is an attachment when `os.path.isfile()` is true, and HTML otherwise.
 The meaning of the call changes with the working directory.
-Distinct arguments (`html=`, `text=`, `attachments=`) cost nothing and never surprise.
+Distinct arguments (`html=`, `text=`, `attachments=`) have no downside.
+They never do anything unexpected.
 
 **Do not let the same type mean different things in different containers.**
 In redmail, a `str` is a path inside a list and raw content as a dict value.
-`attachments=["report.csv"]` reads a file; `attachments={"report.csv": "report.csv"}` attaches six characters.
+`attachments=["report.csv"]` reads a file.
+`attachments={"report.csv": "report.csv"}` attaches ten characters.
 
 **Do not ship preconfigured mutable singletons.**
-`redmail.gmail` is a module-level `EmailSender`, and the documented usage is `gmail.password = '...'`.
+`redmail.gmail` is a module-level `EmailSender`.
+The documented usage is `gmail.password = '...'`.
 That makes credentials process-global.
 Envelopes gets this right with `GMailSMTP` as a class.
 
@@ -1493,112 +1602,136 @@ The second send from the same object is not the message you built.
 
 **Do not name the same thing differently on two backends.**
 Compare blastula's `smtp_send(email, to, from, subject, cc, bcc, credentials, ...)` against `send_by_mailgun(message, subject, from, recipients, url, api_key)`.
-Different word for the message, different word for the recipients, no cc or bcc, credentials as loose arguments.
-The composed message is portable and the send is not, which is the exact failure epistole exists to prevent.
+The Mailgun function uses a different word for the message and a different word for the recipients.
+It has no cc or bcc, and it takes credentials as loose arguments.
+The composed message is portable, and the send is not.
+Epistole exists to prevent exactly that failure.
 Fix it by writing the send signature once, as a protocol, and making every backend implement that signature and nothing else.
 
 **Do not invent a new tuple order for `(name, address)`.**
-Envelopes uses `(address, name)`; emails uses `(name, address)`; stdlib `parseaddr` returns `(name, address)`.
+Envelopes uses `(address, name)`.
+The emails library uses `(name, address)`.
+Stdlib `parseaddr` returns `(name, address)`.
 Follow the stdlib or use a named type.
 
-**Do not return `self` from `__enter__` by accident.**
-In redmail, `__enter__` returns `None`, so `with sender as s:` binds nothing, and the docs quietly avoid `as`.
+**Do not return `None` from `__enter__` by accident.**
+In redmail, `__enter__` returns `None`, so `with sender as s:` binds nothing.
+The docs avoid `as` without comment.
 
 **Do not offer `fail_silently`.**
 Django deprecated it in 6.1 after fifteen years.
-An argument that turns an exception into a silent `return 0` moves the failure to the next person to read the logs.
+An argument that turns an exception into a silent `return 0` hides the failure until the next person reads the logs.
 `emails` has the same problem with `fail_silently=True` as the backend default.
 
 **Do not accept a bare string where a list of addresses is meant.**
 Django raises `TypeError('"to" argument must be a list or tuple')` for all four address fields.
-The alternative is `to="a@b.com"` iterating into eleven single-character recipients on the day someone passes the wrong variable.
-Epistole may want to accept a bare string deliberately, but it should be a decision with a normalization function behind it, not an accident.
+Without that check, `to="a@b.com"` iterates into seven single-character recipients when someone passes the wrong variable.
+Epistole may choose to accept a bare string.
+If it does, that should be a deliberate decision that a normalization function implements.
 
 **Do not run caller-supplied HTML through a template engine by default.**
-In redmail, `use_jinja=True` is the default and every body gets rendered.
-The brief for epistole is HTML the caller already composed.
-Rendering it breaks any literal `{{`, and it is an injection surface when the HTML did not come from the developer.
+In redmail, `use_jinja=True` is the default, so the library renders every body.
+The brief for Epistole is HTML the caller already composed.
+Rendering it breaks any literal `{{`.
+It is also an injection surface when the HTML did not come from the developer.
 
 **Do not silently ignore unknown configuration keys.**
 Django's pre-`MAILERS` backends accepted any kwarg.
 The new path raises `InvalidMailer(f"Unknown options {kwarg_names}.", alias=alias)`.
 A typo in `use_tsl` should fail at startup, not send in the clear.
 
-## Capabilities epistole has not yet considered
+## Capabilities Epistole has not yet considered
 
-Ordered by how likely each is to force a change to the v1 surface.
+The items below are in order of how likely each is to require a change to the v1 surface.
 
-**A normalized send result with per-recipient status.**
-Anymail's `ANYMAIL_STATUSES` is `sent`, `queued`, `invalid`, `rejected`, `failed`, `unknown`, and `AnymailRecipientStatus(message_id, status)` carries one per recipient.
+**Return a normalized send result with per-recipient status.**
+Anymail's `ANYMAIL_STATUSES` is `sent`, `queued`, `invalid`, `rejected`, `failed`, `unknown`.
+`AnymailRecipientStatus(message_id, status)` carries one per recipient.
 `emails`' `SMTPResponse.refused_recipients` is a dict of address to `(code, text)`.
-Partial failure is the normal case for a multi-recipient send, and all three of epistole's backends report it differently.
-Django's `send()` returns an `int`, which is the answer epistole should not copy.
+Partial failure is the normal case for a multi-recipient send.
+All three of Epistole's backends report it differently.
+Django's `send()` returns an `int`, and Epistole should not copy that.
 
-**An explicit unsupported-feature policy.**
-Anymail's `unsupported_feature()` raises by default and can be silenced with a setting.
-Its docstring also draws the line epistole needs: raise for things the API cannot express, but let the provider report its own limits rather than duplicating each provider's validation locally.
-This is the mechanism for epistole's open `from_` question.
+**Adopt an explicit unsupported-feature policy.**
+Anymail's `unsupported_feature()` raises by default, and a setting silences it.
+Its docstring also states the boundary Epistole needs.
+Raise for things the API cannot express.
+Let the provider report its own limits, rather than duplicating each provider's validation locally.
+This is the mechanism for Epistole's open `from_` question.
 
-**A named escape hatch for provider-specific fields.**
-`esp_extra`.
-Without one, every provider-only feature either bloats the shared surface or forces users off epistole entirely.
+**Offer a named escape hatch for provider-specific fields.**
+Anymail's is `esp_extra`.
+Without one, every provider-only feature either enlarges the shared surface or forces users to stop using Epistole entirely.
 
-**Content-ID as a compatibility surface, not an implementation detail.**
+**Treat Content-ID as a compatibility surface, not an implementation detail.**
 Anymail defaults the cid domain to the literal `"inline"` because Gmail blocks Content-IDs ending in `.com` when a provider reuses the cid as a filename.
-The `@domain` is omitted entirely in blastula, because including it makes Outlook.com show a phantom `AT00001.bin` attachment.
-Two independent projects hit client-specific bugs in the same three-character string.
-Whatever epistole generates needs a test against these two known cases.
+The Content-ID in blastula omits the `@domain` entirely, because including it makes Outlook.com show a spurious `AT00001.bin` attachment.
+Two independent projects found client-specific bugs in the domain part of the Content-ID header.
+Whatever Epistole generates needs a test against these two known cases.
 
-**Harvesting `cid:` references out of finished HTML.**
-In blastula, `cid_images()` walks every `<img src>` in the rendered body, converts local paths and data URIs into `cid:` references, attaches the bytes, and deduplicates identical images by digest.
+**Derive `cid:` references from finished HTML.**
+In blastula, `cid_images()` walks every `<img src>` in the rendered body and converts local paths and data URIs into `cid:` references.
+It attaches the bytes and deduplicates identical images by digest.
 The user never types a Content-ID.
-Given that epistole takes caller-supplied HTML, this is the most directly applicable idea in the survey, and it is not on epistole's list.
+Epistole takes caller-supplied HTML, so this is the most directly applicable idea in the survey.
+It is not on Epistole's list.
 `emails`' transformer does the same walk and adds downloading remote images.
 
-**Deduplicating repeated inline images.**
+**Deduplicate repeated inline images.**
 The key in blastula is `digest::digest(src)`.
-A logo used in a header and a footer attaches once.
+A logo used in a header and a footer is attached once.
 
-**A file-format-from-filename convention for structured attachments.**
+**Adopt a file-format-from-filename convention for structured attachments.**
 Compare redmail's `attachments={'data.xlsx': df}` against `{'data.csv': df}`.
-The extension picks the serializer.
-Behind an optional-import guard this costs the core nothing, and it is the difference between epistole being usable in a report script and not.
+The extension determines the serializer.
+Behind an optional-import guard, this adds no dependency to the core.
+It is the difference between Epistole being usable in a report script and not.
 
-**Optional-dependency dispatch as a general pattern.**
-In redmail, `import_from_string(..., if_missing="ignore")` returns `None`, and every dispatch branch is guarded by `has_pandas` and friends.
-This is how a zero-dependency core grows type-aware conveniences without taking a dependency.
+**Use optional-dependency dispatch as a general pattern.**
+In redmail, `import_from_string(..., if_missing="ignore")` returns `None`.
+`has_pandas` and flags like it guard every dispatch branch.
+This pattern lets a zero-dependency core add type-aware conveniences without taking a dependency.
 
-**A test backend that records more than the messages.**
-Django's locmem calls `message.message()` first so header validation still fires, deep-copies so later mutation cannot fool an assertion, and stamps `sent_using = self.alias`.
-`body_contains(text)` checks the plain body and every `text/*` alternative, because the classic bug is updating the HTML and forgetting the fallback.
+**Build a test backend that records more than the messages.**
+Django's locmem calls `message.message()` first, so header validation still runs.
+It deep-copies, so later mutation cannot change what an assertion checks.
+It also sets `sent_using = self.alias`.
+`body_contains(text)` checks the plain body and every `text/*` alternative, because the classic bug is updating the HTML and forgetting the plain text.
 
-**Splitting address parsing from address validation.**
+**Split address parsing from address validation.**
 In flanker, `parse()` (grammar, never raises, returns `None`) is separate from `validate_address()` (DNS and MX lookups, provider-specific grammars).
 `parse_list(..., as_tuple=True)` returns the successes and the failures together instead of raising on the first bad one.
-That shape answers epistole's open build-time-versus-send-time question directly.
+That shape is a direct answer to Epistole's open build-time-versus-send-time question.
 
-**Rendering the composed message for preview before sending.**
-In blastula the message carries two HTML strings: one with `cid:` for sending and one with data URIs for viewing, and printing the object shows the preview.
-There is a `preview_only=True` in yagmail, which returns `(recipients, message_string)` without connecting.
-Both are cheap and both catch the mistake before it reaches an inbox.
+**Render the composed message for preview before sending.**
+In blastula, the message carries two HTML strings: one with `cid:` for sending and one with data URIs for viewing.
+Printing the object shows the preview.
+In yagmail, `preview_only=True` returns `(recipients, message_string)` without connecting.
+Both are cheap.
+Both let a caller find the mistake before sending.
 
-**A connection stack, as an alternative to a settings alias.**
-`envelopes.connstack` gives `push_connection` / `get_current_connection` and a context manager over a thread-local.
+**Consider a connection stack as an alternative to a settings alias.**
+`envelopes.connstack` provides `push_connection` / `get_current_connection` and a context manager over a thread-local.
 Django solved the same problem with a named alias in settings.
-There is no settings module in epistole, so the stack is worth knowing about even if the answer is to pass the backend explicitly.
+Epistole has no settings module, so the stack is worth knowing about.
+The answer may still be to pass the backend explicitly.
 
-**HTML preparation as an extra: CSS inlining, unsafe-tag stripping, absolute links.**
+**Offer HTML preparation as an extra: CSS inlining, unsafe-tag stripping, absolute links.**
 `emails`' `load_and_transform()` does all of it, plus downloading remote images into attachments.
-None of this happens in redmail: its `style` extra only inlines CSS on pandas `Styler` output, never on the email body.
-So epistole's open CSS-inlining question has no prior art in redmail at all, and the real reference is `emails` plus the `css-inline` package itself.
+None of this is in redmail.
+Its `style` extra only inlines CSS on pandas `Styler` output, never on the email body.
+So Epistole's open CSS-inlining question has no prior art in redmail at all.
+The real reference is `emails`, plus the `css-inline` package itself.
 
-**A logging handler that emails records.**
-There is `EmailHandler` and `MultiEmailHandler` in redmail; Django ships `AdminEmailHandler` with a `using` option.
-Out of scope for v1, but it is the strongest argument for making the backend constructible from a plain dict of options: a logging config is a dict.
+**Consider a logging handler that emails records.**
+The redmail handlers are `EmailHandler` and `MultiEmailHandler`.
+Django ships `AdminEmailHandler` with a `using` option.
+It is out of scope for v1.
+It is still the strongest argument for making the backend constructible from a plain dict of options, because a logging config is a dict.
 
 ## Sources
 
-Read directly, not summarized.
+The survey read each source directly, not a summary of it.
 
 Django, `main` at `e2a3da142687c3b3dfa9cbc63c1a1a4433a8f842`:
 
@@ -1628,11 +1761,11 @@ redmail 0.6.0 sdist:
 
 blastula, `main`:
 
-- [`R/compose_email.R`](https://github.com/rstudio/blastula/blob/main/R/compose_email.R)
-- [`R/smtp_send.R`](https://github.com/rstudio/blastula/blob/main/R/smtp_send.R)
-- [`R/creds_helpers.R`](https://github.com/rstudio/blastula/blob/main/R/creds_helpers.R), `R/create_credentials.R`
-- [`R/add_image.R`](https://github.com/rstudio/blastula/blob/main/R/add_image.R), `R/add_attachment.R`, `R/add_ggplot.R`
-- [`R/utils-html_manipulation.R`](https://github.com/rstudio/blastula/blob/main/R/utils-html_manipulation.R), `R/utils.R`, `R/send_by_mailgun.R`, `R/connect_email.R`
+- [`R/compose_email.R`](https://github.com/rstudio/blastula/blob/master/R/compose_email.R)
+- [`R/smtp_send.R`](https://github.com/rstudio/blastula/blob/master/R/smtp_send.R)
+- [`R/creds_helpers.R`](https://github.com/rstudio/blastula/blob/master/R/creds_helpers.R), `R/create_credentials.R`
+- [`R/add_image.R`](https://github.com/rstudio/blastula/blob/master/R/add_image.R), `R/add_attachment.R`, `R/add_ggplot.R`
+- [`R/utils-html_manipulation.R`](https://github.com/rstudio/blastula/blob/master/R/utils-html_manipulation.R), `R/utils.R`, `R/send_by_mailgun.R`, `R/connect_email.R`
 
 Skimmed, from sdists:
 

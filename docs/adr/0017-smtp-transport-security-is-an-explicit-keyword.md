@@ -1,24 +1,34 @@
 # SMTP transport security is an explicit keyword, never inferred from the port
 
 `SMTPBackend` takes `security: Literal["starttls", "tls", "none"]`, default `"starttls"`, next to `host` and `port=587`.
-`"starttls"` requires the upgrade and raises `TransportError` when the server does not offer it; `"tls"` is implicit TLS on connect; `"none"` is plaintext.
+`"starttls"` requires the upgrade and raises `TransportError` when the server does not offer it.
+`"tls"` is implicit TLS on connect.
+`"none"` is plaintext.
 There is no opportunistic mode and no inference from the port.
-Decided on [#29](https://github.com/ozanozbeker/epistole/issues/29), which found the surface undecided while collapsing the ADRs into `docs/spec.md`.
+Decided on [#29](https://github.com/ozanozbeker/epistole/issues/29), which found the surface undecided while merging the ADRs into `docs/spec.md`.
 
 ## Why
 
-Inferring the mode from the port is the guess ADR-0011 refused for scope: 465 is implicit TLS by convention, but 587 with STARTTLS, 25 with STARTTLS, and 2525 with anything all exist, and a wrong guess sends a `Password` in the clear.
-A boolean `starttls=` cannot spell implicit TLS, which Gmail's SMTP page and most relay providers document on 465.
-Opportunistic STARTTLS, upgrade if offered and continue if not, is the one failure a mail library must not make quiet, because the credential goes over plaintext and nothing raises.
+Inferring the mode from the port is the same kind of guess ADR-0011 rejected for scope.
+465 is implicit TLS by convention, but 587 with STARTTLS, 25 with STARTTLS, and 2525 with anything all exist.
+A wrong guess sends a `Password` in the clear.
+A boolean `starttls=` cannot express implicit TLS, which Gmail's SMTP page and most relay providers document on 465.
+Opportunistic STARTTLS upgrades if the server offers it and continues if not.
+That is the one failure a mail library must not make silent, because the credential goes over plaintext and nothing raises.
 
-A `Literal` over an enum costs the caller no import and a type checker still rejects a typo.
+A `Literal` rather than an enum saves the caller an import, and a type checker still rejects a typo.
 
 ## Considered options
 
-- **Infer from port.** Rejected above.
-- **`starttls: bool`.** Rejected above: no implicit TLS.
-- **Opportunistic default.** Rejected above: silent plaintext credential.
-- **An `ssl.SSLContext` argument.** Additive later; ADR-0009 kept the HTTP backends free of transport knobs in v1 and the same applies here.
+- **Infer the mode from the port.**
+  Rejected above.
+- **Take `starttls: bool`.**
+  Rejected above: it cannot express implicit TLS.
+- **Default to opportunistic STARTTLS.**
+  Rejected above: it sends the credential in plaintext without any error.
+- **Take an `ssl.SSLContext` argument.**
+  It can be added later.
+  ADR-0009 kept the HTTP backends free of transport settings in v1, and the same applies here.
 
 ## Consequences
 

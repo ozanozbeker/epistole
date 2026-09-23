@@ -6,9 +6,7 @@ from epistole import Address, Message
 
 ADDRESS_METHODS = ("to", "cc", "bcc", "reply_to")
 
-# Structurally sound: exactly one address, something on both sides of the last
-# @. The quoted local part carries an @ of its own, and the non-ASCII address
-# passes because Epistole never checks character set.
+# A quoted local part may hold an @, and Epistole never checks character set (ADR-0014).
 GOOD = (
     "ada@example.com",
     "Ada Lovelace <ada@example.com>",
@@ -18,8 +16,7 @@ GOOD = (
     "用户@例子.广告",
 )
 
-# The address literal is legal RFC 5321, and getaddresses drops it, so Epistole
-# refuses it without having chosen to.
+# getaddresses drops the address literals although RFC 5321 allows them, so they fail too (ADR-0014).
 BAD = (
     "",
     "garbage",
@@ -45,7 +42,7 @@ def test_a_message_without_content_raises():
         Message()
 
 
-def test_the_readbacks_start_empty():
+def test_the_attributes_start_empty():
     message = Message(text="hi")
 
     assert message.to_ == ()

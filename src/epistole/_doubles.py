@@ -1,4 +1,4 @@
-"""The test doubles: backends that record or render instead of sending."""
+"""The test doubles are backends that record or render a submission instead of sending it."""
 
 from __future__ import annotations
 
@@ -15,27 +15,25 @@ if TYPE_CHECKING:
 
 
 class MemoryBackend(Backend):
-    """A backend that records what it accepted instead of sending it.
+    """A memory backend records each submission instead of sending it.
 
-    The submission it records is the same value `SMTPTransport` and `GraphTransport` receive, so a test that asserts on one is asserting about the real send path rather than about a shape invented for tests.
-
-    `refuse=` is the one thing injectable, because a refusal is data on the same channel a real SMTP transport answers on. A hook that raised an arbitrary error on command would test that `raise` works, not that the mapping from native failures is right.
+    See ADR-0015 for its design.
 
     Parameters
     ----------
-    from_address
-        Defaulted, because on a double there is no mail service to authorize one. `example.invalid` is reserved by RFC 2606 and passes the address check.
     refuse
-        An address to say no to, mapped to the refusal to answer with. Matched against each recipient's addr-spec, and applied at submit. Each key takes the address check here, where the caller wrote it, so a key that could never match a recipient fails loudly rather than silently never firing.
+        Maps an address to the refusal it gets, matched by addr-spec. A key that is not an address raises here, rather than never matching.
 
     Attributes
     ----------
     submissions
-        Every submission a recipient accepted, in submit-completion order. It lives on the backend, so it survives every connection, and it is the one mutable thing a backend holds. There is no reset method: `list.clear()` already exists, and a fresh backend per test starts empty.
+        Every submission at least one recipient accepted, from every connection, in the order the submits completed. Reset it with `list.clear()`.
 
     Examples
     --------
     ```python
+    from epistole import MemoryBackend, Message, Refusal
+
     backend = MemoryBackend(from_address="reports@example.com")
     backend.send(Message(text="Weekly numbers").to("ada@example.com"))
 
@@ -43,7 +41,7 @@ class MemoryBackend(Backend):
     backend.submissions[0].from_address  # "reports@example.com"
     ```
 
-    Refuse one recipient and the rest still go, as on SMTP:
+    Refuse one recipient, and the backend accepts the rest, as SMTP does:
 
     ```python
     backend = MemoryBackend(refuse={"ada@example.com": Refusal(550, "No such mailbox")})
@@ -69,20 +67,11 @@ class MemoryBackend(Backend):
 
     @override
     def _open(self) -> Transport:
-        """Hand back a transport that writes to this backend's list.
-
-        Returns
-        -------
-        A transport holding the backend's list and its refusals.
-        """
         return _MemoryTransport(self.submissions, self._refuse)
 
 
 class _MemoryTransport:
-    """The transport `MemoryBackend` opens: it appends where the backend can be read.
-
-    A connection is a no-op here, so the list has to live on the backend to survive the `with`.
-    """
+    """`MemoryBackend` opens this transport, which appends to the backend's list."""
 
     def __init__(
         self,
@@ -94,14 +83,7 @@ class _MemoryTransport:
         self._refuse = refuse
 
     def submit(self, submission: Submission, /) -> Mapping[str, Refusal]:
-        """Record `submission`, unless every recipient was refused.
-
-        A send every recipient refused records nothing, so the double never holds a record of a send that raised `RecipientsRefusedError`, whose meaning is that nothing was submitted.
-
-        Returns
-        -------
-        A refusal for each recipient `refuse=` names, keyed by addr-spec.
-        """
+        """Record `submission` unless every recipient was refused (ADR-0015), and return the refusals keyed by addr-spec."""
         refused: dict[str, Refusal] = {}
         accepted = False
         for recipient in submission.message.recipients:
@@ -118,16 +100,11 @@ class _MemoryTransport:
         return refused
 
     def close(self) -> None:
-        """Do nothing. There is no link to close."""
+        """Do nothing, because there is no link to close."""
 
 
 def _by_addr_spec(refuse: Mapping[str, Refusal]) -> dict[str, Refusal]:
-    """Key `refuse` by addr-spec, so a key written with a display name still matches.
-
-    Returns
-    -------
-    The same refusals, under the mailbox each key names.
-    """
+    """Check each key of `refuse`, and key the refusals by addr-spec so a key with a display name still matches."""
     for address in refuse:
         check_address(address)
 

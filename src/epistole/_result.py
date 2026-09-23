@@ -1,4 +1,4 @@
-"""What a send hands back, and the refusals it may carry."""
+"""`SendResult` is the value a send returns, and `Refusal` records one refused recipient in it."""
 
 from __future__ import annotations
 
@@ -12,16 +12,16 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Refusal:
-    """A mail service's no to one recipient.
+    """A refusal records one recipient a mail service refused.
 
-    Public because `MemoryBackend(refuse=)` takes one. A bounce is a different thing: it arrives later as a non-delivery report, and Epistole never sees it.
+    It is public because `MemoryBackend(refuse=)` takes one. A bounce is not a refusal, and Epistole never receives one. See ADR-0004.
 
     Attributes
     ----------
     code
-        What the service answered with: an SMTP reply code, or the HTTP status where an API refuses one address.
+        The SMTP reply code, or the HTTP status where an API refuses one address.
     reason
-        The text the service gave. Never bytes: `smtplib` answers in bytes, and the transport decodes them as UTF-8 with `errors="replace"` rather than hand a caller something it has to decode.
+        The text the service returned, never bytes.
     """
 
     code: int
@@ -30,20 +30,18 @@ class Refusal:
 
 @dataclass(frozen=True)
 class SendResult:
-    """The record that a mail service accepted one submission.
+    """A send result records that a mail service accepted one submission.
 
-    Acceptance is not delivery. A send result never implies that anyone received the message.
-
-    `Connection.send` builds every one, from the submission it stamped plus the refusals the transport answered with. A transport never builds one, so no backend can echo an id it invented.
+    Acceptance is not delivery, so a send result never means that anyone received the message. See ADR-0004.
 
     Attributes
     ----------
     message_id
-        The `Message-ID` the send stamped, angle brackets kept. Never `None`, because Epistole wrote it rather than reading it back: Graph answers `202` with no body, Gmail returns a mailbox-local id that is not a `Message-ID`, and `smtplib` discards the queue id.
+        The `Message-ID` the send set, with its angle brackets.
     date
-        The `Date` the send stamped: timezone-aware, carrying the sending machine's offset.
+        The `Date` the send set, timezone-aware in the sending machine's offset.
     refused
-        The recipients the service refused while accepting the rest, keyed by the caller's own recipient string. Only SMTP and `MemoryBackend(refuse=)` ever fill it; it is empty on Gmail and Graph, which accept or refuse the whole message.
+        The recipients the service refused while accepting the rest, keyed by the caller's recipient string. Only SMTP and `MemoryBackend(refuse=)` fill it.
     """
 
     message_id: str

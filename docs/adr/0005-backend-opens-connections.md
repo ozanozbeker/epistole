@@ -1,83 +1,114 @@
 # A backend opens connections and is not one
 
-Django, redmail, and the first draft of [#13](https://github.com/ozanozbeker/epistole/issues/13) make the backend its own context manager: `with SMTPBackend(...) as backend:` opens a socket that the same object later closes.
+Django, redmail, and the first version of [#13](https://github.com/ozanozbeker/epistole/issues/13) make the backend its own context manager: `with SMTPBackend(...) as backend:` opens a socket that the same object later closes.
 Epistole splits the two.
-A backend is frozen configuration, `backend.connect()` opens a connection, and only the connection is a context manager.
-Both carry `send`: `backend.send(message)` opens a connection for one message and closes it, `connection.send(message)` reuses one.
+A backend is frozen configuration.
+`backend.connect()` opens a connection.
+Only the connection is a context manager.
+Both define `send`.
+`backend.send(message)` opens a connection for one message and closes it.
+`connection.send(message)` reuses one.
 This is SQLAlchemy's `Engine` and `Connection` shape.
-Decided on [#13](https://github.com/ozanozbeker/epistole/issues/13); the verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/epistole/issues/14) (ADR-0006).
-Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the backend-held list is `MemoryBackend.submissions`, and `Connection.send` builds every send result from the `Submission` it stamped (ADR-0015).
+Decided on [#13](https://github.com/ozanozbeker/epistole/issues/13).
+The verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/epistole/issues/14) (ADR-0006).
+Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the backend-held list is `MemoryBackend.submissions`.
+`Connection.send` builds every send result from the `Submission` it built (ADR-0015).
 
 ## Why
 
-A backend that is sometimes live and sometimes not needs a lock, a reentrancy rule, and an answer for a second `with` on the same instance.
-Django carries all three.
-Splitting the objects makes each question disappear: configuration is immutable and shareable across threads for free, and a connection belongs to one thread and one `with`, the same rule as a DB-API connection at `threadsafety = 1`.
-Each `connect()` is a fresh link, so there is no second `with` to define.
+A backend that is sometimes live and sometimes not needs a lock, a reentrancy rule, and a defined behaviour for a second `with` on the same instance.
+Django has all three.
+Splitting the objects removes each question.
+Configuration is immutable, so threads can share it without a lock.
+A connection belongs to one thread and one `with`, the same rule as a DB-API connection at `threadsafety = 1`.
+Each `connect()` opens a new connection, so there is no second `with` to define.
 
 The audience is analysts and data engineers sending reports, blastula's users, not a web framework with its own connection management.
-That is why the connection carries no lock: two threads on one SMTP socket serialize anyway, and Graph's four concurrent requests per mailbox call for four connections, not one shared.
+So the connection has no lock.
+Two threads on one SMTP socket serialize anyway.
+Using Graph's four concurrent requests per mailbox takes four connections, not one shared.
 
 ## Rules
 
 - **`connect()` takes no arguments and opens eagerly.**
-  Socket, TLS, and AUTH on SMTP; token acquisition on Gmail and Graph.
-  `AuthenticationError` and `TransportError` therefore surface at the line that called `connect()` on every backend.
-  Everything about how to connect lives on the backend constructor, as it does on `create_engine`.
-  `__enter__` returns `self` and does nothing else, so redmail's return-`None` trap has nowhere to hide.
+  On SMTP, it opens the socket and runs TLS and AUTH.
+  On Gmail and Graph, it acquires a token.
+  So on every backend, `AuthenticationError` and `TransportError` are raised at the line that called `connect()`.
+  The backend constructor takes everything about how to connect, as `create_engine` does.
+  `__enter__` returns `self` and does nothing else.
+  So redmail's return-`None` problem cannot occur.
 - **A connection is one link, used once.**
-  `send` or `__enter__` on a closed connection raises `ValueError`, not a `EpistoleError`, because it is a mistake in the calling code (ADR-0004).
+  `send` or `__enter__` on a closed connection raises `ValueError`, not an `EpistoleError`, because it is a mistake in the calling code (ADR-0004).
   Reopening means calling `connect()` again.
-- **`close()` is idempotent and never raises; `__exit__` calls it and never suppresses.**
-  SMTP `QUIT` is best effort, and a dead socket is swallowed so an error from the `with` body is not masked.
-- **`TransportError` closes the connection; nothing else does.**
+- **`close()` is idempotent and never raises.
+  `__exit__` calls it and never suppresses.**
+  SMTP `QUIT` is best effort.
+  `close()` suppresses the error from a dead socket, so the error from the `with` body propagates unchanged.
+- **Only `TransportError` closes the connection.**
   A disconnect, an `OSError`, or SMTP `421` marks the connection closed, because the socket is gone.
   `RejectedError`, `SenderRefusedError`, `RecipientsRefusedError`, `ThrottledError`, `ProviderError`, and `AuthenticationError` leave it open, because `smtplib` leaves the socket open and a loop should continue with the next recipient.
 - **`backend.send()` is `connect`, `send`, `close`.**
   The one-off send stays one line and opens one connection for it.
-  SQLAlchemy 2.0 removed `Engine.execute`; Epistole keeps the one-shot because a report sender has no transaction to scope and almost every call is one message.
+  SQLAlchemy 2.0 removed `Engine.execute`.
+  Epistole keeps the one-shot because code that sends reports has no transaction to scope, and almost every call is one message.
 - **Every backend has `connect()`, including Gmail, Graph, `MemoryBackend`, and `ConsoleBackend`.**
-  The loop `with backend.connect() as c:` must survive a backend swap unchanged.
-  On HTTP the connection holds a token and, where the transport allows it, one keep-alive link.
-  It refreshes the token through the caller's credential object on each send, so an expired token in a long notebook session is not an error; only a failed refresh is.
-  On the test doubles it is a no-op that delegates to the backend, and `MemoryBackend.submissions` lives on the backend so it survives the `with` (ADR-0015).
-- **Two classes, one Protocol.**
-  `Backend` and `Connection` are Epistole classes; `Transport` is the Protocol a backend author implements.
-  ADR-0006 records the shape; this ADR owns the lifecycle rules above, which are unchanged by it.
+  The loop `with backend.connect() as c:` must work unchanged after a backend swap.
+  On HTTP, the connection holds a token and, where the transport allows it, one keep-alive link.
+  It refreshes the token through the caller's credential object on each send.
+  So an expired token in a long notebook session is not an error.
+  Only a failed refresh is.
+  On the test doubles, it is a no-op that delegates to the backend.
+  `MemoryBackend.submissions` is an attribute of the backend, so it still exists after the `with` ends (ADR-0015).
+- **Epistole defines two classes and one Protocol.**
+  `Backend` and `Connection` are Epistole classes.
+  `Transport` is the Protocol a backend author implements.
+  ADR-0006 records the shape.
+  This ADR owns the lifecycle rules above, and ADR-0006 does not change them.
 - **`EpistoleError.backend` is always the configured backend.**
-  A connection exposes `.backend` and fills it in, so a log line names the route whether the send went through a connection or not, and ADR-0004's wording survives unchanged.
+  A connection exposes `.backend` and fills it in.
+  So a log line names the route whether the send went through a connection or not.
+  ADR-0004's wording stays unchanged.
 - **A backend is not a context manager.**
   `with SMTPBackend(...)` is a `TypeError`.
   There is one way to get a connection, as with `Engine`.
-- **Mirror `Engine`'s shape, not its machinery.**
-  No pool: `connect()` opens a real socket and `close()` closes it, because a pool buys nothing for a report loop and SMTP servers time idle sockets out.
-  No `begin()`, because acceptance is final.
-  No `dispose()`, because there is no pool.
-  No `execution_options()` copies; a `backend.replace(...)` can be added later without breaking anything.
+- **Copy `Engine`'s shape, not its internals.**
+  There is no pool: `connect()` opens a real socket and `close()` closes it.
+  A pool gives a report loop no benefit, and SMTP servers time idle sockets out.
+  There is no `begin()`, because acceptance is final.
+  There is no `dispose()`, because there is no pool.
+  There are no `execution_options()` copies.
+  A `backend.replace(...)` can be added later without breaking anything.
 
 ## Considered options
 
-- **Backend as its own context manager, Django shaped.**
-  Rejected above: it needs a lock and reentrancy rules, and it is the shape Django is retiring around `connection=`.
-- **Backend as sugar for `connect()`, `__enter__` returning the connection.**
-  Two spellings for one thing, and `as backend` would bind a connection under a misleading name.
-- **Lazy open in `__enter__`.**
-  Makes `connect()` a factory that does not connect, and leaves a half-state where a connection exists but has no socket.
-- **Silent reconnect on a closed connection.**
-  Hides the bug where a loop kept a connection past its `with`.
-- **`connect()` on SMTP only.**
-  Calling code would branch on backend type, which is the premise of the library failing.
-- **A lock per connection.**
-  Buys correctness for a use nobody should write and hides the bug instead of surfacing it.
-- **`connect()` inside the `Backend` Protocol.**
-  Forces a connection to have `connect()` too, which is a lie on a live link.
+- **Make the backend its own context manager, as Django does.**
+  Rejected above: it needs a lock and reentrancy rules.
+  It is also the shape Django is retiring around `connection=`.
+- **Make the backend sugar for `connect()`, with `__enter__` returning the connection.**
+  It gives two spellings for one thing.
+  `as backend` would bind a connection under a misleading name.
+- **Open lazily in `__enter__`.**
+  It makes `connect()` a factory that does not connect.
+  It leaves a half-state where a connection exists but has no socket.
+- **Reconnect silently on a closed connection.**
+  It hides the bug where a loop kept a connection past its `with`.
+- **Put `connect()` on SMTP only.**
+  Calling code would branch on backend type, and the library's premise would fail.
+- **Add a lock per connection.**
+  It gives correctness to a use nobody should write.
+  It hides the bug instead of exposing it.
+- **Put `connect()` inside the `Backend` Protocol.**
+  It forces a connection to have `connect()` too, which is misleading on a live link.
 
 ## Consequences
 
-- One more public type, `Connection`, and the `Transport` seam that ADR-0006 names.
-- A connection left unclosed outside `with` holds an SMTP socket until the server times it out; on HTTP nothing leaks.
+- The public API gains `Connection`, and ADR-0006 adds `Transport` as the only Protocol.
+- A connection left unclosed outside `with` holds an SMTP socket until the server times it out.
+  On HTTP, nothing leaks.
   The docstring on `connect()` says to use `with`.
-- The glossary gains *Connection* and `Backend` no longer lists it under *Avoid*.
-- [#16](https://github.com/ozanozbeker/epistole/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all, and how the per-send token refresh is wired through `google-auth` and `msal`.
-- [#18](https://github.com/ozanozbeker/epistole/issues/18) inherits that SMTP AUTH, including XOAUTH2, happens in `connect()`.
+- The glossary gains *Connection*.
+  The `Backend` entry no longer lists it under *Avoid*.
+- [#16](https://github.com/ozanozbeker/epistole/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all.
+  It also decides how the per-send token refresh works through `google-auth` and `msal`.
+- [#18](https://github.com/ozanozbeker/epistole/issues/18) takes as given that SMTP AUTH, including XOAUTH2, happens in `connect()`.
 - The README's user guide is written against this shape.

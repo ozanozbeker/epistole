@@ -27,8 +27,7 @@ LEAVES = (
     TransportError,
 )
 
-# Every leaf takes its message positionally; the ones that carry extras take
-# them keyword-only. Building each here keeps the shape assertions callable.
+# `build` passes these keyword-only extras so it can construct every leaf.
 EXTRAS: dict[type[EpistoleError], dict[str, Any]] = {
     RecipientsRefusedError: {"refused": {"ada@example.com": Refusal(550, "no")}},
     ThrottledError: {"retry_after": 30.0},
