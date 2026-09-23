@@ -301,6 +301,7 @@ markdown = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "epistole", extra = ["markdown"] },
     { name = "prek" },
     { name = "pyrefly" },
     { name = "pytest" },
@@ -322,6 +323,7 @@ provides-extras = ["all", "gmail", "graph", "markdown"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "epistole", extras = ["markdown"] },
     { name = "prek", specifier = ">=0.5.2" },
     { name = "pyrefly", specifier = ">=1.2.0" },
     { name = "pytest", specifier = ">=9.1.1" },

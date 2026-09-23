@@ -25,7 +25,7 @@ class Message:
     html
         The HTML. Epistole derives the plain text from it with `html_to_text`, unless the caller supplies `text` or `text_renderer`.
     markdown
-        Not supported yet. Supplying it raises `NotImplementedError`.
+        The Markdown source. Epistole renders the HTML from it on markdown-it-py's `commonmark` preset and sends the source as the plain text, unless the caller supplies `text`.
     text
         The plain text. Epistole sends it verbatim and derives nothing from `html`. It may be `""` when the subject holds the whole message.
     text_renderer
@@ -38,9 +38,9 @@ class Message:
     subject_
         The subject `.subject()` set, or `None`.
     html
-        The HTML, or `None` on a text-only message.
+        The HTML the caller supplied or Epistole rendered from `markdown`, or `None` on a text-only message.
     text
-        The plain text. It is `""` for `text=""`. It is also `""` for HTML that holds no text, such as a lone image with no alt text.
+        The plain text. It is the Markdown source for `markdown=`. It is `""` for `text=""`, and also for HTML that holds no text, such as a lone image with no alt text.
 
     Raises
     ------
@@ -48,8 +48,8 @@ class Message:
         When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`.
     ValueError
         When `text_renderer` returns something other than a `str`. See ADR-0008.
-    NotImplementedError
-        When `markdown` is supplied.
+    ImportError
+        When `markdown` is supplied and `epistole[markdown]` is not installed.
     """
 
     __slots__ = (
@@ -91,8 +91,15 @@ class Message:
             raise TypeError(msg)
 
         if markdown is not None:
-            msg = "markdown= is not supported yet"
-            raise NotImplementedError(msg)
+            try:
+                from markdown_it import MarkdownIt  # noqa: PLC0415
+            except ImportError as error:
+                msg = "Message(markdown=) needs markdown-it-py, so install the extra: pip install 'epistole[markdown]'"
+                raise ImportError(msg) from error
+
+            html = MarkdownIt("commonmark").render(markdown)
+            if text is None:
+                text = markdown
 
         if text is None and html is not None:
             rendered: object = (

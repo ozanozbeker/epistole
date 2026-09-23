@@ -31,6 +31,7 @@ markdown = ["markdown-it-py>=4.2"]
 
 [dependency-groups]
 dev = [
+  "epistole[markdown]",
   "prek>=0.5.2",
   "pyrefly>=1.2.0",
   "pytest>=9.1.1",

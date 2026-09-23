@@ -1,4 +1,5 @@
 import re
+import sys
 
 import pytest
 
@@ -95,6 +96,34 @@ def test_text_renderer_may_return_empty_text():
 )
 def test_text_derived_from_html_holding_none_is_empty(html: str):
     assert Message(html=html).text == ""
+
+
+def test_a_markdown_message_renders_html_and_keeps_the_source_as_text():
+    message = Message(markdown="Weekly *numbers*")
+
+    assert message.html == "<p>Weekly <em>numbers</em></p>\n"
+    assert message.text == "Weekly *numbers*"
+
+
+def test_text_supplied_with_markdown_is_kept_verbatim():
+    assert (
+        Message(markdown="Weekly *numbers*", text="Weekly numbers").text
+        == "Weekly numbers"
+    )
+
+
+def test_markdown_renders_on_the_commonmark_preset():
+    # A table is a GFM extension, so the commonmark preset leaves it as a paragraph (ADR-0008).
+    table = "| a | b |\n| - | - |\n| 1 | 2 |"
+
+    assert Message(markdown=table).html == f"<p>{table}</p>\n"
+
+
+def test_markdown_without_the_extra_raises_naming_it(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setitem(sys.modules, "markdown_it", None)
+
+    with pytest.raises(ImportError, match=r"epistole\[markdown\]"):
+        Message(markdown="Weekly numbers")
 
 
 def test_a_text_only_message_has_no_html():
