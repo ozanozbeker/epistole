@@ -24,7 +24,7 @@ A method with one caller is a mechanism, not a design.
 
 **The gap is a pre-check, not a new class.**
 ADR-0004 rules that a limit Epistole can check before touching the wire is `RejectedError` with `__cause__` `None`, because the same message succeeds on another backend and the caller should see one class whether Epistole or the service noticed first.
-A header the large path cannot carry is that case exactly, and the fix is on the message, so `RejectedError` is the right class and an eighth leaf would split one meaning across two names.
+A header the large path cannot carry is that case exactly, and the fix is on the message, so `RejectedError` is the right class and an eighth class would split one meaning across two names.
 
 **No warning, no flag.**
 ADR-0004 already rejected warnings because they are invisible in production logs.
@@ -46,5 +46,5 @@ Each backend is its own class, so those knobs are already keyword arguments with
 - #20 decided that every Graph request is JSON (ADR-0012).
   A MIME-built draft with attachments uploaded afterwards would shrink the gap; it is untested and recorded there as the reopener.
 - A provider that rewrites the stamped `Message-ID` is not a contract break: ADR-0004 defines `SendResult.message_id` as the id of the submission Epistole made.
-- ADR-0004's consequence that #17 "can add an unsupported-feature leaf" is closed: it does not.
+- ADR-0004's consequence that #17 "can add an unsupported-feature class" is closed: it does not.
 - `docs/research/prior-art.md` keeps recommending both mechanisms; this ADR is the answer to that recommendation, not a correction of the research.

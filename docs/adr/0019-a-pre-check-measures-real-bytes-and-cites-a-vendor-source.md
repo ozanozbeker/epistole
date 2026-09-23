@@ -56,7 +56,7 @@ The tenant message limit on Exchange Online is the standing example: ADR-0012 le
   Fast rejection on the obvious cases, exact behaviour at the boundary.
   Rejected because it is two constants and two rules serving one gate.
 - **No pre-checks anywhere; let every service answer.**
-  Smallest surface, and every reply already maps to the same leaf.
+  Smallest surface, and every reply already maps to the same class.
   Rejected because Epistole would ship knowing a documented limit it declines to check, and the round trip on a 35 MB message is not free.
 - **A pre-check on the Exchange Online tenant message limit.**
   Rejected in ADR-0012 and unchanged here: the value is per tenant and not readable, so any number would be a guess.

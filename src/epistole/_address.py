@@ -1,4 +1,4 @@
-"""The address type and the structural check every address passes."""
+"""The address type, the check every address passes, and the reader that strips a display name."""
 
 from email.utils import formataddr, getaddresses
 from typing import Self
@@ -72,3 +72,29 @@ def check_address(address: str) -> None:
     if not local or not domain:
         msg = f"{address!r} is not an address: it needs something on both sides of its last @"
         raise ValueError(msg)
+
+
+def addr_spec(address: str) -> str:
+    """Return the mailbox `address` names, without its display name.
+
+    A mail service names a mailbox and never a display name, so the addr-spec is the form a refusal arrives under and the form `refuse=` matches against. It is also where a `Message-ID` takes its domain.
+
+    Every caller has run `check_address` first, so `getaddresses` reads exactly one pair.
+
+    Parameters
+    ----------
+    address
+        A checked address, bare or carrying a display name.
+
+    Returns
+    -------
+    The addr-spec, which is `address` itself when it carries no display name.
+
+    Examples
+    --------
+    ```python
+    addr_spec("Ada Lovelace <ada@example.com>")  # "ada@example.com"
+    addr_spec("ada@example.com")  # "ada@example.com"
+    ```
+    """
+    return getaddresses([address])[0][1]

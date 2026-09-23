@@ -39,7 +39,7 @@ A Graph recipient typo arrives later as a non-delivery report in the sender's in
 `smtplib.SMTPException` subclasses `OSError`.
 Copying that would let an `except OSError` around unrelated file code swallow a mail failure.
 `EpistoleError` subclasses `Exception` and carries `backend`, the backend object the failure came from.
-A transport has no backend to name, because it receives a `Submission` and nothing else (ADR-0015), so the leaf is raised without one and the caller stamps it on the way out.
+A transport has no backend to name, because it receives a `Submission` and nothing else (ADR-0015), so the error is raised without one and the caller stamps it on the way out.
 The native exception is reachable as `__cause__`, raised with `from`, and there is no duplicate `original` attribute.
 For the HTTP backends the cause is whatever the transport layer raised, so the status and body stay reachable through it; #16 owns that layer.
 
@@ -69,7 +69,7 @@ Epistole never sleeps and never retries.
   `Connection.send` re-keys each one to the matching entry of `submission.message.recipients` before it builds the send result, so `refused` compares directly against what the caller wrote and a display-name address is not silently missed.
   Two recipients sharing an addr-spec resolve to the first in `recipients` order.
   `reason` is text, never bytes: `smtplib` answers in `bytes`, decoded as UTF-8 with `errors="replace"`.
-- **Seven leaves under `EpistoleError`.**
+- **Seven error classes under `EpistoleError`.**
 
   | Class | Meaning |
   | --- | --- |
@@ -82,12 +82,12 @@ Epistole never sleeps and never retries.
   | `ProviderError` | the provider's own `5xx`, or a reply the mapper does not know |
 
   Sender and recipients refused stay apart from `RejectedError` because the fix is different: an administrator's grant or the address list, not the message content.
-- **A leaf takes a message positionally and its extras keyword-only.**
+- **Each takes a message positionally and its extras keyword-only.**
   `EpistoleError(message, /, *, backend=None)`, `RecipientsRefusedError(message, /, *, refused, backend=None)`, and `ThrottledError(message, /, *, retry_after=None, backend=None)`; the other four inherit the base.
-  `raise SomeLeaf("text")` stays the shape every Python exception has.
+  `raise RejectedError("text")` stays the shape every Python exception has.
 - **The raise site does not fill `backend`; the caller stamps it.**
-  A transport raises the mapped leaf with `backend` unset, and `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
-  So `backend` is set on every error that reaches a caller, and `None` only on a leaf inspected before it has propagated.
+  A transport raises the mapped error with `backend` unset, and `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
+  So `backend` is set on every error that reaches a caller, and `None` only on an error inspected before it has propagated.
   `backend` is therefore a plain mutable attribute rather than a constructor-only field.
 - **Who said no decides the class.**
   A mistake Epistole finds before touching the wire, such as no recipients, `send` on a closed connection, or a `cid:` with no inline image behind it, is a `TypeError` or `ValueError`, never a `EpistoleError`.
@@ -174,6 +174,6 @@ Epistole never sleeps and never retries.
 - [#13](https://github.com/ozanozbeker/epistole/issues/13) maps connection-lifecycle failures onto `TransportError` and `AuthenticationError`; no new class is needed.
 - [#14](https://github.com/ozanozbeker/epistole/issues/14) settled the spellings: `SendResult`, `Refusal`, and the seven class names as written here.
 - [#16](https://github.com/ozanozbeker/epistole/issues/16) decides what `__cause__` is on the HTTP backends; the contract here is only that it is the transport's own exception.
-- [#17](https://github.com/ozanozbeker/epistole/issues/17) can add an unsupported-feature leaf; the hierarchy is flat, so nothing here forecloses it.
+- [#17](https://github.com/ozanozbeker/epistole/issues/17) can add an unsupported-feature class; the hierarchy is flat, so nothing here forecloses it.
 - What Gmail does when the `From` header names neither the account nor a verified alias needs a real send, so its mapping is unknown until implementation.
-  Rewrite, reject, and send-as-given each land on a different leaf above; ADR-0001 carries the same open question from the sender-identity side.
+  Rewrite, reject, and send-as-given each land on a different class above; ADR-0001 carries the same open question from the sender-identity side.

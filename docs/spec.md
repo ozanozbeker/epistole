@@ -26,31 +26,42 @@ __all__ = [
     "AccessToken",
     "Address",
     "Attachment",
-    "AuthenticationError",
     "Backend",
     "Connection",
     "ConsoleBackend",
-    "EpistoleError",
     "GmailBackend",
     "GraphBackend",
     "MemoryBackend",
     "Message",
-    "ProviderError",
-    "RecipientsRefusedError",
     "Refusal",
-    "RejectedError",
     "SMTPBackend",
     "SendResult",
-    "SenderRefusedError",
     "Submission",
-    "ThrottledError",
     "TokenCredential",
     "Transport",
-    "TransportError",
+    "exceptions",
     "html_to_text",
+]
+
+
+# epistole.exceptions
+__all__ = [
+    "AuthenticationError",
+    "EpistoleError",
+    "ProviderError",
+    "RecipientsRefusedError",
+    "RejectedError",
+    "SenderRefusedError",
+    "ThrottledError",
+    "TransportError",
 ]
 ```
 
+- Every error class lives in `epistole.exceptions` and none is re-exported from `epistole`.
+  A caller writes `from epistole.exceptions import ThrottledError`, or `from epistole import exceptions` and then `exceptions.ThrottledError`.
+  The module is named for `Exception` rather than for `Error` because `Warning` is an `Exception` too, so a warning Epistole raises later lands in the same module without the name going wrong.
+  `polars.exceptions`, `numpy.exceptions`, and `sqlalchemy.exc` each hold both kinds; `pandas.errors` is the counterexample.
+  `epistole` carries the submodule itself in `__all__`, so `import epistole` reaches `epistole.exceptions` without a second import line.
 - Credential values live in the module of the backend that issues their tokens: `epistole.smtp`, `epistole.gmail`, `epistole.graph` (ADR-0011).
   The backend classes are defined there too and re-exported from `epistole`.
 - Each backend module carries its own `__all__`: `epistole.smtp` exports `SMTPBackend`, `Password`, and `OAuth`; `epistole.gmail` exports `GmailBackend`, `ServiceAccount`, and `AuthorizedUser`; `epistole.graph` exports `GraphBackend`, `ClientSecret`, `Certificate`, and `ManagedIdentity`.
@@ -295,8 +306,8 @@ class Submission:
 - The whole of what a third-party backend writes.
   `submit` returns the refusals the service gave, empty when none; it never constructs a `SendResult`.
 - A transport that cannot carry part of a message raises `RejectedError` with `__cause__` `None` before writing (ADR-0010).
-- `submit` maps the native failure onto one `EpistoleError` leaf per the tables below, raised with `from`.
-  It raises the leaf with `backend` unset: a transport receives a `Submission` and nothing else, so it has no backend to name.
+- `submit` maps the native failure onto one `EpistoleError` subclass per the tables below, raised with `from`.
+  It raises that error with `backend` unset: a transport receives a `Submission` and nothing else, so it has no backend to name.
 
 **Submission (ADR-0015).**
 
@@ -304,6 +315,11 @@ class Submission:
   Sending one message twice makes two submissions with two ids.
 - `message_id` is `email.utils.make_msgid(domain=...)`, the domain taken from the addr-spec of the backend's `from_address`, keeping its angle brackets.
   It is never `make_msgid()` bare, which resolves the domain through `socket.getfqdn()` and would leak the sending machine's hostname.
+- A non-ASCII domain is IDNA-encoded before it is stamped, so `用户@例子.广告` sends under `@xn--fsqu00a.xn--4rr70v` (ADR-0015).
+  RFC 5322 wants a `msg-id` in ASCII, and `EmailMessage.as_bytes()` raises `UnicodeEncodeError` on anything else, which is not an `EpistoleError` and is in no mapping table.
+  A `Message-ID` is an identifier and not a route, so nothing resolves the encoded domain and the stdlib codec's IDNA 2003 folding is harmless here.
+  A domain the codec refuses, which takes a non-ASCII label over 63 characters, is a `ValueError` from `Connection.send`.
+  ADR-0014 stands: this is what Epistole stamps, not what it checks, and a non-ASCII address is still accepted.
 - `date` is `email.utils.localtime()`: timezone-aware, carrying the sending machine's offset.
 
 ## Concrete backends
@@ -503,7 +519,9 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - `ConsoleBackend` writes a rendering, never wire bytes: addressing, custom headers (ADR-0016), `Message-ID`, `Date`, subject, the plain text in full, one line per attachment and inline image with name, content type, and size, and HTML as a size line.
   `stream=None` binds `sys.stdout` at write time.
 
-## SendResult, Refusal, errors
+## SendResult, Refusal, exceptions
+
+`SendResult` and `Refusal` are `epistole`; every class below them is `epistole.exceptions`.
 
 ```python
 @dataclass(frozen=True)
@@ -519,6 +537,7 @@ class Refusal:
     reason: str
 
 
+# epistole.exceptions
 class EpistoleError(Exception):
     backend: Backend | None
 
@@ -578,12 +597,12 @@ class ProviderError(EpistoleError): ...
 
 **Errors (ADR-0004).**
 
-- Flat: seven leaves, no transient base.
+- Flat: seven error classes under `EpistoleError`, no transient base.
   The transient set is `(ThrottledError, TransportError, ProviderError)`.
-- A leaf takes its message positionally and its extras keyword-only, so `raise RejectedError("...")` keeps the shape every Python exception has.
+- Each takes its message positionally and its extras keyword-only, so `raise RejectedError("...")` keeps the shape every Python exception has.
 - The raise site does not fill `backend`.
-  A transport raises the leaf without one, and `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
-  So `backend` is the configured backend on every error that reaches a caller, and `None` only on a leaf inspected before it has propagated.
+  A transport raises the error without one, and `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
+  So `backend` is the configured backend on every error that reaches a caller, and `None` only on an error inspected before it has propagated.
 - The native exception is `__cause__`, raised with `from`.
   `__cause__` is `None` on any check Epistole ran itself, before the wire or after it: a backend pre-check, and the every-recipient-refused check in `Connection.send`.
 - `retry_after` is seconds, parsed from both RFC 9110 `Retry-After` forms whenever the response carries the header, and `None` otherwise, on both HTTP backends.
@@ -677,7 +696,7 @@ Facts the ADRs took from documentation or set conservatively. [#23](https://gith
 None moves a signature above; each changes a docstring, a private constant, or a mapping row.
 
 1. Gmail: does `messages.send` keep the stamped `Message-ID` on the wire (ADR-0004, ADR-0011).
-2. Gmail: what happens when `From` names neither the account nor a verified alias, and which leaf it maps to; it lands on `AuthenticationError` through the catch-all `403` until a reason string is observed (ADR-0001, ADR-0004).
+2. Gmail: what happens when `From` names neither the account nor a verified alias, and which class it maps to; it lands on `AuthenticationError` through the catch-all `403` until a reason string is observed (ADR-0001, ADR-0004).
 3. Gmail: does `users/me` resolve to `ServiceAccount.subject` on the send endpoint (ADR-0011).
 4. Graph: does `/users/{addr-spec}` serve a delegated `TokenCredential` reaching its own mailbox, as the app-only path does (ADR-0012).
 5. Graph: does `internetMessageId` survive to the wire on both paths (ADR-0012).

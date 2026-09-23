@@ -6,6 +6,7 @@ It now takes a frozen `Submission(message, from_address, message_id, date)` and 
 Decided on [#28](https://github.com/ozanozbeker/epistole/issues/28), which amends ADR-0002, ADR-0004, ADR-0005, ADR-0006, ADR-0007, and ADR-0008.
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the rendering carries the caller's custom headers, alongside the addressing (ADR-0016).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the stamps get their generators, and `MemoryBackend` records a submission only when a recipient accepted it.
+Amended on [#35](https://github.com/ozanozbeker/epistole/issues/35): a non-ASCII domain is IDNA-encoded before it is stamped into `message_id`.
 
 ## Why
 
@@ -63,6 +64,10 @@ The entries are `Submission` values, so the attribute and the type agree, as `Se
 - **The stamps have one generator each.**
   `message_id` is `email.utils.make_msgid(domain=...)`, the domain taken from the addr-spec of the backend's from address, and it keeps its angle brackets so the value reads the same in a log, in the header, and in Graph's `internetMessageId`.
   The domain comes from the from address rather than from `make_msgid`'s default, which resolves through `socket.getfqdn()` and would put the sending machine's internal hostname in every message a scheduled job sends.
+  A non-ASCII domain is IDNA-encoded on the way in, because RFC 5322 wants a `msg-id` in ASCII and `EmailMessage.as_bytes()` raises `UnicodeEncodeError` on anything else, which is not an `EpistoleError` and sits in no mapping table (ADR-0004).
+  The encoding is safe to do blind: a `Message-ID` is an identifier and not a route, so nothing resolves the domain and it only has to be stable and legal.
+  That is also why the stdlib codec's IDNA 2003 folding does not matter, where `straße.de` becomes `strasse.de` rather than IDNA 2008's `xn--strae-oqa.de`.
+  ADR-0014 is untouched: it decided what Epistole checks, and this decides what Epistole stamps.
   `date` is `email.utils.localtime()`: timezone-aware, carrying the sending machine's offset, which is what a mail client writes and what a recipient reading a timestamp expects.
 - **`Transport` is `submit(submission, /) -> Mapping[str, Refusal]` and `close() -> None`.**
   Positional-only as ADR-0006 requires.
@@ -71,7 +76,7 @@ The entries are `Submission` values, so the attribute and the type agree, as `Se
   It checks the message, builds the `Submission`, calls `submit`, then constructs the `SendResult` from the submission's `message_id` and `date` plus the returned mapping.
   A transport never constructs a `SendResult`.
 - **Every recipient refused raises `RecipientsRefusedError`, and `Connection.send` is the only place it is raised.**
-  A transport answers with refusals and never raises this leaf, `SMTPTransport` included: it catches `SMTPRecipientsRefused` and returns its `.recipients` as data.
+  A transport answers with refusals and never raises it, `SMTPTransport` included: it catches `SMTPRecipientsRefused` and returns its `.recipients` as data.
   The rule then holds on every backend including the doubles, which is why it moved here (ADR-0004).
 - **`MemoryBackend.submissions` is a live `list[Submission]`.**
   On the backend, surviving every connection the backend opens (ADR-0005).
