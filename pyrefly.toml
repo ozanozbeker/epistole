@@ -1,4 +1,1 @@
-# Pyrefly configuration file
-# See: https://pyrefly.org/en/docs/configuration/
-
 preset = "strict"

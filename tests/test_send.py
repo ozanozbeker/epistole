@@ -31,7 +31,7 @@ def message(*recipients: str) -> Message:
 
 
 class FakeTransport:
-    """A transport that answers with whatever the test set on it."""
+    """A fake transport returns or raises whatever the test sets on it."""
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class FakeTransport:
 
 
 class FakeBackend(Backend):
-    """A backend that opens one transport the test holds a reference to."""
+    """A fake backend opens one transport the test holds a reference to."""
 
     def __init__(
         self,
@@ -112,7 +112,7 @@ def test_send_opens_a_connection_sends_and_closes_it():
     assert backend.transport.closes == 1
 
 
-def test_send_returns_the_stamps_the_submission_carried():
+def test_send_returns_the_message_id_and_date_the_submission_carried():
     backend = MemoryBackend()
 
     result = backend.send(message())
@@ -128,7 +128,7 @@ def test_connect_hands_back_a_connection():
         assert isinstance(connection, Connection)
 
 
-def test_connect_stamps_the_backend_on_an_error_from_open():
+def test_connect_sets_the_backend_on_an_error_from_open():
     backend = FakeBackend(open_error=TransportError("no socket"))
 
     with pytest.raises(TransportError) as caught:
@@ -432,8 +432,8 @@ def test_the_full_refusal_check_reads_every_recipient():
 # --- Errors on the way out ---------------------------------------------------
 
 
-def test_send_stamps_the_backend_on_an_error_from_the_transport():
-    backend = FakeBackend(FakeTransport(error=ProviderError("service is unwell")))
+def test_send_sets_the_backend_on_an_error_from_the_transport():
+    backend = FakeBackend(FakeTransport(error=ProviderError("service returned 503")))
 
     with pytest.raises(ProviderError) as caught:
         backend.send(message())
@@ -454,7 +454,7 @@ def test_a_transport_error_closes_the_connection():
 
 
 def test_every_other_error_leaves_the_connection_open():
-    backend = FakeBackend(FakeTransport(error=ProviderError("service is unwell")))
+    backend = FakeBackend(FakeTransport(error=ProviderError("service returned 503")))
     connection = backend.connect()
 
     with pytest.raises(ProviderError):
@@ -483,7 +483,7 @@ def test_an_ascii_domain_is_left_alone():
     assert backend.send(message()).message_id.endswith("@EXAMPLE.com>")
 
 
-def test_a_stamped_message_id_writes_to_the_wire():
+def test_a_generated_message_id_serializes_to_bytes():
     backend = MemoryBackend(from_address="用户@例子.广告")
 
     result = backend.send(message())
@@ -496,7 +496,7 @@ def test_a_stamped_message_id_writes_to_the_wire():
     assert result.message_id.encode() in built.as_bytes()
 
 
-def test_a_domain_the_codec_refuses_raises():
+def test_a_domain_the_codec_cannot_encode_raises():
     backend = MemoryBackend(from_address=f"ada@{'例' * 64}.com")
 
     with pytest.raises(ValueError, match="Message-ID"):

@@ -1,16 +1,12 @@
-# Ruff configuration file
-# See: https://docs.astral.sh/ruff/
-
 target-version = "py313"
 
 [lint]
 select = ["ALL"]
 ignore = [
-  # No per-file copyright headers; a single top-level LICENSE covers the project
+  # The top-level LICENSE covers every file, so no file carries a copyright header.
   "CPY001",  # flake8-copyright
 
-  # Recommended rules to disable per the docs
-  # https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
+  # Ruff recommends disabling these rules alongside its formatter: https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
   "COM812",  # flake8-commas > missing trailing-comma
   "COM819",  # flake8-commas > prohibited-trailing-comma
   "D203",  # pydocstyle > incorrect-blank-line-before-class
@@ -19,7 +15,7 @@ ignore = [
   "E111",  # pycodestyle Error > indentation-with-invalid-multiple
   "E114",  # pycodestyle Error > indentation-with-invalid-multiple-comment
   "E117",  # pycodestyle Error > over-indented
-  "E501",  # pycodestyle Error
+  "E501",  # pycodestyle Error > line-too-long
   "ISC002",  # flake8-implicit-str-concat > multi-line-implicit-string-concatenation
   "Q",  # flake8-quotes
   "W191",  # pycodestyle Warning > tab-indentation
@@ -30,13 +26,11 @@ unfixable = [
 ]
 
 [lint.per-file-ignores]
-# __init__.py related ignores
 "**/__init__.py" = [
   "D104",  # pydocstyle > undocumented-public-package
   "F401",  # Pyflakes > unused-import
 ]
 
-# Pytest related ignores
 "**/tests/**/*.py" = [
   "ANN",  # flake8-annotations > ALL
   "ARG001",  # flake8-unused-arguments > unused-function-argument

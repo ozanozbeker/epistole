@@ -1,7 +1,7 @@
 [project]
 name = "epistole"
 version = "0.0.3"
-description = "A single Python API for sending email, regardless of the backend behind it."
+description = "Epistole is a single Python API for sending email, regardless of the backend."
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
@@ -44,8 +44,7 @@ requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.pytest.ini_options]
-# importlib mode keeps tests/ free of __init__.py and imports epistole from the
-# installed package rather than from a sys.path entry pointing at src/.
+# importlib mode imports epistole from the installed package, not from src/. tests/ needs no __init__.py.
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]
 testpaths = ["tests"]
 xfail_strict = true
