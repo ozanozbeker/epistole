@@ -1,5 +1,10 @@
-from collections.abc import Mapping
+import base64
+import contextlib
+import io
+from collections.abc import Callable, Mapping
 from email.message import EmailMessage
+from email.utils import format_datetime
+from pathlib import Path
 from typing import override
 
 import pytest
@@ -7,6 +12,7 @@ import pytest
 from epistole import (
     Backend,
     Connection,
+    ConsoleBackend,
     MemoryBackend,
     Message,
     Refusal,
@@ -91,8 +97,9 @@ def test_a_backend_checks_its_from_address():
         MemoryBackend(from_address="garbage")
 
 
-def test_a_double_defaults_its_from_address():
-    assert MemoryBackend().from_address == "epistole@example.invalid"
+@pytest.mark.parametrize("double", [MemoryBackend, ConsoleBackend])
+def test_a_double_defaults_its_from_address(double: Callable[[], Backend]):
+    assert double().from_address == "epistole@example.invalid"
 
 
 def test_a_backend_is_not_a_context_manager():
@@ -371,6 +378,111 @@ def test_refuse_reaches_a_cc_and_a_bcc():
 def test_refuse_checks_the_addresses_it_was_given():
     with pytest.raises(ValueError, match="garbage"):
         MemoryBackend(refuse={"garbage": REFUSED})
+
+
+# --- ConsoleBackend ----------------------------------------------------------
+
+
+def test_a_supplied_stream_receives_the_rendering(capsys: pytest.CaptureFixture[str]):
+    stream = io.StringIO()
+
+    ConsoleBackend(stream=stream).send(message())
+
+    assert "Weekly numbers" in stream.getvalue()
+    assert capsys.readouterr().out == ""
+
+
+def test_stream_none_binds_stdout_at_write_time():
+    connection = ConsoleBackend().connect()
+    stdout = io.StringIO()
+
+    with connection, contextlib.redirect_stdout(stdout):
+        connection.send(message())
+
+    assert "Weekly numbers" in stdout.getvalue()
+
+
+def test_a_file_stream_holds_the_rendering_when_the_send_returns(tmp_path: Path):
+    path = tmp_path / "sent.txt"
+
+    with path.open("w", encoding="utf-8") as stream:
+        ConsoleBackend(stream=stream).send(message())
+
+        assert "Weekly numbers" in path.read_text(encoding="utf-8")
+
+
+def test_the_rendering_leaves_out_what_the_message_does_not_hold():
+    stream = io.StringIO()
+
+    result = ConsoleBackend(stream=stream).send(
+        Message(text="Weekly numbers").to("ada@example.com")
+    )
+
+    assert stream.getvalue() == (
+        "From: epistole@example.invalid\n"
+        "To: ada@example.com\n"
+        f"Message-ID: {result.message_id}\n"
+        f"Date: {format_datetime(result.date)}\n"
+        "\n"
+        "Weekly numbers\n"
+        f"{'-' * 79}\n"
+    )
+
+
+def test_the_rendering_holds_every_part_of_the_submission():
+    stream = io.StringIO()
+    backend = ConsoleBackend(from_address="reports@example.com", stream=stream)
+
+    result = backend.send(
+        Message(html='<p>Café</p><img src="cid:logo">', text="Weekly numbers")
+        .to("ada@example.com", "Bob <bob@example.com>")
+        .cc("cleo@example.com")
+        .bcc("dan@example.com")
+        .reply_to("help@example.com")
+        .subject("Weekly numbers")
+        .headers({"List-Unsubscribe": "<mailto:stop@example.com>", "X-Id": "autumn"})
+        .attach(bytes(2048), filename="weekly.pdf")
+        .attach(b"%PDF", filename="monthly.pdf")
+        .embed(b"\x89PNG", filename="logo.png", cid="logo")
+    )
+
+    assert stream.getvalue() == (
+        "From: reports@example.com\n"
+        "To: ada@example.com, Bob <bob@example.com>\n"
+        "Cc: cleo@example.com\n"
+        "Bcc: dan@example.com\n"
+        "Reply-To: help@example.com\n"
+        "List-Unsubscribe: <mailto:stop@example.com>\n"
+        "X-Id: autumn\n"
+        f"Message-ID: {result.message_id}\n"
+        f"Date: {format_datetime(result.date)}\n"
+        "Subject: Weekly numbers\n"
+        "HTML: 32 bytes\n"
+        "Attachment: weekly.pdf (application/pdf, 2,048 bytes)\n"
+        "Attachment: monthly.pdf (application/pdf, 4 bytes)\n"
+        "Inline image: cid:logo (logo.png, image/png, 4 bytes)\n"
+        "\n"
+        "Weekly numbers\n"
+        f"{'-' * 79}\n"
+    )
+
+
+def test_the_rendering_is_never_the_bytes_a_backend_sends():
+    stream = io.StringIO()
+    pdf = b"%PDF-1.7 weekly numbers"
+
+    ConsoleBackend(stream=stream).send(
+        Message(html="<p>Café</p>")
+        .to("Zoë <zoe@example.com>")
+        .subject("Café numbers")
+        .attach(pdf, filename="weekly.pdf")
+    )
+
+    rendered = stream.getvalue()
+    assert "To: Zoë <zoe@example.com>\n" in rendered
+    assert "Subject: Café numbers\n" in rendered
+    assert "<p>" not in rendered
+    assert base64.b64encode(pdf).decode() not in rendered
 
 
 # --- Every recipient refused -------------------------------------------------

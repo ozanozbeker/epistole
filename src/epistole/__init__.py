@@ -1,7 +1,7 @@
 from epistole import exceptions
 from epistole._address import Address
 from epistole._backend import Backend, Connection, Submission, Transport
-from epistole._doubles import MemoryBackend
+from epistole._doubles import ConsoleBackend, MemoryBackend
 from epistole._message import Attachment, Message
 from epistole._result import Refusal, SendResult
 from epistole._text import html_to_text
@@ -11,6 +11,7 @@ __all__ = [
     "Attachment",
     "Backend",
     "Connection",
+    "ConsoleBackend",
     "MemoryBackend",
     "Message",
     "Refusal",

@@ -9,6 +9,7 @@ Decided on [#28](https://github.com/ozanozbeker/epistole/issues/28), which amend
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the rendering includes the caller's custom headers, alongside the addressing (ADR-0016).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): `Message-ID` and `Date` get their generators, and `MemoryBackend` records a submission only when at least one recipient is accepted.
 Amended on [#35](https://github.com/ozanozbeker/epistole/issues/35): a non-ASCII domain is IDNA-encoded before it is written into `message_id`.
+Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): the rendering includes the from address, which the submission holds and the message does not. `ConsoleBackend` flushes the stream after each rendering.
 
 ## Why
 
@@ -129,9 +130,10 @@ The entries are `Submission` values, so the attribute name matches the type, as 
   `None` means `sys.stdout` looked up at write time, never captured in `__init__`.
   pytest's `capsys` and Jupyter both replace it after import, and an eagerly bound stream writes somewhere the test does not capture.
 - **`ConsoleBackend` writes a rendering, not bytes.**
-  The rendering holds the addressing, custom headers, `Message-ID`, `Date`, subject, and the plain text in full.
+  The rendering holds the from address, the addressing, custom headers, `Message-ID`, `Date`, subject, and the plain text in full.
   It has one line per attachment and inline image, with name, content type and size.
   It shows the HTML as a size line alone.
+  It flushes the stream after each rendering, as Django's console backend and `logging.StreamHandler` do, so a pipe or a file holds the rendering when the send returns.
 - **Both doubles default the from address and take no credential.**
   The default is `epistole@example.invalid`, reserved by RFC 2606 and passing the ADR-0014 shape check.
   On a double, the from address carries no information, because there is no mail service to authorize it.

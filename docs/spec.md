@@ -608,9 +608,10 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   Concurrent sends do lose call order, because entries are appended in submit-completion order.
   A test that asserts on order sends from one thread.
 - `ConsoleBackend` writes a rendering, never the bytes a backend sends.
-  It writes the addressing, custom headers (ADR-0016), `Message-ID`, `Date`, subject, and the plain text in full.
+  It writes the from address, the addressing, custom headers (ADR-0016), `Message-ID`, `Date`, subject, and the plain text in full.
   It writes one line per attachment and inline image, with name, content type, and size.
   It writes HTML as a size line.
+  It flushes the stream after each rendering, so a pipe or a file holds the rendering when the send returns.
   `stream=None` binds `sys.stdout` at write time.
 
 ## SendResult, Refusal, exceptions
