@@ -27,11 +27,11 @@ LEAVES = (
     TransportError,
 )
 
-# `build` passes these keyword-only extras so it can construct every leaf.
 EXTRAS: dict[type[EpistoleError], dict[str, Any]] = {
     RecipientsRefusedError: {"refused": {"ada@example.com": Refusal(550, "no")}},
     ThrottledError: {"retry_after": 30.0},
 }
+"""`build` passes these keyword-only extras so it can construct every leaf."""
 
 
 def build(leaf: type[EpistoleError], **overrides: Any) -> EpistoleError:

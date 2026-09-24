@@ -19,18 +19,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import BinaryIO
 
-# The type and the subtype each match RFC 6838's restricted-name.
 _MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
+"""The type and the subtype each match RFC 6838's restricted-name."""
 
-# HTMLParser reports attribute values without their offsets, so this tokenizes a start tag's attributes as HTML5 does.
 _ATTRIBUTE = re.compile(
     r"""[\t\n\f\r /]*(?P<name>[^\t\n\f\r />][^\t\n\f\r /=>]*)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)'|(?P<bare>[^\t\n\f\r >]*)))?"""
 )
+"""HTMLParser reports attribute values without their offsets, so this tokenizes a start tag's attributes as HTML5 does."""
 
-# RFC 5322 ftext: printable ASCII 33 to 126, except the colon.
 _FIELD_NAME = re.compile(r"[!-9;-~]+")
+"""RFC 5322 ftext: printable ASCII 33 to 126, except the colon."""
 
-# ADR-0016 lists the headers Epistole writes, lowercased because RFC 5322 names are case-insensitive.
 _OWNED_NAMES = frozenset(
     {
         "from",
@@ -48,6 +47,7 @@ _OWNED_NAMES = frozenset(
         "content-disposition",
     }
 )
+"""ADR-0016 lists the headers Epistole writes, lowercased because RFC 5322 names are case-insensitive."""
 
 
 class Message:
@@ -519,11 +519,11 @@ class _DataImageFinder(Parser):
 
     def __init__(self, html: str) -> None:
         super().__init__()
-        # getpos() counts only "\n" as a line end, so the index of a position is its line's start plus its column.
         self._line_starts: list[int] = [
             0,
             *(match.end() for match in re.finditer("\n", html)),
         ]
+        r"""getpos() counts only "\n" as a line end, so the index of a position is its line's start plus its column."""
         self.found: list[tuple[int, int, Attachment]] = []
         self.feed(html)
         self.close()

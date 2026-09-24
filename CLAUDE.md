@@ -105,3 +105,14 @@ These limits keep it there:
   It records no history and does not restate the code.
 - A test's docstring is one sentence naming the behaviour under test.
 - A measurement or a declined design goes in the repo's own record, and the docstring links to it in one sentence.
+
+### Explain a value in a docstring under it
+
+A module constant, a class attribute, or a `self` attribute set in `__init__` that needs explaining takes a docstring on the line after its assignment.
+Do not write a comment line above it.
+A comment between two assignments can read as belonging to either one.
+
+```python
+_CLOSING = 421
+"""RFC 5321: the server closes its socket after this reply."""
+```

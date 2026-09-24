@@ -35,10 +35,9 @@ def content_id_of(
 
 CHART = data_uri(PNG)
 
-# The line boundaries str.splitlines() documents, each of which EmailMessage raises on.
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+"""The line boundaries str.splitlines() documents, each of which EmailMessage raises on."""
 
-# A quoted local part may hold an @, and Epistole never checks character set (ADR-0014).
 GOOD = (
     "ada@example.com",
     "Ada Lovelace <ada@example.com>",
@@ -47,8 +46,8 @@ GOOD = (
     '"very.unusual.@.unusual.com"@example.com',
     "用户@例子.广告",
 )
+"""A quoted local part may hold an @, and Epistole never checks character set (ADR-0014)."""
 
-# getaddresses drops the address literals although RFC 5321 allows them, so they fail too (ADR-0014).
 BAD = (
     "",
     "garbage",
@@ -61,6 +60,7 @@ BAD = (
     "Ada\u2028Lovelace <ada@example.com>",
     '"a\nb"@example.com',
 )
+"""getaddresses drops the address literals although RFC 5321 allows them, so they fail too (ADR-0014)."""
 
 
 def test_a_message_carries_the_text_it_was_built_with():

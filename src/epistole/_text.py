@@ -3,13 +3,12 @@
 from html.parser import HTMLParser
 from typing import override
 
-# A <head> holds text only in these, so skipping them drops the head even when it is never closed.
 _SKIPPED = frozenset({"script", "style", "title"})
+"""A <head> holds text only in these, so skipping them drops the head even when it is never closed."""
 
-# Each of these block elements ends the line.
 _LINES = frozenset({"div", "li", "tr"})
+"""Each of these block elements ends the line."""
 
-# Each of these ends the line and leaves a blank line before the next.
 _PARAGRAPHS = frozenset(
     {
         "blockquote",
@@ -27,6 +26,7 @@ _PARAGRAPHS = frozenset(
         "ul",
     }
 )
+"""Each of these ends the line and leaves a blank line before the next."""
 
 
 def html_to_text(html: str, /) -> str:

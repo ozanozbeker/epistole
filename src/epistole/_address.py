@@ -4,8 +4,8 @@ import re
 from email.utils import formataddr, getaddresses
 from typing import Self
 
-# str.splitlines() splits on each of these, and EmailMessage raises on a value it splits.
 LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
+"""str.splitlines() splits on each of these, and EmailMessage raises on a value it splits."""
 
 
 class Address(str):
