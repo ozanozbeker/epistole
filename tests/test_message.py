@@ -1,6 +1,10 @@
+import base64
+import hashlib
+import mimetypes
 import re
 import sys
 from pathlib import Path
+from urllib.parse import quote_from_bytes
 
 import pytest
 
@@ -10,8 +14,25 @@ ADDRESS_METHODS = ("to", "cc", "bcc", "reply_to")
 
 PDF = b"%PDF-1.7 weekly numbers"
 PNG = b"\x89PNG\r\n\x1a\n logo"
+SVG = b'<svg xmlns="http://www.w3.org/2000/svg"/>'
 LOGO_HTML = '<p><img src="cid:logo.png" alt="Logo"></p>'
 UNSUBSCRIBE = "<mailto:unsubscribe@example.com>"
+
+
+def data_uri(data: bytes, media_type: str = "image/png") -> str:
+    return f"data:{media_type};base64,{base64.b64encode(data).decode()}"
+
+
+def content_id_of(
+    data: bytes, media_type: str = "image/png", extension: str = ".png"
+) -> str:
+    # ADR-0003 fixes the format: 16 hex characters of SHA-256 over the media type, a NUL, and the bytes.
+    return (
+        hashlib.sha256(f"{media_type}\0".encode() + data).hexdigest()[:16] + extension
+    )
+
+
+CHART = data_uri(PNG)
 
 # The line boundaries str.splitlines() documents, each of which EmailMessage raises on.
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
@@ -597,6 +618,159 @@ def test_messages_differing_in_attachments_are_not_equal():
     assert attached != base
     assert attached != base.attach(PNG, filename="header.png")
     assert base.embed(PNG, cid="logo.png") != base
+
+
+def test_a_data_image_becomes_an_inline_image():
+    cid = content_id_of(PNG)
+
+    message = Message(html=f'<p><img src="{CHART}" alt="Chart"></p>')
+
+    assert message.html == f'<p><img src="cid:{cid}" alt="Chart"></p>'
+    assert message.inline_images == (
+        Attachment(filename=cid, content_type="image/png", data=PNG, content_id=cid),
+    )
+
+
+@pytest.mark.parametrize(
+    ("uri", "content_type", "data"),
+    [
+        # Pandoc writes an SVG percent-encoded rather than as base64 (ADR-0003).
+        (
+            "data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E",
+            "image/svg+xml",
+            SVG,
+        ),
+        (
+            "data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22/%3E",
+            "image/svg+xml",
+            SVG,
+        ),
+        (CHART.replace(";base64", ";name=chart.png;base64"), "image/png", PNG),
+        (
+            CHART.replace("data:image/png;base64", "DATA:Image/PNG;BASE64"),
+            "image/png",
+            PNG,
+        ),
+        (CHART[:30] + "\n  " + CHART[30:], "image/png", PNG),
+        (CHART.rstrip("="), "image/png", PNG),
+    ],
+)
+def test_a_data_image_decodes_either_payload_form(
+    uri: str, content_type: str, data: bytes
+):
+    image = Message(html=f'<img src="{uri}">').inline_images[0]
+
+    assert (image.content_type, image.data) == (content_type, data)
+
+
+def test_the_rewrite_changes_nothing_but_the_src_values():
+    html = (
+        "<!DOCTYPE html>\n"
+        "<!-- Q3 report -->\n"
+        "<p class=note>Q3 &amp; Q4&nbsp;numbers</p>\r\n"
+        f"<IMG width=600 SRC = '{CHART}' alt=\"Chart\"/>\n"
+        f"<img alt=Chart src={CHART}>"
+    )
+
+    assert Message(html=html).html == html.replace(CHART, f"cid:{content_id_of(PNG)}")
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        f'<!-- <img src="{CHART}"> -->',
+        f'<!--[if mso]><img src="{CHART}"><![endif]-->',
+        f"<style>.chart {{ background: url({CHART}); }}</style>",
+        f'<div style="background-image: url({CHART})"></div>',
+        f'<img srcset="{CHART} 2x" src="cid:logo.png">',
+        f'<img data-src="{CHART}">',
+        '<img src="data:text/plain;base64,aGk=">',
+    ],
+)
+def test_a_data_uri_that_is_not_an_img_src_image_stays_as_written(html: str):
+    message = Message(html=html)
+
+    assert message.html == html
+    assert message.inline_images == ()
+
+
+def test_cdata_outside_svg_is_a_comment_that_ends_at_the_next_greater_than_sign():
+    html = f'<![CDATA[ a > <img src="{CHART}"> ]]>'
+
+    assert Message(html=html).html == html.replace(CHART, f"cid:{content_id_of(PNG)}")
+
+
+@pytest.mark.parametrize(
+    "again",
+    [
+        CHART,
+        CHART.replace("image/png", "IMAGE/PNG"),
+        f"data:image/png,{quote_from_bytes(PNG)}",
+    ],
+)
+def test_one_image_used_twice_makes_one_inline_image(again: str):
+    cid = content_id_of(PNG)
+
+    message = Message(
+        html=f'<img src="{CHART}"><p>Weekly numbers</p><img src="{again}">'
+    )
+
+    assert (
+        message.html
+        == f'<img src="cid:{cid}"><p>Weekly numbers</p><img src="cid:{cid}">'
+    )
+    assert [image.content_id for image in message.inline_images] == [cid]
+
+
+def test_an_unregistered_image_subtype_leaves_the_bare_digest():
+    image = Message(
+        html=f'<img src="{data_uri(PNG, "image/x-epistole")}">'
+    ).inline_images[0]
+
+    assert image.content_id == content_id_of(PNG, "image/x-epistole", "")
+    assert image.filename == image.content_id
+
+
+def test_two_media_types_over_the_same_bytes_make_two_inline_images(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Some platforms give image/pjpeg the .jpg extension that image/jpeg has.
+    extensions = {"image/jpeg": ".jpg", "image/pjpeg": ".jpg"}
+    monkeypatch.setattr(mimetypes, "guess_extension", extensions.get)
+    html = f'<img src="{data_uri(PNG, "image/jpeg")}"><img src="{data_uri(PNG, "image/pjpeg")}">'
+
+    first, second = Message(html=html).inline_images
+
+    assert (first.content_type, second.content_type) == ("image/jpeg", "image/pjpeg")
+    assert first.content_id != second.content_id
+
+
+# A base64 payload's length is never one more than a multiple of four, so the second cannot decode.
+@pytest.mark.parametrize("payload", ["iVBO!w0KGgo=", "iVBORw0KG"])
+def test_a_data_image_whose_payload_does_not_decode_raises_naming_its_position(
+    payload: str,
+):
+    html = f'<p>Chart</p>\n<p><img src="data:image/png;base64,{payload}"></p>'
+
+    with pytest.raises(ValueError, match="line 2, column 4"):
+        Message(html=html)
+
+
+def test_the_text_renderer_receives_the_rewritten_html():
+    message = Message(html=f'<img src="{CHART}">', text_renderer=lambda html: html)
+
+    assert message.text == f'<img src="cid:{content_id_of(PNG)}">'
+
+
+def test_a_data_image_in_markdown_becomes_an_inline_image():
+    markdown = f"![Chart]({CHART})"
+
+    message = Message(markdown=markdown)
+
+    assert (
+        message.html == f'<p><img src="cid:{content_id_of(PNG)}" alt="Chart" /></p>\n'
+    )
+    assert message.text == markdown
 
 
 def test_headers_reads_back_in_the_given_order():

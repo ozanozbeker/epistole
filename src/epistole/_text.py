@@ -1,4 +1,4 @@
-"""`html_to_text` derives plain text from HTML on the stdlib `html.parser`, with no dependency. `Message` uses it unless the caller supplies `text=` or `text_renderer=`."""
+"""`html_to_text` derives plain text from HTML on the stdlib `html.parser`, with no dependency. `Message` uses it unless the caller supplies `text=` or `text_renderer=`. Both `html_to_text` and the `data:` rewrite in `_message.py` parse with a subclass of `Parser`, so both skip the same comments."""
 
 from html.parser import HTMLParser
 from typing import override
@@ -51,7 +51,19 @@ def html_to_text(html: str, /) -> str:
     return "\n".join(extractor.lines)
 
 
-class _Extractor(HTMLParser):
+class Parser(HTMLParser):
+    """A parser reads every `<![` as a comment that ends at the next `>`, as HTML5 does outside SVG and MathML."""
+
+    @override
+    def parse_html_declaration(self, i: int) -> int:
+        # Without this, Python reads <![CDATA[ up to ]]>, and 3.13.0 to 3.13.3 raise AssertionError on <![foo]>.
+        if self.rawdata.startswith("<![", i):
+            return self.parse_bogus_comment(i)
+
+        return super().parse_html_declaration(i)
+
+
+class _Extractor(Parser):
     """An extractor collects the plain text of the HTML it is fed, one line at a time."""
 
     def __init__(self) -> None:
@@ -112,14 +124,6 @@ class _Extractor(HTMLParser):
         self._close_link()
         self._flush_pre()
         self._flush()
-
-    @override
-    def parse_marked_section(self, i: int, report: bool = True) -> int:
-        """Parse `<![` as a comment, as HTML5 does outside SVG and MathML.
-
-        Python 3.13.0 to 3.13.3 raise `AssertionError` here on an unknown keyword, such as `<![foo]>`.
-        """
-        return self.parse_bogus_comment(i, report)
 
     def _write(self, text: str) -> None:
         """Add `text` to the open `<pre>` or the current cell, and to the open link's label."""

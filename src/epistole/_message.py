@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import mimetypes
 import re
+from base64 import b64decode
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
+from urllib.parse import unquote_to_bytes
 
 from epistole._address import LINE_BREAK, check_address
-from epistole._text import html_to_text
+from epistole._text import Parser, html_to_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -18,6 +21,11 @@ if TYPE_CHECKING:
 
 # The type and the subtype each match RFC 6838's restricted-name.
 _MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
+
+# HTMLParser reports attribute values without their offsets, so this tokenizes a start tag's attributes as HTML5 does.
+_ATTRIBUTE = re.compile(
+    r"""[\t\n\f\r /]*(?P<name>[^\t\n\f\r />][^\t\n\f\r /=>]*)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)'|(?P<bare>[^\t\n\f\r >]*)))?"""
+)
 
 # RFC 5322 ftext: printable ASCII 33 to 126, except the colon.
 _FIELD_NAME = re.compile(r"[!-9;-~]+")
@@ -54,13 +62,13 @@ class Message:
     Parameters
     ----------
     html
-        The HTML. Epistole derives the plain text from it with `html_to_text`, unless the caller supplies `text` or `text_renderer`.
+        The HTML. Epistole moves each `data:` image in an `<img src>` into an inline image and rewrites the `src` to `cid:`. It then derives the plain text from the result with `html_to_text`, unless the caller supplies `text` or `text_renderer`. See ADR-0003.
     markdown
         The Markdown source. Epistole renders the HTML from it on markdown-it-py's `commonmark` preset and sends the source as the plain text, unless the caller supplies `text`.
     text
         The plain text. Epistole sends it verbatim and derives nothing from `html`. It may be `""` when the subject holds the whole message.
     text_renderer
-        Derives the plain text from `html` in place of `html_to_text`. It runs once, at construction. The message does not keep it, so equality compares content alone. An exception it raises propagates unchanged.
+        Derives the plain text from the rewritten `html` in place of `html_to_text`. It runs once, at construction. The message does not keep it, so equality compares content alone. An exception it raises propagates unchanged.
 
     Attributes
     ----------
@@ -71,20 +79,20 @@ class Message:
     headers_
         The custom headers `.headers()` set, as a read-only mapping in the caller's order. It is empty until `.headers()` sets it, and it never holds a header Epistole writes.
     html
-        The HTML the caller supplied or Epistole rendered from `markdown`, or `None` on a text-only message.
+        The HTML the caller supplied or Epistole rendered from `markdown`, or `None` on a text-only message. The rewrite has replaced each `data:` image in it with a `cid:` reference.
     text
         The plain text. It is the Markdown source for `markdown=`. It is `""` for `text=""`, and also for HTML that holds no text, such as a lone image with no alt text.
     attachments
         What `.attach()` added, in call order.
     inline_images
-        What `.embed()` added, in call order.
+        The inline images the `data:` rewrite made come first, one per distinct media type and bytes. What `.embed()` added follows, in call order.
 
     Raises
     ------
     TypeError
         When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`.
     ValueError
-        When `text_renderer` returns something other than a `str`. See ADR-0008.
+        When `text_renderer` returns something other than a `str`, or when the payload of a `data:` image does not decode. See ADR-0003 and ADR-0008.
     ImportError
         When `markdown` is supplied and `epistole[markdown]` is not installed.
     """
@@ -146,6 +154,10 @@ class Message:
             if text is None:
                 text = markdown
 
+        inline_images: tuple[Attachment, ...] = ()
+        if html is not None:
+            html, inline_images = _rewrite_data_images(html)
+
         if text is None and html is not None:
             rendered: object = (
                 html_to_text if text_renderer is None else text_renderer
@@ -169,7 +181,7 @@ class Message:
                 "html": html,
                 "text": text,
                 "attachments": (),
-                "inline_images": (),
+                "inline_images": inline_images,
             },
         )
 
@@ -278,7 +290,7 @@ class Message:
         TypeError
             As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
         ValueError
-            When the filename or the content id holds a line break, when the content type is not `image/*`, or when the message already holds an inline image under the same content id. See ADR-0018.
+            When the filename or the content id holds a line break, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. See ADR-0018.
         """
         # Runs before _filename, so a line break in cid raises the content id error, not the filename one.
         if cid is not None and LINE_BREAK.search(cid):
@@ -481,3 +493,96 @@ def _read(source: Path | bytes | BinaryIO) -> bytes:
         raise TypeError(msg)
 
     return data
+
+
+def _rewrite_data_images(html: str) -> tuple[str, tuple[Attachment, ...]]:
+    """Return `html` with the `src` of each `data:` image rewritten to `cid:`, and the inline images the rewrite made (ADR-0003)."""
+    found: list[tuple[int, int, Attachment]] = _DataImageFinder(html).found
+    parts: list[str] = []
+    end: int = 0
+    for start, stop, image in found:
+        parts += (html[end:start], f"cid:{image.content_id}")
+        end = stop
+
+    parts.append(html[end:])
+    # Two images with one media type and one set of bytes are equal, so this keeps the first of each.
+    return "".join(parts), tuple(dict.fromkeys(image for *_, image in found))
+
+
+class _DataImageFinder(Parser):
+    """A finder holds the span of each `<img>` `src` value that is a `data:` image in the HTML it parses, and the inline image decoded from that value."""
+
+    def __init__(self, html: str) -> None:
+        super().__init__()
+        # getpos() counts only "\n" as a line end, so the index of a position is its line's start plus its column.
+        self._line_starts: list[int] = [
+            0,
+            *(match.end() for match in re.finditer("\n", html)),
+        ]
+        self.found: list[tuple[int, int, Attachment]] = []
+        self.feed(html)
+        self.close()
+
+    @override
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "img":
+            return
+
+        # HTML5 keeps the first of two attributes with one name.
+        src: str | None = next((value for name, value in attrs if name == "src"), None)
+        if src is None:
+            return
+
+        line, column = self.getpos()
+        try:
+            image: Attachment | None = _inline_image(src)
+        except ValueError as error:
+            msg = f"the <img> at line {line}, column {column + 1} holds a data: URI whose payload does not decode ({error}). Fix the payload, or reference the image as cid: and add it with .embed()."
+            raise ValueError(msg) from error
+
+        span: tuple[int, int] | None = _src_span(self.get_starttag_text() or "")
+        if image is not None and span is not None:
+            start: int = self._line_starts[line - 1] + column
+            self.found.append((start + span[0], start + span[1], image))
+
+
+def _src_span(start_tag: str) -> tuple[int, int] | None:
+    """Return the span of the first `src` value in the text of an `<img>` start tag, without its quotes."""
+    for match in _ATTRIBUTE.finditer(start_tag, len("<img")):
+        if match["name"].lower() == "src":
+            for form in ("double", "single", "bare"):
+                if match[form] is not None:
+                    return match.span(form)
+
+            return None
+
+    return None
+
+
+def _inline_image(uri: str) -> Attachment | None:
+    """Return the inline image decoded from `uri` when it is a `data:` URI with an `image/*` media type, else `None`."""
+    scheme, _, rest = uri.strip().partition(":")
+    header, comma, payload = rest.partition(",")
+    # RFC 2045 makes a media type case-insensitive, so lowercasing it lets two spellings share one inline image.
+    media_type, *parameters = (part.strip().lower() for part in header.split(";"))
+    if (
+        scheme.lower() != "data"
+        or not comma
+        or not media_type.startswith("image/")
+        or _MEDIA_TYPE.fullmatch(media_type) is None
+    ):
+        return None
+
+    data: bytes = unquote_to_bytes(payload)
+    if parameters and parameters[-1] == "base64":
+        # Browsers skip whitespace and missing padding in a base64 payload, so this does too.
+        data = b"".join(data.split())
+        data = b64decode(data + b"=" * (-len(data) % 4), validate=True)
+
+    # The digest covers the media type, so image/jpeg and image/pjpeg over the same bytes get two ids.
+    content_id: str = sha256(f"{media_type}\0".encode() + data).hexdigest()[:16] + (
+        mimetypes.guess_extension(media_type) or ""
+    )
+    return Attachment(
+        filename=content_id, content_type=media_type, data=data, content_id=content_id
+    )
