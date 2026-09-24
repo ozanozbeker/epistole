@@ -27,7 +27,10 @@ def build(submission: Submission, /) -> EmailMessage:
         for one in (submission.from_address, *message.recipients, *message.reply_to_)
     )
     # SMTP ends each line with CRLF. refold_source="none" writes a value stored with set_raw, the parser's API, as it stands.
-    mime = EmailMessage(policy=SMTP.clone(refold_source="none", utf8=not ascii_only))
+    # With cte_type="7bit", EmailMessage writes non-ASCII text as quoted-printable or base64, so SMTP needs no BODY=8BITMIME (ADR-0020).
+    mime = EmailMessage(
+        policy=SMTP.clone(refold_source="none", utf8=not ascii_only, cte_type="7bit")
+    )
     mime["From"] = submission.from_address
     for name, addresses in (
         ("To", message.to_),

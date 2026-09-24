@@ -82,6 +82,7 @@ __all__ = [
   It is defined in the core and takes no dependency.
   It writes `Bcc`, because Gmail sends to the addresses in `To`, `Cc`, and `Bcc` (ADR-0016).
   `SMTPTransport` writes it through `smtplib`'s `send_message`, which deletes `Bcc` first.
+  It writes non-ASCII text as quoted-printable or base64, so a message whose headers are ASCII is 7-bit and SMTP needs no `BODY=8BITMIME` (ADR-0020).
 - `from epistole import GmailBackend` and `GraphBackend` always succeed.
   The constructor runs the vendor imports (ADR-0009).
 - The core has no runtime dependency (ADR-0008, ADR-0009).
@@ -515,6 +516,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `send` takes the message alone (ADR-0010).
   There is no such keyword in v1.
 - Credential values are frozen dataclasses of inputs and import no vendor library.
+  A field that holds a secret is left out of the `repr` (ADR-0011).
   The backend constructor raises `ImportError` naming the extra its credential value needs, whichever module the value came from.
   So `SMTPBackend(credential=OAuth(credential=graph.ClientSecret(...)))` names `epistole[graph]`.
   `connect()` builds the vendor object (ADR-0009, ADR-0011).
@@ -531,6 +533,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `"tls"` is implicit TLS on connect.
   `"none"` is plaintext.
   There is no opportunistic mode.
+  Any other value is a `ValueError` at construction, because the transport would otherwise send in plaintext on a misspelled mode (ADR-0017).
 - `credential=None` is anonymous submission.
   `Password` uses `login`.
   `OAuth` uses XOAUTH2 through `smtplib.SMTP.auth` with `user={username}\x01auth=Bearer {token}\x01\x01`.
@@ -543,7 +546,11 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   The server's `552` maps to `RejectedError` (ADR-0004).
 - SMTP writes the RFC 5322 message Epistole built.
   Custom headers follow Epistole's own, in the caller's order.
+- SMTP passes the envelope to `send_message`: the from address's addr-spec, and each distinct addr-spec in `recipients`, in order.
+  `send_message` would otherwise read it from the headers, so a custom `Sender` header would override the from address (ADR-0001).
+  A repeated addr-spec gets one `RCPT TO`, because `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients (ADR-0004).
 - SMTP asks the server for `SMTPUTF8` whenever the built message has UTF-8 headers, including when `Reply-To` holds the only non-ASCII address (ADR-0014).
+  For that case Epistole checks the extension itself and raises `RejectedError`, because `sendmail` drops every option on a server that answered `HELO`.
 - The timeout is 60 s, and no setting changes it.
 
 **Gmail (ADR-0009, ADR-0011, ADR-0016, ADR-0019).**
@@ -758,13 +765,13 @@ Everything below `421` classifies on `smtp_code // 100`.
 | any exception carrying `421` | `TransportError` |
 | `SMTPSenderRefused` `552` | `RejectedError` |
 | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
-| `SMTPAuthenticationError`; `SMTPNotSupportedError` from `login` or `auth` | `AuthenticationError` |
+| `SMTPAuthenticationError`; `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth` | `AuthenticationError` |
 | `SMTPNotSupportedError` from `send_message` (non-ASCII address, no `SMTPUTF8`) | `RejectedError` |
 | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors, STARTTLS not offered | `TransportError` |
 | `SMTPDataError` `5yz` | `RejectedError` |
 | `SMTPDataError` `4yz` | `ProviderError` |
 | any other `SMTPResponseException` | `RejectedError` on `5yz`, `ProviderError` otherwise |
-| a bare `SMTPException` | `ProviderError` |
+| any other bare `SMTPException` | `ProviderError` |
 
 `SMTPRecipientsRefused` has no row.
 `SMTPTransport` catches it and returns its `.recipients` as refusal data.
@@ -773,6 +780,7 @@ The `421` rule runs first, so a `SMTPRecipientsRefused` carrying `421` becomes `
 In that case `smtplib` reports one refused recipient, never tries the rest, and closes the socket.
 `552` on MAIL FROM is the server rejecting the message against its advertised `SIZE`.
 That is a fact about the message, not about the from address.
+`login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, and no retry changes that.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**

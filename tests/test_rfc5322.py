@@ -74,6 +74,14 @@ def test_an_html_message_builds_its_plain_text_before_its_html():
     assert lines(html) == ["<p>Weekly <b>numbers</b></p>"]
 
 
+def test_non_ascii_content_is_written_in_7_bits():
+    message = Message(html="<p>Café</p>").to("ada@example.com")
+
+    assert build(submission(message)).as_bytes().isascii()
+    plain, html = read_back(message).iter_parts()
+    assert (lines(plain), lines(html)) == (["Café"], ["<p>Café</p>"])
+
+
 # --- Attachments and inline images -------------------------------------------
 
 

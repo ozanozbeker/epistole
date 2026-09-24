@@ -19,6 +19,7 @@ The same issue moved `SMTPRecipientsRefused` off the table, as refusal data.
 It mapped `552` on MAIL FROM to `RejectedError`.
 It gave the leaves constructors.
 It made `retry_after` conditional on the header rather than hard-coded per backend.
+Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): a bare `SMTPException` from `login` or `auth` is `AuthenticationError`, and SMTP names each addr-spec once in its envelope.
 
 ## Why
 
@@ -152,18 +153,25 @@ Epistole never sleeps and never retries.
   | any exception carrying `421` | `TransportError` |
   | `SMTPSenderRefused` `552` | `RejectedError` |
   | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
-  | `SMTPAuthenticationError`, `SMTPNotSupportedError` from `login` or `auth` | `AuthenticationError` |
+  | `SMTPAuthenticationError`, `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth` | `AuthenticationError` |
   | `SMTPNotSupportedError` from `send_message`, meaning a non-ASCII address and no `SMTPUTF8` | `RejectedError` (ADR-0014) |
   | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors | `TransportError` |
   | `SMTPDataError` `5yz` | `RejectedError` |
   | `SMTPDataError` `4yz` | `ProviderError` |
   | any other `SMTPResponseException` | `RejectedError` on `5yz`, `ProviderError` otherwise |
-  | a bare `SMTPException` | `ProviderError` |
+  | any other bare `SMTPException` | `ProviderError` |
 
   `SMTPRecipientsRefused` has no row.
   `SMTPTransport` catches it and returns its `.recipients` as ordinary refusal data.
   `Connection.send` raises `RecipientsRefusedError` when every recipient was refused.
   So the rule holds on every backend, including the doubles (ADR-0015).
+  `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients.
+  A repeated addr-spec breaks that count, so `smtplib` sends `DATA` anyway and raises on the server's reply.
+  So `SMTPTransport` names each addr-spec once.
+  `login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, such as a server that offers only NTLM.
+  No retry changes that, so it is `AuthenticationError`, as the catch-all Gmail `403` below is.
+  As a `ProviderError` it would be in the transient set.
+  A retry loop would then repeat it.
   `552` on MAIL FROM is the server refusing the message against its advertised `SIZE`.
   That is a fact about the message and not about the from address.
   So it cannot share a row with a genuine refusal of the from address.

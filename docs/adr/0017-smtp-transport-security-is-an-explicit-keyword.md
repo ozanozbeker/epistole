@@ -6,6 +6,7 @@
 `"none"` is plaintext.
 There is no opportunistic mode and no inference from the port.
 Decided on [#29](https://github.com/ozanozbeker/epistole/issues/29), which found the surface undecided while merging the ADRs into `docs/spec.md`.
+Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): any other value is a `ValueError` at construction.
 
 ## Why
 
@@ -17,6 +18,8 @@ Opportunistic STARTTLS upgrades if the server offers it and continues if not.
 That is the one failure a mail library must not make silent, because the credential goes over plaintext and nothing raises.
 
 A `Literal` rather than an enum saves the caller an import, and a type checker still rejects a typo.
+The constructor raises `ValueError` for any other string.
+Without that check, the transport would send a `Password` in plaintext when untyped code misspells a mode.
 
 ## Considered options
 

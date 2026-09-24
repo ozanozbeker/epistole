@@ -72,7 +72,8 @@ The mail service determines whether the mailbox exists, accepts mail, or may sen
 _Avoid_: email address (the noun is _address_ on its own), addr, recipient (the role an address plays, not the value)
 
 **Recipient**: One address in a message's to, cc, or bcc.
-A backend submits to the union of the three, in that order with duplicates kept.
+A backend submits to the union of the three, in that order.
+The message keeps duplicates, and SMTP names each addr-spec once in its envelope.
 A refusal names one of them.
 _Avoid_: addressee, target, destination
 

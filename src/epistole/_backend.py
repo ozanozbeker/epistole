@@ -40,7 +40,7 @@ class Backend(ABC):
     def send(self, message: Message, /) -> SendResult:
         """Send one message over a connection opened and closed for it.
 
-        To send many messages, open one connection with `connect()` instead.
+        To send many messages, open one connection with `connect()` instead. When the service refuses some recipients and accepts the rest, the send raises nothing and `SendResult.refused` holds the refusals.
         """
         with self.connect() as connection:
             return connection.send(message)
@@ -97,6 +97,8 @@ class Connection:
 
     def send(self, message: Message, /) -> SendResult:
         """Check `message`, submit it, and build the send result.
+
+        When the service refuses some recipients and accepts the rest, the send raises nothing and `SendResult.refused` holds the refusals.
 
         Raises
         ------

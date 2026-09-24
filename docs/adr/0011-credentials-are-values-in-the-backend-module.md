@@ -17,6 +17,7 @@ A confidential client requests a scope, and a managed identity requests a resour
 The Gmail REST backend requests `gmail.send` rather than the SMTP scope.
 `Certificate` requires one complete form.
 `TokenCredential` and `AccessToken` are exported as Protocols.
+Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): no secret appears in a value's `repr`.
 
 ## Why
 
@@ -111,6 +112,8 @@ No backend would change.
   `smtp.OAuth` with a Gmail value requests `https://mail.google.com/`.
   Application Default Credentials are not offered: sending as a mailbox from ADC needs a signed delegation JWT that keyless ADC cannot produce.
 - Every value is a frozen dataclass of inputs.
+  A field that holds a secret, such as `Password.password`, takes `field(repr=False)`.
+  A dataclass `repr` includes every field, and tracebacks and log lines include the `repr`.
   Importing a value imports no vendor library.
   The backend constructor raises `ImportError` naming the extra (ADR-0009).
   `connect()` builds the vendor object.
