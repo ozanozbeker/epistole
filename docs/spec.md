@@ -80,6 +80,8 @@ __all__ = [
   `SMTPTransport` writes it, and `GmailTransport` sends it as base64url `raw` (ADR-0009).
   `GraphTransport` never calls it, because every Graph request is JSON (ADR-0012).
   It is defined in the core and takes no dependency.
+  It writes `Bcc`, because Gmail sends to the addresses in `To`, `Cc`, and `Bcc` (ADR-0016).
+  `SMTPTransport` writes it through `smtplib`'s `send_message`, which deletes `Bcc` first.
 - `from epistole import GmailBackend` and `GraphBackend` always succeed.
   The constructor runs the vendor imports (ADR-0009).
 - The core has no runtime dependency (ADR-0008, ADR-0009).
@@ -246,6 +248,7 @@ class Attachment:
   A string passes when it holds no line break, `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
   Epistole inspects nothing else: no character set, no DNS, no punycode.
 - `recipients` is `to_ + cc_ + bcc_` in that order, duplicates kept (ADR-0007).
+- SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers, because RFC 2047 allows no encoded-word in an addr-spec (ADR-0014).
 
 **Subject (ADR-0016).**
 
@@ -266,6 +269,8 @@ class Attachment:
   Anything else is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - Two names that differ only in case are a `ValueError`, because a `dict` holds both and RFC 5322 names are case-insensitive.
+- SMTP and Gmail write an ASCII value as the caller wrote it, on one line (ADR-0016).
+  `EmailMessage` would write a word longer than 77 characters, such as a `List-Unsubscribe` URL, as RFC 2047 encoded-words.
 
 **Attributes (ADR-0007).**
 
@@ -518,7 +523,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   A limit with no vendor source gets no pre-check.
   Epistole maps the service's reply under ADR-0004 instead (ADR-0019).
 
-**SMTP (ADR-0011, ADR-0016, ADR-0017, ADR-0019).**
+**SMTP (ADR-0011, ADR-0014, ADR-0016, ADR-0017, ADR-0019).**
 
 - `security="starttls"` requires the upgrade after EHLO and raises `TransportError` when the server does not offer it.
   `"tls"` is implicit TLS on connect.
@@ -536,6 +541,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   The server's `552` maps to `RejectedError` (ADR-0004).
 - SMTP writes the RFC 5322 message Epistole built.
   Custom headers follow Epistole's own, in the caller's order.
+- SMTP asks the server for `SMTPUTF8` whenever the built message has UTF-8 headers, including when `Reply-To` holds the only non-ASCII address (ADR-0014).
 - The timeout is 60 s, and no setting changes it.
 
 **Gmail (ADR-0009, ADR-0011, ADR-0016, ADR-0019).**

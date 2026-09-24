@@ -11,6 +11,7 @@ Any other name fails a `RejectedError` pre-check at every size.
 Decided on [#27](https://github.com/ozanozbeker/epistole/issues/27), which closes an open consequence of ADR-0010 and makes ADR-0012's pre-check concrete.
 Amended on [#40](https://github.com/ozanozbeker/epistole/issues/40): two names that differ only in case are a `ValueError`, as is a value holding any character `str.splitlines()` splits on.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): `.subject()` raises `ValueError` on a line break, by the rule a custom header value follows.
+Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write an ASCII value as the caller wrote it, on one line. The RFC 5322 message holds `Bcc`, and SMTP deletes it before writing.
 
 ## Why
 
@@ -115,15 +116,26 @@ So Graph raises either way on the case users most want this feature for.
   A check on `\r` and `\n` alone would pass `\u2028`, and SMTP and Gmail would then raise at send time instead of at `.headers()`.
   Anything else is a `ValueError`.
   The character set is not otherwise checked, matching ADR-0014.
-  The stdlib RFC 2047-encodes a non-ASCII value on the SMTP and Gmail paths, and Graph sends it as UTF-8 in JSON.
+  The stdlib RFC 2047-encodes a non-ASCII value on the SMTP and Gmail paths, unless a non-ASCII address makes the message UTF-8 (ADR-0014).
+  Graph sends it as UTF-8 in JSON.
 - **A subject takes the same line-break check, in `.subject()`.**
   `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
   Checking in `Message` raises at the line that set the subject, on every backend.
 - **A name Epistole owns is a `ValueError`**, matched case-insensitively against the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
+- **The RFC 5322 message Epistole builds holds `Bcc`.**
+  Gmail's `users.messages.send` "sends the specified message to the recipients in the `To`, `Cc`, and `Bcc` headers" ([reference](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)).
+  SMTP writes the message through `smtplib`'s `send_message`, which deletes `Bcc` before it writes.
 - **Two names that differ only in case are a `ValueError`.**
   A `dict` holds both, and RFC 5322 names are case-insensitive.
 - **Every check runs in `Message`**, so it fails at the line that named the header, on every backend (ADR-0002).
 - **SMTP and Gmail write every custom header**, after the ones Epistole writes, in the caller's order.
+- **SMTP and Gmail write an ASCII value as the caller wrote it, on one line.**
+  `EmailMessage` cannot fold a word longer than 77 characters, so it writes the word as RFC 2047 encoded-words.
+  It did so on 3.13.12 and on 3.14.7.
+  A `List-Unsubscribe` URL that long would be sent that way.
+  RFC 2047 allows no encoded-word in a structured field such as `List-Unsubscribe`.
+  `email.parser` decodes an encoded-word and raises no error, so only the bytes show it.
+  A value longer than RFC 5322's 998-character line limit is sent as written, and the service accepts or rejects it.
 - **`GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
   The check runs before it writes, on both the `sendMail` path and the draft path (ADR-0004, ADR-0012).
   The error names the offending header.

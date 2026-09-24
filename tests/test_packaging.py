@@ -17,5 +17,5 @@ def test_the_package_has_a_typing_marker():
 
 def test_the_core_imports_without_the_markdown_extra():
     # A fresh interpreter, because an earlier test may already have imported markdown_it here.
-    code = "import sys, epistole; assert 'markdown_it' not in sys.modules"
+    code = "import sys, epistole._rfc5322; assert 'markdown_it' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603
