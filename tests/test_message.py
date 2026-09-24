@@ -11,6 +11,7 @@ ADDRESS_METHODS = ("to", "cc", "bcc", "reply_to")
 PDF = b"%PDF-1.7 weekly numbers"
 PNG = b"\x89PNG\r\n\x1a\n logo"
 LOGO_HTML = '<p><img src="cid:logo.png" alt="Logo"></p>'
+UNSUBSCRIBE = "<mailto:unsubscribe@example.com>"
 
 # A quoted local part may hold an @, and Epistole never checks character set (ADR-0014).
 GOOD = (
@@ -180,6 +181,7 @@ def test_the_attributes_start_empty():
     assert message.bcc_ == ()
     assert message.reply_to_ == ()
     assert message.subject_ is None
+    assert message.headers_ == {}
 
 
 @pytest.mark.parametrize("method", ADDRESS_METHODS)
@@ -286,6 +288,7 @@ def test_two_messages_built_the_same_way_are_equal_and_hash_equal():
             Message(html=LOGO_HTML)
             .to("ada@example.com")
             .subject("Weekly numbers")
+            .headers({"X-Campaign-Id": "autumn"})
             .attach(PDF, filename="weekly.pdf")
             .embed(PNG, cid="logo.png")
         )
@@ -551,3 +554,142 @@ def test_messages_differing_in_attachments_are_not_equal():
     assert attached != base
     assert attached != base.attach(PNG, filename="header.png")
     assert base.embed(PNG, cid="logo.png") != base
+
+
+def test_headers_reads_back_in_the_given_order():
+    message = Message(text="hi").headers(
+        {"X-Campaign-Id": "autumn", "List-Unsubscribe": UNSUBSCRIBE}
+    )
+
+    assert message.headers_ == {
+        "X-Campaign-Id": "autumn",
+        "List-Unsubscribe": UNSUBSCRIBE,
+    }
+    assert list(message.headers_) == ["X-Campaign-Id", "List-Unsubscribe"]
+
+
+def test_messages_differing_in_headers_are_not_equal():
+    base = Message(text="hi")
+    tagged = base.headers({"X-Campaign-Id": "autumn"})
+
+    assert tagged != base
+    assert tagged != base.headers({"X-Campaign-Id": "spring"})
+
+
+def test_headers_replaces_the_whole_set():
+    message = Message(text="hi").headers({"X-Campaign-Id": "autumn", "X-Segment": "b"})
+
+    assert message.headers({"X-Campaign-Id": "spring"}).headers_ == {
+        "X-Campaign-Id": "spring"
+    }
+
+
+def test_headers_copies_the_mapping_and_leaves_the_receiver_unchanged():
+    mapping = {"X-Campaign-Id": "autumn"}
+    base = Message(text="hi")
+
+    message = base.headers(mapping)
+    mapping["X-Campaign-Id"] = "spring"
+
+    assert message.headers_ == {"X-Campaign-Id": "autumn"}
+    assert base.headers_ == {}
+
+
+def test_headers_reads_back_as_one_read_only_mapping():
+    message = Message(text="hi").headers({"X-Campaign-Id": "autumn"})
+
+    assert message.headers_ is message.headers_
+    with pytest.raises(TypeError):
+        message.headers_["X-Campaign-Id"] = "spring"  # pyrefly: ignore
+
+
+def test_headers_takes_a_name_of_any_printable_ascii_but_colon():
+    # RFC 5322 ftext is ASCII 33 to 126, and 58 is the colon.
+    name = "".join(chr(code) for code in range(33, 127) if code != 58)
+
+    assert Message(text="hi").headers({name: "autumn"}).headers_ == {name: "autumn"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", "X Campaign", "X:Campaign", "X-Café", "X-Campaign\r\nBcc", "X-\x7f"],
+)
+def test_headers_raises_on_an_illegal_name(name: str):
+    with pytest.raises(ValueError, match=re.escape(repr(name))):
+        Message(text="hi").headers({name: "autumn"})
+
+
+# The line boundaries str.splitlines() documents, each of which EmailMessage raises on.
+@pytest.mark.parametrize(
+    "value",
+    [
+        "autumn\r\nBcc: eve@example.com",
+        "autumn\n",
+        *(
+            f"autumn{boundary}spring"
+            for boundary in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+        ),
+    ],
+)
+def test_headers_raises_on_a_value_holding_a_line_break(value: str):
+    with pytest.raises(ValueError, match="'X-Campaign-Id'"):
+        Message(text="hi").headers({"X-Campaign-Id": value})
+
+
+def test_headers_takes_a_non_ascii_value():
+    message = Message(text="hi").headers({"X-Campaign-Id": "automne café"})
+
+    assert message.headers_ == {"X-Campaign-Id": "automne café"}
+
+
+@pytest.mark.parametrize(
+    ("mapping", "match"),
+    [({5: "autumn"}, "5"), ({"X-Campaign-Id": 5}, "'X-Campaign-Id'")],
+)
+def test_headers_raises_on_a_name_or_value_that_is_not_a_str(
+    mapping: dict[object, object], match: str
+):
+    with pytest.raises(ValueError, match=match):
+        Message(text="hi").headers(mapping)  # pyrefly: ignore
+
+
+# ADR-0016 lists these names, and the casing varies because RFC 5322 names are case-insensitive.
+@pytest.mark.parametrize(
+    "name",
+    [
+        "From",
+        "to",
+        "CC",
+        "Bcc",
+        "reply-to",
+        "Subject",
+        "MESSAGE-ID",
+        "Date",
+        "Mime-Version",
+        "Content-Type",
+        "content-transfer-encoding",
+        "Content-Id",
+        "Content-Disposition",
+    ],
+)
+def test_headers_raises_on_a_name_epistole_writes(name: str):
+    with pytest.raises(ValueError, match=re.escape(repr(name))):
+        Message(text="hi").headers({name: "autumn"})
+
+
+def test_headers_matches_the_names_epistole_writes_exactly():
+    message = Message(text="hi").headers({"In-Reply-To": "<1@example.com>"})
+
+    assert message.headers_ == {"In-Reply-To": "<1@example.com>"}
+
+
+def test_headers_needs_at_least_one_custom_header():
+    with pytest.raises(ValueError, match="at least one"):
+        Message(text="hi").headers({})
+
+
+def test_headers_raises_on_a_name_repeated_in_another_case():
+    with pytest.raises(ValueError, match="'x-campaign-id'"):
+        Message(text="hi").headers(
+            {"X-Campaign-Id": "autumn", "x-campaign-id": "spring"}
+        )

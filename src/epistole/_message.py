@@ -6,6 +6,7 @@ import mimetypes
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from epistole._address import check_address
@@ -18,9 +19,34 @@ if TYPE_CHECKING:
 # The type and the subtype each match RFC 6838's restricted-name.
 _MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
 
+# RFC 5322 ftext: printable ASCII 33 to 126, except the colon.
+_FIELD_NAME = re.compile(r"[!-9;-~]+")
+
+# ADR-0016 lists the headers Epistole writes, lowercased because RFC 5322 names are case-insensitive.
+_OWNED_NAMES = frozenset(
+    {
+        "from",
+        "to",
+        "cc",
+        "bcc",
+        "reply-to",
+        "subject",
+        "message-id",
+        "date",
+        "mime-version",
+        "content-type",
+        "content-transfer-encoding",
+        "content-id",
+        "content-disposition",
+    }
+)
+
+# str.splitlines() splits on each of these, and EmailMessage raises on a value it splits.
+_LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
+
 
 class Message:
-    """A message holds the content, addressing, subject, and attachments a caller builds, as one frozen value.
+    """A message holds the content, addressing, subject, custom headers, and attachments a caller builds, as one frozen value.
 
     It compares and hashes by content. Every builder method returns a new message and leaves the receiver unchanged.
 
@@ -45,6 +71,8 @@ class Message:
         The addresses the builder method of the same name set.
     subject_
         The subject `.subject()` set, or `None`.
+    headers_
+        The custom headers `.headers()` set, as a read-only mapping in the caller's order. It is empty until `.headers()` sets it, and it never holds a header Epistole writes.
     html
         The HTML the caller supplied or Epistole rendered from `markdown`, or `None` on a text-only message.
     text
@@ -65,9 +93,11 @@ class Message:
     """
 
     __slots__ = (
+        "_header_pairs",
         "attachments",
         "bcc_",
         "cc_",
+        "headers_",
         "html",
         "inline_images",
         "reply_to_",
@@ -81,6 +111,8 @@ class Message:
     bcc_: tuple[str, ...]
     reply_to_: tuple[str, ...]
     subject_: str | None
+    headers_: Mapping[str, str]
+    _header_pairs: tuple[tuple[str, str], ...]
     html: str | None
     text: str
     attachments: tuple[Attachment, ...]
@@ -135,6 +167,8 @@ class Message:
                 "bcc_": (),
                 "reply_to_": (),
                 "subject_": None,
+                "headers_": MappingProxyType({}),
+                "_header_pairs": (),
                 "html": html,
                 "text": text,
                 "attachments": (),
@@ -161,6 +195,19 @@ class Message:
     def subject(self, subject: str, /) -> Message:
         """Return a copy with the subject set, replacing any earlier subject."""
         return self._copy(subject_=subject)
+
+    def headers(self, mapping: Mapping[str, str], /) -> Message:
+        """Return a copy with the custom headers set, replacing any earlier `.headers()`.
+
+        It copies `mapping` at the call and keeps its order. See ADR-0016.
+
+        Raises
+        ------
+        ValueError
+            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII, or is a name Epistole writes. When a value is not a `str`, or holds a line break.
+        """
+        pairs: tuple[tuple[str, str], ...] = _checked_headers(mapping)
+        return self._copy(_header_pairs=pairs, headers_=MappingProxyType(dict(pairs)))
 
     def attach(
         self,
@@ -277,6 +324,7 @@ class Message:
             self.bcc_,
             self.reply_to_,
             self.subject_,
+            self._header_pairs,
             self.html,
             self.text,
             self.attachments,
@@ -329,6 +377,39 @@ def _checked(address: str, more: tuple[str, ...]) -> tuple[str, ...]:
         check_address(one)
 
     return addresses
+
+
+def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+    """Check each custom header where the caller supplies it, and return them as pairs in the caller's order."""
+    pairs: tuple[tuple[str, str], ...] = tuple(mapping.items())
+    if not pairs:
+        msg = ".headers() takes at least one custom header, because no builder method removes anything. Build the message without .headers() to send none."
+        raise ValueError(msg)
+
+    seen: set[str] = set()
+    for name, value in pairs:
+        if not isinstance(name, str) or _FIELD_NAME.fullmatch(name) is None:
+            msg = f"{name!r} is not a header name. A name is a str of one or more printable ASCII characters, with no space and no colon."
+            raise ValueError(msg)
+
+        lowered: str = name.lower()
+        if lowered in _OWNED_NAMES:
+            msg = f"Epistole writes the {name!r} header itself, so it cannot be a custom header"
+            raise ValueError(msg)
+
+        # A dict holds both spellings of one name, and a backend would write a line for each.
+        if lowered in seen:
+            msg = f"{name!r} repeats an earlier header name in another case. RFC 5322 names are case-insensitive, so pass one value per name."
+            raise ValueError(msg)
+
+        seen.add(lowered)
+
+        # Graph sends JSON, so no stdlib check raises on a line break there (ADR-0016).
+        if not isinstance(value, str) or _LINE_BREAK.search(value):
+            msg = f"the value of custom header {name!r} must be a str with no line break, such as \\r or \\n"
+            raise ValueError(msg)
+
+    return pairs
 
 
 def _filename(

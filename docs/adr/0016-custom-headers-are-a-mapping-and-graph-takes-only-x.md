@@ -9,6 +9,7 @@ Graph carries only names starting with `x-`.
 Any other name fails a `RejectedError` pre-check at every size.
 `Importance` and read receipts get no v1 surface.
 Decided on [#27](https://github.com/ozanozbeker/epistole/issues/27), which closes an open consequence of ADR-0010 and makes ADR-0012's pre-check concrete.
+Amended on [#40](https://github.com/ozanozbeker/epistole/issues/40): two names that differ only in case are a `ValueError`, as is a value holding any character `str.splitlines()` splits on.
 
 ## Why
 
@@ -40,12 +41,16 @@ Address methods take `(address, /, *more)`, so `.to(*[])` fails at the call site
 Under both rules, a base without something is built without it.
 Neither method removes anything.
 
-**A `Mapping` forbids repeated names, and nothing more is needed.**
+**A `Mapping` cannot hold an exact repeat, and `Message` raises on a repeat in another case.**
 RFC 5322 allows a few field names to repeat, `Received` and `Comments` among them.
 A mapping cannot express that, and nothing in v1 needs it.
 Relays write `Received` in transit, not at submission.
 Reading messages is out of scope for this map.
-The type cannot hold repeats, so there is no check to write and no rule for a caller to learn.
+The type cannot hold an exact repeat.
+It can hold one name in two cases, as `{"X-Id": "1", "x-id": "2"}` does.
+RFC 5322 names are case-insensitive, so that is a repeat.
+A backend would write a line for each spelling.
+So `Message` raises `ValueError` on it.
 
 **Both checks run in the message, and the newline check is a security rule.**
 Python's stdlib already raises on the malformed cases, tested on 3.13:
@@ -103,11 +108,16 @@ So Graph raises either way on the case users most want this feature for.
 - **A legal name is one or more characters from printable ASCII 33 to 126, excluding colon.**
   This is RFC 5322 `ftext`.
   Anything else is a `ValueError`, including an empty name.
-- **A legal value is a `str` holding no carriage return and no line feed.**
+- **A legal value is a `str` holding no line break.**
+  A line break is any character `str.splitlines()` splits on: `\r`, `\n`, `\v`, `\f`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\u2028`, and `\u2029`.
+  `EmailMessage` raises on a value that `str.splitlines()` splits, tested on 3.13.12.
+  A check on `\r` and `\n` alone would pass `\u2028`, and SMTP and Gmail would then raise at send time instead of at `.headers()`.
   Anything else is a `ValueError`.
   The character set is not otherwise checked, matching ADR-0014.
   The stdlib RFC 2047-encodes a non-ASCII value on the SMTP and Gmail paths, and Graph sends it as UTF-8 in JSON.
 - **A name Epistole owns is a `ValueError`**, matched case-insensitively against the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
+- **Two names that differ only in case are a `ValueError`.**
+  A `dict` holds both, and RFC 5322 names are case-insensitive.
 - **Every check runs in `Message`**, so it fails at the line that named the header, on every backend (ADR-0002).
 - **SMTP and Gmail write every custom header**, after the ones Epistole writes, in the caller's order.
 - **`GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
@@ -171,7 +181,7 @@ So Graph raises either way on the case users most want this feature for.
   It is a pre-check, so it makes no network call and the message is unchanged.
 - A caller who wants the degraded send strips the header first, as ADR-0010 requires.
   There is no flag and no warning.
-- `Message` gets one new field and two checks, and no backend gets new configuration.
+- `Message` gets one new field and the checks above, and no backend gets new configuration.
 - Implementation verifies two things this ADR took from documentation.
   Microsoft's `message` resource marks `internetMessageHeaders` **Read-only** in its property table, while the same page says to add custom headers when creating a message.
   Every third-party report uses the create path, and a live send settles it.

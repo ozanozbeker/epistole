@@ -254,9 +254,11 @@ class Attachment:
   `__hash__` reads the tuple, because no read-only mapping in the stdlib is hashable.
   `headers_ == {"X-Campaign-Id": "autumn"}` holds, so a test reads it as a dict.
 - A legal name is one or more characters in printable ASCII 33 to 126 excluding `:`.
-  A legal value is a `str` with no `\r` and no `\n`.
+  A legal value is a `str` with no character that `str.splitlines()` splits on, such as `\r`, `\n`, or `\u2028`.
+  `EmailMessage` raises on a value that `str.splitlines()` splits, so the check covers every value it raises on.
   Anything else is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
+- Two names that differ only in case are a `ValueError`, because a `dict` holds both and RFC 5322 names are case-insensitive.
 
 **Attributes (ADR-0007).**
 
