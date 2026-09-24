@@ -792,10 +792,11 @@ SMTP never raises `ThrottledError`.
 | `401`, `403 authError`, `403 insufficientPermissions`, any other `403`, refresh failed, second `401` | `AuthenticationError` |
 | `403 rateLimitExceeded`, `403 userRateLimitExceeded`, `403 dailyLimitExceeded`, `429` | `ThrottledError` |
 | `5xx` | `ProviderError` |
-| network failure, including one inside a `RefreshError` | `TransportError` |
+| network failure, including one during a refresh | `TransportError` |
 
-A `RefreshError` is read one level down.
-A network failure inside it is `TransportError`, and any other failed refresh is `AuthenticationError`.
+A `google-auth` error is read one level down.
+`google-auth` raises the request adapter's `google.auth.exceptions.TransportError` for a network failure, not a `RefreshError`.
+A network failure one level down is `TransportError`, and any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**

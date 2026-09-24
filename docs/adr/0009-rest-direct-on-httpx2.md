@@ -9,6 +9,8 @@ Every request goes through it, whether for a token or a send.
 Decided on [#16](https://github.com/ozanozbeker/epistole/issues/16), based on `docs/research/sdk-versus-rest.md`.
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the `401` refresh is per request rather than per send.
 A backend constructor names the extra its credential value needs, even when that value comes from another backend's module.
+Amended on [#44](https://github.com/ozanozbeker/epistole/issues/44): `google-auth` 2.57 raises the request adapter's own `google.auth.exceptions.TransportError` for a network failure during a refresh, not a `RefreshError`.
+So Epistole reads any `google-auth` error one level down.
 
 ## Why
 
@@ -100,7 +102,7 @@ It is token freshness, not the backoff policy #2 rules out.
   | mail endpoint returned non-2xx | `httpx2.HTTPStatusError`; `.response` keeps status, headers, and body | ADR-0004 status tables |
   | connect, TLS, read, write, timeout | the `httpx2.TransportError` subclass raised | `TransportError` |
   | Google refresh failed | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
-  | Google refresh failed on the network | the `RefreshError`; Epistole reads one level down and maps on the `httpx2.TransportError` inside | `TransportError` |
+  | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | msal token call failed | `None`; msal returns an error dict and raises nothing, so the message carries `error` and `error_description` | `AuthenticationError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |

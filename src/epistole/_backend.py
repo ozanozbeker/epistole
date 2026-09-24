@@ -1,4 +1,7 @@
-"""A backend opens a connection, which builds each submission and passes it to a transport."""
+"""A backend opens a connection, which builds each submission and passes it to a transport.
+
+`TokenCredential` is here because backend modules annotate their constructors with it and must import without their extras.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,7 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 from dataclasses import dataclass
 from email.utils import localtime, make_msgid
-from typing import TYPE_CHECKING, Protocol, Self
+from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
 from epistole._address import addr_spec, check_address
 from epistole._result import SendResult
@@ -223,6 +226,35 @@ class Submission:
     from_address: str
     message_id: str
     date: datetime
+
+
+@runtime_checkable
+class TokenCredential(Protocol):
+    """A token credential returns an access token on demand, in the shape `azure.core.credentials` defines.
+
+    An `azure-identity` credential satisfies it with no dependency on `azure-core`. A backend uses the credential unchanged and calls `get_token` before each request, so the credential should cache its own tokens. See ADR-0011.
+    """
+
+    def get_token(self, *scopes: str) -> AccessToken:
+        """Return an access token for `scopes`."""
+        ...
+
+
+class AccessToken(Protocol):
+    """An access token is the value `TokenCredential.get_token` returns.
+
+    Its members are read-only, so `azure.core.credentials.AccessToken`, a `NamedTuple`, satisfies it.
+    """
+
+    @property
+    def token(self) -> str:
+        """The token a request carries."""
+        ...
+
+    @property
+    def expires_on(self) -> int:
+        """When the token expires, in seconds since the Unix epoch."""
+        ...
 
 
 def _domain(from_address: str) -> str:
