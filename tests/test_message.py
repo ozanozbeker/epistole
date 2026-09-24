@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import io
 import mimetypes
 import re
 import sys
@@ -583,6 +584,31 @@ def test_embed_raises_on_a_content_id_holding_a_line_break(
         Message(html=LOGO_HTML).embed(
             PNG, filename=filename, cid=cid, content_type="image/png"
         )
+
+
+@pytest.mark.parametrize(
+    ("filename", "cid", "content_id"),
+    [("café.png", None, "café.png"), ("logo.png", "café", "café")],
+)
+def test_embed_raises_on_a_content_id_outside_ascii_before_reading(
+    filename: str, cid: str | None, content_id: str
+):
+    source = io.BytesIO(PNG)
+
+    with pytest.raises(ValueError, match=re.escape(f"content id {content_id!r}")):
+        Message(html=LOGO_HTML).embed(source, filename=filename, cid=cid)
+
+    assert source.tell() == 0
+
+
+def test_embed_takes_a_filename_outside_ascii_under_an_ascii_content_id():
+    image = (
+        Message(html=LOGO_HTML)
+        .embed(PNG, filename="café.png", cid="cafe.png")
+        .inline_images[0]
+    )
+
+    assert (image.filename, image.content_id) == ("café.png", "cafe.png")
 
 
 def test_a_path_whose_name_holds_a_line_break_raises_before_it_is_read():

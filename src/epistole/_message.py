@@ -290,7 +290,7 @@ class Message:
         TypeError
             As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
         ValueError
-            When the filename or the content id holds a line break, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. See ADR-0018.
+            When the filename or the content id holds a line break, when the content id is not ASCII, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. See ADR-0018.
         """
         # Runs before _filename, so a line break in cid raises the content id error, not the filename one.
         if cid is not None and LINE_BREAK.search(cid):
@@ -305,6 +305,11 @@ class Message:
             raise ValueError(msg)
 
         content_id: str = name if cid is None else cid
+        # The stdlib writes a non-ASCII Content-ID as an encoded-word, which RFC 2047 forbids there (ADR-0018).
+        if not content_id.isascii():
+            msg = f"the content id {content_id!r} is not ASCII. Pass cid= with an ASCII id, and name that after cid: in the HTML."
+            raise ValueError(msg)
+
         if any(image.content_id == content_id for image in self.inline_images):
             msg = f"the message already holds an inline image under content id {content_id!r}. Pass cid= to embed this one under another."
             raise ValueError(msg)

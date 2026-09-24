@@ -12,6 +12,7 @@ A `str` is never read as a path.
 Decided on [#30](https://github.com/ozanozbeker/epistole/issues/30), which found the whole block in `docs/spec.md` citing [#11](https://github.com/ozanozbeker/epistole/issues/11) and ADR-0003, neither of which covers any of it.
 Amended on [#37](https://github.com/ozanozbeker/epistole/issues/37): a compressed filename falls back to `application/octet-stream`, and `content_type=` must match RFC 6838's `type/subtype` grammar.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): a filename or a content id that holds a line break is a `ValueError`.
+Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): a content id that is not ASCII is a `ValueError`.
 
 ## Why
 
@@ -94,6 +95,11 @@ This does not amend ADR-0002's append rule.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
 - **A filename or a content id that holds a line break is a `ValueError`**, including a `Path`'s own name.
   `EmailMessage` raises on either at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+  The check runs before the source is read.
+- **A content id that is not ASCII is a `ValueError`**, including one that defaults to a `Path`'s own name.
+  On SMTP and Gmail, `EmailMessage` writes a non-ASCII `Content-ID` as an RFC 2047 encoded-word, and RFC 2047 forbids one in that header.
+  The `cid:` reference in the HTML then differs from the header.
+  A filename may still be non-ASCII, because the stdlib writes it in RFC 2231's encoding.
   The check runs before the source is read.
 - **`.embed()` requires an `image/*` content type** after inference or override, and raises `ValueError` otherwise.
 - **A content id already held is a `ValueError`** that names the id.

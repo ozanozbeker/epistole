@@ -232,6 +232,8 @@ class Attachment:
   The content type must be `image/*` after inference or override, else `ValueError`.
 - A filename or a content id that holds a line break is a `ValueError`, including a `Path`'s own name.
   The check runs before the source is read.
+- A content id that is not ASCII is a `ValueError`, because SMTP and Gmail would write it as an RFC 2047 encoded-word.
+  A filename may still be non-ASCII.
 - A content id the message already holds is a `ValueError` naming it, including one the `data:` rewrite generated at construction.
   `.embed()` still appends.
   It raises only on the append the HTML could not resolve (ADR-0002).
