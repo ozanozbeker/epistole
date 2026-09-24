@@ -1,6 +1,7 @@
 import base64
 import contextlib
 import io
+import re
 from collections.abc import Callable, Mapping
 from email.message import EmailMessage
 from email.utils import format_datetime
@@ -92,9 +93,12 @@ class FakeBackend(Backend):
 # --- Backend -----------------------------------------------------------------
 
 
-def test_a_backend_checks_its_from_address():
-    with pytest.raises(ValueError, match="garbage"):
-        MemoryBackend(from_address="garbage")
+@pytest.mark.parametrize(
+    "address", ["garbage", '"Reports\nBcc: eve@example.com" <reports@example.com>']
+)
+def test_a_backend_checks_its_from_address(address: str):
+    with pytest.raises(ValueError, match=re.escape(repr(address))):
+        MemoryBackend(from_address=address)
 
 
 @pytest.mark.parametrize("double", [MemoryBackend, ConsoleBackend])

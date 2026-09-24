@@ -10,6 +10,7 @@ Any other name fails a `RejectedError` pre-check at every size.
 `Importance` and read receipts get no v1 surface.
 Decided on [#27](https://github.com/ozanozbeker/epistole/issues/27), which closes an open consequence of ADR-0010 and makes ADR-0012's pre-check concrete.
 Amended on [#40](https://github.com/ozanozbeker/epistole/issues/40): two names that differ only in case are a `ValueError`, as is a value holding any character `str.splitlines()` splits on.
+Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): `.subject()` raises `ValueError` on a line break, by the rule a custom header value follows.
 
 ## Why
 
@@ -115,6 +116,9 @@ So Graph raises either way on the case users most want this feature for.
   Anything else is a `ValueError`.
   The character set is not otherwise checked, matching ADR-0014.
   The stdlib RFC 2047-encodes a non-ASCII value on the SMTP and Gmail paths, and Graph sends it as UTF-8 in JSON.
+- **A subject takes the same line-break check, in `.subject()`.**
+  `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+  Checking in `Message` raises at the line that set the subject, on every backend.
 - **A name Epistole owns is a `ValueError`**, matched case-insensitively against the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - **Two names that differ only in case are a `ValueError`.**
   A `dict` holds both, and RFC 5322 names are case-insensitive.

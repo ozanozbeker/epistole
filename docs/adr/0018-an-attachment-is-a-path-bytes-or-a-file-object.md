@@ -11,6 +11,7 @@ A `str` is never read as a path.
 `.embed()` adds an inline image under a content id that must be unused.
 Decided on [#30](https://github.com/ozanozbeker/epistole/issues/30), which found the whole block in `docs/spec.md` citing [#11](https://github.com/ozanozbeker/epistole/issues/11) and ADR-0003, neither of which covers any of it.
 Amended on [#37](https://github.com/ozanozbeker/epistole/issues/37): a compressed filename falls back to `application/octet-stream`, and `content_type=` must match RFC 6838's `type/subtype` grammar.
+Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): a filename or a content id that holds a line break is a `ValueError`.
 
 ## Why
 
@@ -91,6 +92,9 @@ This does not amend ADR-0002's append rule.
   Bytes are never inspected.
 - **`.embed()` defaults `filename` and `cid` to each other**, so `.embed(Path("logo.png"))` matches `<img src="cid:logo.png">`.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
+- **A filename or a content id that holds a line break is a `ValueError`**, including a `Path`'s own name.
+  `EmailMessage` raises on either at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+  The check runs before the source is read.
 - **`.embed()` requires an `image/*` content type** after inference or override, and raises `ValueError` otherwise.
 - **A content id already held is a `ValueError`** that names the id.
   This includes one the `data:` rewrite generated at construction.

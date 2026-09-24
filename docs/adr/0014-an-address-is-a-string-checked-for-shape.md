@@ -6,6 +6,7 @@ Each string must hold exactly one address.
 Epistole checks that when the caller supplies it and raises `ValueError` otherwise.
 The mail service, never Epistole, checks whether that address exists, accepts mail, or may send.
 Decided on [#26](https://github.com/ozanozbeker/epistole/issues/26).
+Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): an address that holds a line break is a `ValueError`.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -104,8 +105,9 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   The plain-string path accepts the rest.
 - **Epistole checks structure where the caller supplies the address**, in `.to()` and the other address methods and in a backend's constructor.
   A failure raises `ValueError` per ADR-0004.
-  A string passes when `getaddresses` returns exactly one pair, its addr-spec is non-empty, and both halves of the addr-spec's last `@` are non-empty.
-  The check inspects nothing inside either half: no dot in the domain, no TLD list, no length limit, no DNS or MX lookup.
+  A string passes when it holds no line break, `getaddresses` returns exactly one pair, its addr-spec is non-empty, and both halves of the addr-spec's last `@` are non-empty.
+  A line break fails anywhere in the string, because `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+  Apart from line breaks, the check inspects nothing inside either half: no dot in the domain, no TLD list, no length limit, no DNS or MX lookup.
 - **Validity belongs to the mail service.**
   When the service refuses a structurally sound address, the caller gets `RecipientsRefusedError` or `result.refused` on SMTP.
   On Gmail and Graph, the caller gets a whole-message rejection, per ADR-0004.

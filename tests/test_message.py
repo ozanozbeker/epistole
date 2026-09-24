@@ -13,6 +13,9 @@ PNG = b"\x89PNG\r\n\x1a\n logo"
 LOGO_HTML = '<p><img src="cid:logo.png" alt="Logo"></p>'
 UNSUBSCRIBE = "<mailto:unsubscribe@example.com>"
 
+# The line boundaries str.splitlines() documents, each of which EmailMessage raises on.
+LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
+
 # A quoted local part may hold an @, and Epistole never checks character set (ADR-0014).
 GOOD = (
     "ada@example.com",
@@ -32,6 +35,9 @@ BAD = (
     "ada@example.com, bob@example.com",
     "a@[192.168.1.1]",
     "a@[IPv6:::1]",
+    '"Ada\nBcc: eve@example.com" <ada@example.com>',
+    "Ada\u2028Lovelace <ada@example.com>",
+    '"a\nb"@example.com',
 )
 
 
@@ -215,6 +221,12 @@ def test_an_address_method_replaces_rather_than_appends(method: str):
 
 def test_subject_replaces():
     assert Message(text="hi").subject("first").subject("second").subject_ == "second"
+
+
+@pytest.mark.parametrize("boundary", LINE_BREAKS)
+def test_subject_raises_on_a_line_break(boundary: str):
+    with pytest.raises(ValueError, match="line break"):
+        Message(text="hi").subject(f"Weekly{boundary}numbers")
 
 
 @pytest.mark.parametrize("method", ADDRESS_METHODS)
@@ -528,6 +540,37 @@ def test_embed_raises_on_a_content_id_the_message_already_holds(data: bytes):
         message.embed(data, cid="logo.png")
 
 
+@pytest.mark.parametrize("method", ["attach", "embed"])
+@pytest.mark.parametrize("boundary", LINE_BREAKS)
+def test_a_filename_holding_a_line_break_raises(method: str, boundary: str):
+    filename = f"logo{boundary}.png"
+
+    with pytest.raises(ValueError, match=re.escape(repr(filename))):
+        getattr(Message(html=LOGO_HTML), method)(
+            PNG, filename=filename, content_type="image/png"
+        )
+
+
+@pytest.mark.parametrize("filename", [None, "logo.png"])
+@pytest.mark.parametrize("boundary", LINE_BREAKS)
+def test_embed_raises_on_a_content_id_holding_a_line_break(
+    filename: str | None, boundary: str
+):
+    cid = f"logo{boundary}"
+
+    with pytest.raises(ValueError, match=re.escape(f"content id {cid!r}")):
+        Message(html=LOGO_HTML).embed(
+            PNG, filename=filename, cid=cid, content_type="image/png"
+        )
+
+
+def test_a_path_whose_name_holds_a_line_break_raises_before_it_is_read():
+    path = Path("weekly\n.pdf")
+
+    with pytest.raises(ValueError, match=re.escape(repr(path.name))):
+        Message(text="hi").attach(path)
+
+
 def test_attach_and_embed_append_in_call_order_and_leave_the_receiver_unchanged():
     base = Message(html=LOGO_HTML)
 
@@ -619,16 +662,12 @@ def test_headers_raises_on_an_illegal_name(name: str):
         Message(text="hi").headers({name: "autumn"})
 
 
-# The line boundaries str.splitlines() documents, each of which EmailMessage raises on.
 @pytest.mark.parametrize(
     "value",
     [
         "autumn\r\nBcc: eve@example.com",
         "autumn\n",
-        *(
-            f"autumn{boundary}spring"
-            for boundary in "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
-        ),
+        *(f"autumn{boundary}spring" for boundary in LINE_BREAKS),
     ],
 )
 def test_headers_raises_on_a_value_holding_a_line_break(value: str):

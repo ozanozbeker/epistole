@@ -1,7 +1,11 @@
-"""`Address` writes an address with its display name. `check_address` and `addr_spec` check and parse an address string."""
+"""`Address` writes an address with its display name. `check_address` and `addr_spec` check and parse an address string. `LINE_BREAK` matches what no header value may hold."""
 
+import re
 from email.utils import formataddr, getaddresses
 from typing import Self
+
+# str.splitlines() splits on each of these, and EmailMessage raises on a value it splits.
+LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 
 
 class Address(str):
@@ -45,10 +49,14 @@ class Address(str):
 
 
 def check_address(address: str) -> None:
-    """Raise `ValueError` unless `address` holds exactly one address with something on both sides of its last `@`.
+    """Raise `ValueError` unless `address` holds exactly one address on one line, with something on both sides of its last `@`.
 
     See ADR-0014 for why the check looks no further.
     """
+    if LINE_BREAK.search(address):
+        msg = f"{address!r} holds a line break, such as \\r or \\n. An address is one line."
+        raise ValueError(msg)
+
     pairs: list[tuple[str, str]] = getaddresses([address])
     if len(pairs) != 1:
         msg = (

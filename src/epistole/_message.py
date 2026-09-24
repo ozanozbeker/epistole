@@ -9,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from epistole._address import check_address
+from epistole._address import LINE_BREAK, check_address
 from epistole._text import html_to_text
 
 if TYPE_CHECKING:
@@ -40,9 +40,6 @@ _OWNED_NAMES = frozenset(
         "content-disposition",
     }
 )
-
-# str.splitlines() splits on each of these, and EmailMessage raises on a value it splits.
-_LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 
 
 class Message:
@@ -193,7 +190,17 @@ class Message:
         return self._copy(reply_to_=_checked(address, more))
 
     def subject(self, subject: str, /) -> Message:
-        """Return a copy with the subject set, replacing any earlier subject."""
+        """Return a copy with the subject set, replacing any earlier subject.
+
+        Raises
+        ------
+        ValueError
+            When `subject` holds a line break. See ADR-0016.
+        """
+        if LINE_BREAK.search(subject):
+            msg = f"{subject!r} holds a line break, such as \\r or \\n. A subject is one line."
+            raise ValueError(msg)
+
         return self._copy(subject_=subject)
 
     def headers(self, mapping: Mapping[str, str], /) -> Message:
@@ -233,7 +240,7 @@ class Message:
         TypeError
             When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. See ADR-0018.
         ValueError
-            When `content_type` is not a bare `type/subtype`, such as one with parameters.
+            When the filename holds a line break, or when `content_type` is not a bare `type/subtype`, such as one with parameters.
         """
         name: str = _filename(source, filename)
         attachment = Attachment(
@@ -271,8 +278,13 @@ class Message:
         TypeError
             As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
         ValueError
-            When the content type is not `image/*`, or when the message already holds an inline image under the same content id. See ADR-0018.
+            When the filename or the content id holds a line break, when the content type is not `image/*`, or when the message already holds an inline image under the same content id. See ADR-0018.
         """
+        # Runs before _filename, so a line break in cid raises the content id error, not the filename one.
+        if cid is not None and LINE_BREAK.search(cid):
+            msg = f"the content id {cid!r} holds a line break, such as \\r or \\n. Pass cid= without one."
+            raise ValueError(msg)
+
         name: str = _filename(source, filename, cid)
         kind: str = _content_type(name, content_type)
         # RFC 2045 makes a media type case-insensitive.
@@ -405,7 +417,7 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
         seen.add(lowered)
 
         # Graph sends JSON, so no stdlib check raises on a line break there (ADR-0016).
-        if not isinstance(value, str) or _LINE_BREAK.search(value):
+        if not isinstance(value, str) or LINE_BREAK.search(value):
             msg = f"the value of custom header {name!r} must be a str with no line break, such as \\r or \\n"
             raise ValueError(msg)
 
@@ -415,7 +427,7 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
 def _filename(
     source: Path | bytes | BinaryIO, filename: str | None, cid: str | None = None
 ) -> str:
-    """Check the type of `source`, then return `filename`, or else a `Path` source's own name, or else `cid`."""
+    """Check the type of `source`, then return `filename`, or else a `Path` source's own name, or else `cid`, once checked for a line break."""
     if isinstance(source, str):
         msg = "Epistole never reads a str as a path. Wrap it in Path()."
         raise TypeError(msg)
@@ -425,16 +437,20 @@ def _filename(
         raise TypeError(msg)
 
     if filename is not None:
-        return filename
+        name: str = filename
+    elif isinstance(source, Path):
+        name = source.name
+    elif cid is not None:
+        name = cid
+    else:
+        msg = f"a {type(source).__name__} source needs filename=, because only a Path supplies its own filename. .embed() takes cid= as well."
+        raise TypeError(msg)
 
-    if isinstance(source, Path):
-        return source.name
+    if LINE_BREAK.search(name):
+        msg = f"the filename {name!r} holds a line break, such as \\r or \\n. Pass filename= to name it without one."
+        raise ValueError(msg)
 
-    if cid is not None:
-        return cid
-
-    msg = f"a {type(source).__name__} source needs filename=, because only a Path supplies its own filename. .embed() takes cid= as well."
-    raise TypeError(msg)
+    return name
 
 
 def _content_type(filename: str, content_type: str | None) -> str:

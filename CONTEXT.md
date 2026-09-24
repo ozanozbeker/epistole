@@ -67,7 +67,7 @@ _Avoid_: session, channel, socket, link (prose only), backend (the configuration
 **Address**: One mailbox written as a string, either bare as `ada@example.com` or with a display name as `Ada Lovelace <ada@example.com>`.
 Every address Epistole holds is a `str`.
 `Address(name, email)` is a `str` subclass that writes the second form, so the caller never has to know the quoting rules.
-Epistole checks only that a string holds exactly one address and that the address has something on both sides of its last `@`.
+Epistole checks only that a string holds exactly one address on one line, and that the address has something on both sides of its last `@`.
 The mail service determines whether the mailbox exists, accepts mail, or may send.
 _Avoid_: email address (the noun is _address_ on its own), addr, recipient (the role an address plays, not the value)
 

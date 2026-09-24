@@ -228,6 +228,8 @@ class Attachment:
 - `.embed()`: `filename` and `cid` default to each other, so `.embed(Path("logo.png"))` resolves `<img src="cid:logo.png">`.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
   The content type must be `image/*` after inference or override, else `ValueError`.
+- A filename or a content id that holds a line break is a `ValueError`, including a `Path`'s own name.
+  The check runs before the source is read.
 - A content id the message already holds is a `ValueError` naming it, including one the `data:` rewrite generated at construction.
   `.embed()` still appends.
   It raises only on the append the HTML could not resolve (ADR-0002).
@@ -241,9 +243,14 @@ class Attachment:
 
 - An address is checked where it is supplied: in the four address methods and in `from_address`.
   A failed check is a `ValueError`.
-  A string passes when `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
+  A string passes when it holds no line break, `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
   Epistole inspects nothing else: no character set, no DNS, no punycode.
 - `recipients` is `to_ + cc_ + bcc_` in that order, duplicates kept (ADR-0007).
+
+**Subject (ADR-0016).**
+
+- A subject that holds a line break is a `ValueError`, checked in `.subject()`.
+  The rule is the one a custom header value follows.
 
 **Custom headers (ADR-0016).**
 
