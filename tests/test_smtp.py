@@ -1,11 +1,15 @@
 import base64
 import contextlib
+import json
 import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from smtplib import (
     SMTPAuthenticationError,
     SMTPConnectError,
@@ -19,11 +23,15 @@ from smtplib import (
     SMTPServerDisconnected,
 )
 from types import NoneType
-from typing import Any
+from typing import Any, NamedTuple
+from urllib.parse import parse_qs
 
+import httpx2
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
-from epistole import Message, Refusal, SMTPBackend, smtp
+from epistole import Message, Refusal, SMTPBackend, gmail, graph, smtp
 from epistole.exceptions import (
     AuthenticationError,
     EpistoleError,
@@ -34,10 +42,15 @@ from epistole.exceptions import (
     TransportError,
 )
 
-EXTENSIONS = ("SIZE 10485760", "8BITMIME", "SMTPUTF8", "AUTH PLAIN")
+EXTENSIONS = ("SIZE 10485760", "8BITMIME", "SMTPUTF8", "AUTH PLAIN XOAUTH2")
 STARTTLS = (*EXTENSIONS, "STARTTLS")
 PASSWORD = smtp.Password(username="reports", password="hunter2")  # noqa: S106
 AUTH = f"AUTH PLAIN {base64.b64encode(b'\0reports\0hunter2').decode()}"
+XOAUTH2 = f"AUTH XOAUTH2 {base64.b64encode(b'user=reports@example.com\1auth=Bearer token-1\1\1').decode()}"
+OUTLOOK = "https://outlook.office365.com/.default"
+GMAIL = "https://mail.google.com/"
+TENANT = "contoso.onmicrosoft.com"
+MICROSOFT = f"https://login.microsoftonline.com/{TENANT}"
 
 type Reply = str | bytes | None
 
@@ -136,7 +149,9 @@ class Server:
         if verb == "AUTH":
             return (
                 verb,
-                "235 2.7.0 accepted" if command == AUTH else "535 5.7.8 rejected",
+                "235 2.7.0 accepted"
+                if command in {AUTH, XOAUTH2}
+                else "535 5.7.8 rejected",
             )
 
         defaults = {
@@ -219,6 +234,121 @@ def message(*recipients: str) -> Message:
     return built.to(*recipients) if recipients else built.to("ada@example.com")
 
 
+class AccessToken(NamedTuple):
+    """The shape `azure.core.credentials.AccessToken` defines."""
+
+    token: str
+    expires_on: int
+
+
+class Credential:
+    """A `TokenCredential` that returns `token-1` and records the scopes of each call."""
+
+    def __init__(self) -> None:
+        self.scopes: list[tuple[str, ...]] = []
+
+    def get_token(self, *scopes: str) -> AccessToken:
+        self.scopes.append(scopes)
+        return AccessToken("token-1", int(time.time()) + 3600)
+
+
+class Issuer:
+    """A fake of the token endpoints of Microsoft and Google, which issues `token-1` and records each request.
+
+    Once `failure` is set, every request raises it.
+    """
+
+    def __init__(self) -> None:
+        self.requests: list[httpx2.Request] = []
+        self.clients: list[httpx2.Client] = []
+        self.failure: Exception | None = None
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        if self.failure is not None:
+            raise self.failure
+
+        if request.url.path.endswith("/openid-configuration"):
+            return httpx2.Response(
+                200,
+                json={
+                    "authorization_endpoint": f"{MICROSOFT}/oauth2/v2.0/authorize",
+                    "token_endpoint": f"{MICROSOFT}/oauth2/v2.0/token",
+                    "issuer": f"{MICROSOFT}/v2.0",
+                },
+            )
+
+        return httpx2.Response(
+            200,
+            json={
+                "access_token": "token-1",
+                "token_type": "Bearer",
+                "expires_in": 3600,
+            },
+        )
+
+
+@pytest.fixture
+def issuer(monkeypatch: pytest.MonkeyPatch) -> Issuer:
+    """Send every request of every `httpx2.Client` the backend builds to a fake issuer, keeping the options the backend set."""
+    fake = Issuer()
+    build = httpx2.Client
+
+    def client(**options: Any) -> httpx2.Client:
+        fake.clients.append(build(transport=httpx2.MockTransport(fake), **options))
+        return fake.clients[-1]
+
+    monkeypatch.setattr(httpx2, "Client", client)
+    # msal reads these to pick a managed identity endpoint other than a VM's.
+    for name in ("IDENTITY_ENDPOINT", "MSI_ENDPOINT"):
+        monkeypatch.delenv(name, raising=False)
+
+    return fake
+
+
+@pytest.fixture
+def secret() -> graph.ClientSecret:
+    return graph.ClientSecret(TENANT, "epistole", "hunter2")
+
+
+@pytest.fixture
+def service_account(tmp_path: Path) -> gmail.ServiceAccount:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    path = tmp_path / "service-account.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": "epistole@project.iam.gserviceaccount.com",
+                "private_key": pem.decode(),
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+    )
+    return gmail.ServiceAccount(path, subject="reports@example.com")
+
+
+@pytest.fixture
+def authorized_user(tmp_path: Path) -> gmail.AuthorizedUser:
+    path = tmp_path / "authorized-user.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "authorized_user",
+                "client_id": "epistole",
+                "client_secret": "hunter2",
+                "refresh_token": "refresh",
+            }
+        )
+    )
+    return gmail.AuthorizedUser(path)
+
+
 # --- Sending -----------------------------------------------------------------
 
 
@@ -283,6 +413,259 @@ def test_a_wrong_password_raises_on_the_connect_line(serve: Callable[..., Server
 
 def test_a_password_stays_out_of_the_repr():
     assert "hunter2" not in repr(PASSWORD)
+
+
+def test_oauth_authenticates_through_xoauth2_on_connect(
+    serve: Callable[..., Server],
+):
+    server = serve()
+    credential = Credential()
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=credential, scope=OUTLOOK
+    )
+
+    with backend(server, credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+    assert credential.scopes == [(OUTLOOK,)]
+
+
+def test_a_rejected_token_raises_on_the_connect_line(serve: Callable[..., Server]):
+    # Gmail sends a 334 challenge that holds its error for a rejected token, then 535 after an empty response.
+    error = base64.b64encode(b'{"status":"400","schemes":"Bearer"}').decode()
+    server = serve({"AUTH": f"334 {error}", "": "535 5.7.8 not accepted"})
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=Credential(), scope=OUTLOOK
+    )
+    configured = backend(server, credential=oauth)
+
+    with pytest.raises(AuthenticationError, match="535") as caught:
+        configured.connect()
+
+    assert isinstance(caught.value.__cause__, SMTPAuthenticationError)
+    assert caught.value.backend is configured
+    assert server.commands[-1] == ""
+    assert server.hung_up.wait(5)
+
+
+@pytest.mark.parametrize(
+    ("extensions", "reply"),
+    [
+        # Postfix replies 503 when SASL is off, and smtplib's auth returns normally on it.
+        pytest.param(("8BITMIME",), "503 5.5.1 not enabled", id="no AUTH"),
+        pytest.param(("AUTH PLAIN LOGIN",), "504 5.7.4 unknown", id="no XOAUTH2"),
+    ],
+)
+def test_oauth_sends_no_token_to_a_server_that_does_not_offer_xoauth2(
+    serve: Callable[..., Server], extensions: tuple[str, ...], reply: str
+):
+    server = serve({"AUTH": reply}, extensions=extensions)
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=Credential(), scope=OUTLOOK
+    )
+
+    with pytest.raises(AuthenticationError, match="XOAUTH2") as caught:
+        backend(server, credential=oauth).connect()
+
+    assert caught.value.__cause__ is None
+    assert "AUTH" not in server.verbs()
+    assert server.hung_up.wait(5)
+
+
+def test_oauth_over_a_graph_value_requests_the_exchange_online_scope(
+    serve: Callable[..., Server], issuer: Issuer, secret: graph.ClientSecret
+):
+    server = serve()
+    oauth = smtp.OAuth(username="reports@example.com", credential=secret)
+
+    with backend(server, credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+    [token] = [one for one in issuer.requests if one.method == "POST"]
+    assert parse_qs(token.content.decode())["scope"] == [OUTLOOK]
+    assert all(one.is_closed for one in issuer.clients)
+
+
+def test_oauth_over_a_managed_identity_requests_the_exchange_online_resource(
+    serve: Callable[..., Server], issuer: Issuer
+):
+    server = serve()
+    identity = graph.ManagedIdentity()
+    oauth = smtp.OAuth(username="reports@example.com", credential=identity)
+
+    with backend(server, credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+    [token] = issuer.requests
+    query = parse_qs(token.url.query.decode())
+    assert query["resource"] == ["https://outlook.office365.com"]
+    assert "scope" not in query
+
+
+def test_oauth_over_a_service_account_requests_the_gmail_smtp_scope(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    service_account: gmail.ServiceAccount,
+):
+    server = serve()
+    oauth = smtp.OAuth(username="reports@example.com", credential=service_account)
+
+    with backend(server, credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+    [token] = issuer.requests
+    assertion = parse_qs(token.content.decode())["assertion"][0]
+    claims = json.loads(base64.urlsafe_b64decode(assertion.split(".")[1] + "=="))
+    assert claims["scope"] == GMAIL
+    assert all(one.is_closed for one in issuer.clients)
+
+
+def test_oauth_over_an_authorized_user_requests_the_gmail_smtp_scope(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    authorized_user: gmail.AuthorizedUser,
+):
+    server = serve()
+    oauth = smtp.OAuth(username="reports@example.com", credential=authorized_user)
+
+    with backend(server, credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+    [token] = issuer.requests
+    assert parse_qs(token.content.decode())["scope"] == [GMAIL]
+
+
+@pytest.mark.parametrize(
+    ("credential", "module", "extra"),
+    [
+        pytest.param(
+            graph.ClientSecret(TENANT, "epistole", "hunter2"),
+            "msal",
+            "graph",
+            id="graph value without msal",
+        ),
+        pytest.param(
+            graph.ManagedIdentity(), "httpx2", "graph", id="graph value without httpx2"
+        ),
+        pytest.param(
+            gmail.AuthorizedUser(Path("authorized-user.json")),
+            "google.auth",
+            "gmail",
+            id="gmail value without google-auth",
+        ),
+    ],
+)
+def test_the_constructor_raises_naming_the_extra_the_wrapped_credential_needs(
+    monkeypatch: pytest.MonkeyPatch,
+    credential: graph.ClientSecret | graph.ManagedIdentity | gmail.AuthorizedUser,
+    module: str,
+    extra: str,
+):
+    monkeypatch.setitem(sys.modules, module, None)
+    oauth = smtp.OAuth(username="reports@example.com", credential=credential)
+
+    with pytest.raises(ImportError, match=rf"epistole\[{extra}\]"):
+        SMTPBackend("127.0.0.1", from_address="reports@example.com", credential=oauth)
+
+
+def test_oauth_over_get_token_needs_no_extra(
+    monkeypatch: pytest.MonkeyPatch, serve: Callable[..., Server]
+):
+    for module in ("httpx2", "msal", "google.auth"):
+        monkeypatch.setitem(sys.modules, module, None)
+
+    server = serve()
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=Credential(), scope=OUTLOOK
+    )
+
+    backend(server, credential=oauth).send(message())
+
+    assert len(server.messages) == 1
+
+
+def test_a_missing_key_file_stays_a_file_not_found_error(
+    serve: Callable[..., Server], issuer: Issuer, tmp_path: Path
+):
+    missing = gmail.AuthorizedUser(tmp_path / "missing.json")
+    oauth = smtp.OAuth(username="reports@example.com", credential=missing)
+
+    with pytest.raises(FileNotFoundError):
+        backend(serve(), credential=oauth).connect()
+
+    assert all(one.is_closed for one in issuer.clients)
+
+
+@pytest.mark.parametrize("fixture", ["secret", "authorized_user"])
+def test_a_network_failure_getting_the_token_is_a_transport_error(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    request: pytest.FixtureRequest,
+    fixture: str,
+):
+    issuer.failure = failure = httpx2.ConnectError("refused")
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
+    configured = backend(serve(), credential=oauth)
+
+    with pytest.raises(TransportError) as caught:
+        configured.connect()
+
+    assert caught.value.__cause__ is failure
+    assert caught.value.backend is configured
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        graph.ClientSecret(TENANT, "epistole", "hunter2"),
+        graph.Certificate(TENANT, "epistole", pfx=Path("app.pfx")),
+        graph.ManagedIdentity(),
+        gmail.ServiceAccount(Path("key.json"), subject="reports@example.com"),
+        gmail.AuthorizedUser(Path("authorized-user.json")),
+    ],
+    ids=lambda credential: type(credential).__name__,
+)
+def test_oauth_takes_every_graph_and_gmail_value(
+    credential: graph.ClientSecret
+    | graph.Certificate
+    | graph.ManagedIdentity
+    | gmail.ServiceAccount
+    | gmail.AuthorizedUser,
+):
+    oauth = smtp.OAuth(username="reports@example.com", credential=credential)
+
+    SMTPBackend("127.0.0.1", from_address="reports@example.com", credential=oauth)
+
+
+@pytest.mark.parametrize(
+    ("credential", "scope"),
+    [
+        pytest.param(Credential(), None, id="get_token without scope"),
+        pytest.param(
+            graph.ClientSecret(TENANT, "epistole", "hunter2"),
+            OUTLOOK,
+            id="graph value with scope",
+        ),
+        pytest.param(
+            gmail.AuthorizedUser(Path("authorized-user.json")),
+            GMAIL,
+            id="gmail value with scope",
+        ),
+    ],
+)
+def test_oauth_takes_a_scope_with_get_token_and_only_then(
+    credential: object, scope: str | None
+):
+    with pytest.raises(TypeError, match="scope="):
+        smtp.OAuth(username="reports@example.com", credential=credential, scope=scope)  # pyrefly: ignore
+
+
+@pytest.mark.parametrize("credential", ["token", PASSWORD], ids=["str", "Password"])
+def test_oauth_over_a_credential_of_another_type_raises(credential: object):
+    with pytest.raises(TypeError, match=type(credential).__name__):
+        smtp.OAuth(username="reports@example.com", credential=credential, scope=OUTLOOK)  # pyrefly: ignore
 
 
 # --- Security ----------------------------------------------------------------

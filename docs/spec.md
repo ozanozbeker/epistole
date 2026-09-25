@@ -537,6 +537,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - `credential=None` is anonymous submission.
   `Password` uses `login`.
   `OAuth` uses XOAUTH2 through `smtplib.SMTP.auth` with `user={username}\x01auth=Bearer {token}\x01\x01`.
+  It sends no token to a server that does not offer `AUTH XOAUTH2`, and raises `AuthenticationError` instead.
+  `auth` returns normally on a `503`, which Postfix sends when AUTH is off (ADR-0011).
 - `OAuth.scope` is derived from the issuer: `https://outlook.office365.com/.default` for a Graph value, `https://mail.google.com/` for a Gmail value.
   It is required for a `TokenCredential`.
   Supplying it alongside a Graph or a Gmail value is a `TypeError`.
@@ -758,7 +760,7 @@ One rule applies to all three tables.
 - A client-side timeout is the `httpx2.TransportError` subclass and so `TransportError`.
   A `504` is a status the service returned and so `ProviderError`.
 
-**SMTP mapping (ADR-0004, ADR-0014, ADR-0017).**
+**SMTP mapping (ADR-0004, ADR-0011, ADR-0014, ADR-0017).**
 Everything below `421` classifies on `smtp_code // 100`.
 
 | Native | Epistole |
@@ -766,7 +768,7 @@ Everything below `421` classifies on `smtp_code // 100`.
 | any exception carrying `421` | `TransportError` |
 | `SMTPSenderRefused` `552` | `RejectedError` |
 | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
-| `SMTPAuthenticationError`; `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth` | `AuthenticationError` |
+| `SMTPAuthenticationError`; `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth`; `AUTH XOAUTH2` not offered | `AuthenticationError` |
 | `SMTPNotSupportedError` from `send_message` (non-ASCII address, no `SMTPUTF8`) | `RejectedError` |
 | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors, STARTTLS not offered | `TransportError` |
 | `SMTPDataError` `5yz` | `RejectedError` |

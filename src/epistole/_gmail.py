@@ -64,7 +64,7 @@ def connect(
     client: httpx2.Client = _http.client()
     with ExitStack() as on_failure:
         on_failure.callback(client.close)
-        tokens: _http.Tokens = _tokens(credential, client)
+        tokens: _http.Tokens = _tokens(credential, client, _SCOPE)
         with _mapping():
             tokens.token()
 
@@ -73,24 +73,36 @@ def connect(
     return _GmailTransport(client, tokens)
 
 
+def token(credential: ServiceAccount | AuthorizedUser, scope: str) -> str:
+    """Return one access token for `scope`.
+
+    SMTP sends a token once in `AUTH`, so the client closes before this returns.
+    """
+    with _http.client() as client:
+        tokens: _http.Tokens = _tokens(credential, client, scope)
+        with _mapping():
+            return tokens.token()
+
+
 def _tokens(
     credential: ServiceAccount | AuthorizedUser | TokenCredential,
     client: httpx2.Client,
+    scope: str,
 ) -> _http.Tokens:
     """Build the tokens for `credential`, reading its file if it has one."""
     match credential:
         case ServiceAccount(path=path, subject=subject):
             credentials: Credentials = (
                 ServiceAccountCredentials.from_service_account_file(
-                    path, scopes=[_SCOPE], subject=subject
+                    path, scopes=[scope], subject=subject
                 )
             )
         case AuthorizedUser(path=path):
             credentials = UserCredentials.from_authorized_user_file(
-                path, scopes=[_SCOPE]
+                path, scopes=[scope]
             )
         case _:
-            return _http.ForeignTokens(credential, _SCOPE)
+            return _http.ForeignTokens(credential, scope)
 
     return _GoogleTokens(credentials, _Request(client))
 

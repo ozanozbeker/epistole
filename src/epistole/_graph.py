@@ -38,10 +38,7 @@ if TYPE_CHECKING:
     from epistole._result import Refusal
 
 _AUDIENCE = "https://graph.microsoft.com"
-"""`msal`'s managed identity client takes the audience bare, as a resource, because it accepts no scope (ADR-0011)."""
-
-_SCOPE = f"{_AUDIENCE}/.default"
-"""`msal`'s confidential client and a `TokenCredential` take the audience as this scope (ADR-0011)."""
+"""Graph's audience, which `_tokens` requests as a resource or as a scope by the credential's type (ADR-0011)."""
 
 _USERS = f"{_AUDIENCE}/v1.0/users/"
 """Every request names the mailbox, because `/me` needs a signed-in user and an app-only token has none (ADR-0012)."""
@@ -71,7 +68,7 @@ def connect(
         on_failure.callback(client.close)
         # msal fetches the tenant's OpenID configuration when it builds a confidential client.
         with _mapping():
-            tokens: _http.Tokens = _tokens(credential, client)
+            tokens: _http.Tokens = _tokens(credential, client, _AUDIENCE)
             tokens.token()
 
         on_failure.pop_all()
@@ -79,12 +76,25 @@ def connect(
     return _GraphTransport(client, tokens)
 
 
+def token(
+    credential: ClientSecret | Certificate | ManagedIdentity, audience: str
+) -> str:
+    """Return one access token for `audience`.
+
+    SMTP sends a token once in `AUTH`, so the client closes before this returns.
+    """
+    with _http.client() as client, _mapping():
+        return _tokens(credential, client, audience).token()
+
+
 def _tokens(
     credential: ClientSecret | Certificate | ManagedIdentity | TokenCredential,
     client: httpx2.Client,
+    audience: str,
 ) -> _http.Tokens:
-    """Build the tokens for `credential`, in the spelling of the audience its `msal` client takes (ADR-0011)."""
+    """Build the tokens for `credential`, in the spelling of `audience` its `msal` client takes (ADR-0011)."""
     cache = msal.TokenCache()
+    scope = f"{audience}/.default"
     match credential:
         case ManagedIdentity(client_id=client_id):
             identity = (
@@ -96,7 +106,7 @@ def _tokens(
                 identity, http_client=_HttpClient(client), token_cache=cache
             )
             return _MsalTokens(
-                partial(managed.acquire_token_for_client, resource=_AUDIENCE), cache
+                partial(managed.acquire_token_for_client, resource=audience), cache
             )
         case ClientSecret() | Certificate():
             app = msal.ConfidentialClientApplication(
@@ -108,9 +118,9 @@ def _tokens(
                 # Otherwise msal fetches the host's aliases after a rejection, to find a refresh token a client credential never has.
                 instance_discovery=False,
             )
-            return _MsalTokens(partial(app.acquire_token_for_client, [_SCOPE]), cache)
+            return _MsalTokens(partial(app.acquire_token_for_client, [scope]), cache)
         case _:
-            return _http.ForeignTokens(credential, _SCOPE)
+            return _http.ForeignTokens(credential, scope)
 
 
 def _client_credential(

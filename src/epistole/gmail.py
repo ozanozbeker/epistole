@@ -56,13 +56,7 @@ class GmailBackend(Backend):
             raise TypeError(msg)
 
         # A job without the extra fails at construction rather than on its first send (ADR-0009).
-        try:
-            import google.auth  # noqa: F401, PLC0415
-            import httpx2  # noqa: F401, PLC0415
-        except ImportError as error:
-            msg = "GmailBackend needs httpx2 and google-auth, so install the extra: pip install 'epistole[gmail]'"
-            raise ImportError(msg) from error
-
+        _check_extra("GmailBackend")
         self._credential = credential
 
     @override
@@ -72,11 +66,21 @@ class GmailBackend(Backend):
         return connect(self._credential)
 
 
+def _check_extra(dependent: str, /) -> None:
+    """Raise `ImportError` naming `epistole[gmail]` unless `httpx2` and `google-auth` import."""
+    try:
+        import google.auth  # noqa: F401, PLC0415
+        import httpx2  # noqa: F401, PLC0415
+    except ImportError as error:
+        msg = f"{dependent} needs httpx2 and google-auth, so install the extra: pip install 'epistole[gmail]'"
+        raise ImportError(msg) from error
+
+
 @dataclass(frozen=True)
 class ServiceAccount:
     """A service account sends as `subject` through domain-wide delegation.
 
-    A Workspace administrator grants the service account's client ID the `https://www.googleapis.com/auth/gmail.send` scope.
+    A Workspace administrator grants the service account's client ID the `https://www.googleapis.com/auth/gmail.send` scope. Inside `smtp.OAuth`, it requests `https://mail.google.com/` instead, so the administrator grants that.
 
     Attributes
     ----------
@@ -95,6 +99,8 @@ class AuthorizedUser:
     """An authorized user is a saved user consent.
 
     Epistole runs no consent flow and never rewrites the file. A refresh token that Google has expired or revoked raises `AuthenticationError` on `connect()`.
+
+    Inside `smtp.OAuth`, it requests `https://mail.google.com/`, so the consent must include that scope.
 
     Attributes
     ----------

@@ -19,6 +19,7 @@ The Gmail REST backend requests `gmail.send` rather than the SMTP scope.
 `TokenCredential` and `AccessToken` are exported as Protocols.
 Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): no secret appears in a value's `repr`.
 Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `ManagedIdentity` does not work on Service Fabric, because `msal` 1.38 requires a real `requests.Session` there.
+Amended on [#47](https://github.com/ozanozbeker/epistole/issues/47): `connect()` sends a token only to a server that offers `AUTH XOAUTH2`.
 
 ## Why
 
@@ -94,6 +95,9 @@ No backend would change.
   `OAuth(username, credential, scope=None)`, where `credential` is a Graph value, a Gmail value, or a `get_token` object.
   `scope` is required for the last and forbidden for the first two.
   XOAUTH2 uses `smtplib.SMTP.auth` with the auth string `user={username}\x01auth=Bearer {token}\x01\x01`.
+  `connect()` raises `AuthenticationError` without sending the token when the server does not offer `AUTH XOAUTH2`.
+  `auth` returns normally on a `503`, which Postfix sends when AUTH is off.
+  Without the check, a send would continue unauthenticated.
 - `GraphBackend(from_address=, credential=)` takes `ClientSecret(tenant_id, client_id, client_secret)`, a certificate, `ManagedIdentity(client_id=None)` for a system- or user-assigned identity, or any `get_token` object.
   The certificate is `Certificate(tenant_id, client_id, pfx=, passphrase=None)` or `Certificate(tenant_id, client_id, private_key=, thumbprint=)`, the two mutually exclusive forms `msal` accepts.
 - **`Certificate` takes exactly one complete form.**

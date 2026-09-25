@@ -60,13 +60,7 @@ class GraphBackend(Backend):
             raise TypeError(msg)
 
         # A job without the extra fails at construction rather than on its first send (ADR-0009).
-        try:
-            import httpx2  # noqa: F401, PLC0415
-            import msal  # noqa: F401, PLC0415
-        except ImportError as error:
-            msg = "GraphBackend needs httpx2 and msal, so install the extra: pip install 'epistole[graph]'"
-            raise ImportError(msg) from error
-
+        _check_extra("GraphBackend")
         self._credential = credential
 
     @override
@@ -76,11 +70,21 @@ class GraphBackend(Backend):
         return connect(self._credential)
 
 
+def _check_extra(dependent: str, /) -> None:
+    """Raise `ImportError` naming `epistole[graph]` unless `httpx2` and `msal` import."""
+    try:
+        import httpx2  # noqa: F401, PLC0415
+        import msal  # noqa: F401, PLC0415
+    except ImportError as error:
+        msg = f"{dependent} needs httpx2 and msal, so install the extra: pip install 'epistole[graph]'"
+        raise ImportError(msg) from error
+
+
 @dataclass(frozen=True)
 class ClientSecret:
     """A client secret authenticates an Entra app registration, which needs the `Mail.Send` application permission.
 
-    Epistole requests the scope `https://graph.microsoft.com/.default`, which grants the permissions an administrator consented to for the app. See ADR-0011.
+    Epistole requests the scope `https://graph.microsoft.com/.default`, which grants the permissions an administrator consented to for the app. Inside `smtp.OAuth`, it requests `https://outlook.office365.com/.default` instead. See ADR-0011.
 
     Attributes
     ----------
@@ -143,7 +147,7 @@ class Certificate:
 class ManagedIdentity:
     """A managed identity is the identity Azure gives the resource the code runs on, so the caller stores no secret.
 
-    Epistole requests the resource `https://graph.microsoft.com`, because `msal`'s managed identity client takes a resource and no scope. It does not work on Service Fabric, where `msal` requires its own `requests.Session` to pin the endpoint's certificate. See ADR-0011.
+    Epistole requests the resource `https://graph.microsoft.com`, because `msal`'s managed identity client takes a resource and no scope. Inside `smtp.OAuth`, it requests `https://outlook.office365.com` instead. It does not work on Service Fabric, where `msal` requires its own `requests.Session` to pin the endpoint's certificate. See ADR-0011.
 
     Attributes
     ----------
