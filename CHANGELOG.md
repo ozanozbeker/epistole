@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.0.5](https://github.com/ozanozbeker/epistole/compare/v0.0.4...v0.0.5) (2026-09-25)
+
+
+### Features
+
+* attach files and embed inline images ([8d43923](https://github.com/ozanozbeker/epistole/commit/8d4392375d11446d0e09b5830243d648dfd61c0e)), closes [#37](https://github.com/ozanozbeker/epistole/issues/37)
+* build the RFC 5322 message ([6a853d1](https://github.com/ozanozbeker/epistole/commit/6a853d16f2b79ab16980568f4aac7e2af0a5785f)), closes [#41](https://github.com/ozanozbeker/epistole/issues/41)
+* carry custom headers on a message ([0ac7440](https://github.com/ozanozbeker/epistole/commit/0ac7440031d2587cb2db231922dc6457687f2314)), closes [#40](https://github.com/ozanozbeker/epistole/issues/40)
+* print a message with ConsoleBackend ([edee2fa](https://github.com/ozanozbeker/epistole/commit/edee2fa9a54998098f1a40e323ae92a4a3f21478)), closes [#42](https://github.com/ozanozbeker/epistole/issues/42)
+* rewrite data: images into inline images ([ec9b755](https://github.com/ozanozbeker/epistole/commit/ec9b755afb438893c70ab831aefb30ee76d60973)), closes [#38](https://github.com/ozanozbeker/epistole/issues/38)
+* send a Markdown message ([0c33fe8](https://github.com/ozanozbeker/epistole/commit/0c33fe8966e5dfc7f1722d568d21b776d6999e50)), closes [#39](https://github.com/ozanozbeker/epistole/issues/39)
+* send an HTML message with derived plain text ([c140764](https://github.com/ozanozbeker/epistole/commit/c1407642301661597e3d8f4fa5d4df12cd47e2ed)), closes [#36](https://github.com/ozanozbeker/epistole/issues/36)
+* send over Graph on the large path ([3869679](https://github.com/ozanozbeker/epistole/commit/38696798c4a8a04409a87dd9313f90813ee66a03)), closes [#46](https://github.com/ozanozbeker/epistole/issues/46)
+* send over Graph on the small path ([484a232](https://github.com/ozanozbeker/epistole/commit/484a232516aab269a5d8e7b45877d5fa1b0b6854)), closes [#45](https://github.com/ozanozbeker/epistole/issues/45)
+* send over SMTP with no credential or a password ([600714b](https://github.com/ozanozbeker/epistole/commit/600714b9059ad7f3f149529275c117020a8520bb)), closes [#43](https://github.com/ozanozbeker/epistole/issues/43)
+* send over SMTP with OAuth ([2fea1d4](https://github.com/ozanozbeker/epistole/commit/2fea1d4d1c3a0317848c7bd055f4a8b600dc7c0f)), closes [#47](https://github.com/ozanozbeker/epistole/issues/47)
+* send over the Gmail API ([2177623](https://github.com/ozanozbeker/epistole/commit/217762367dab5ecefeeefe11c605b7f7ff70cf07)), closes [#44](https://github.com/ozanozbeker/epistole/issues/44)
+
+
+### Bug Fixes
+
+* reject a content id that is not ASCII ([5dfffca](https://github.com/ozanozbeker/epistole/commit/5dfffcaf7b031e1b6d8748d0aec13e8129a0baab)), closes [#41](https://github.com/ozanozbeker/epistole/issues/41)
+* reject a line break in a subject, address, filename or content id ([76822c7](https://github.com/ozanozbeker/epistole/commit/76822c7e0bfbccb57ee7c3b7f9d8fa2be5efa6b5)), closes [#42](https://github.com/ozanozbeker/epistole/issues/42)
+
+
+### Documentation
+
+* explain each value in a docstring under it ([6fa644d](https://github.com/ozanozbeker/epistole/commit/6fa644dbd0987a3a2503b5e1562abdb3d98ea9d0))
+
 ## [0.0.4](https://github.com/ozanozbeker/epistole/compare/v0.0.3...v0.0.4) (2026-09-23)
 
 
