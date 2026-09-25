@@ -43,7 +43,11 @@ DISCOVERY = (
 )
 TOKEN_URI = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
 IMDS = "http://169.254.169.254/metadata/identity/oauth2/token"
-SEND_MAIL = "https://graph.microsoft.com/v1.0/users/reports@example.com/sendMail"
+MAILBOX = "https://graph.microsoft.com/v1.0/users/reports@example.com"
+SEND_MAIL = f"{MAILBOX}/sendMail"
+DRAFTS = f"{MAILBOX}/messages"
+DRAFT = f"{DRAFTS}/draft-1"
+UPLOAD = "https://outlook.office.com/api/v2.0/Users('reports@example.com')/Messages('draft-1')/AttachmentSessions('session-1')"
 AUDIENCE = "https://graph.microsoft.com"
 SCOPE = "https://graph.microsoft.com/.default"
 
@@ -58,7 +62,7 @@ def url(request: httpx2.Request) -> str:
 class Microsoft:
     """A fake of Microsoft's identity platform and Graph, which every `httpx2.Client` the backend builds sends to.
 
-    `replies` maps a URL to the replies it serves first, in order. An exception among them is raised rather than returned. After those, a token endpoint issues `token-1`, `token-2`, and so on, and `sendMail` accepts.
+    `replies` maps a URL to the replies it serves first, in order. An exception among them is raised rather than returned. After those, a token endpoint issues `token-1`, `token-2`, and so on, and every mail endpoint accepts. The draft it creates is `DRAFT`, and the upload session is `UPLOAD`.
     """
 
     def __init__(self) -> None:
@@ -70,6 +74,14 @@ class Microsoft:
     def sent(self) -> list[httpx2.Request]:
         """Return each `sendMail` request."""
         return [one for one in self.requests if url(one).endswith("/sendMail")]
+
+    def calls(self) -> list[tuple[str, str]]:
+        """Return the method and URL of each request to a mail endpoint."""
+        return [
+            (one.method, url(one))
+            for one in self.requests
+            if url(one) not in {DISCOVERY, TOKEN_URI, IMDS}
+        ]
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
@@ -102,9 +114,16 @@ class Microsoft:
                 },
             )
 
-        if where.startswith(
-            "https://graph.microsoft.com/v1.0/users/"
-        ) and where.endswith("/sendMail"):
+        created = {
+            DRAFTS: {"id": "draft-1"},
+            f"{DRAFT}/attachments/createUploadSession": {
+                "uploadUrl": f"{UPLOAD}?authtoken=eyJ0"
+            },
+        }.get(where)
+        if created is not None:
+            return httpx2.Response(201, json=created)
+
+        if where.endswith("/sendMail") or where.startswith((DRAFT, UPLOAD)):
             return httpx2.Response(202)
 
         return httpx2.Response(404)
@@ -363,7 +382,19 @@ def test_a_custom_header_not_starting_with_x_is_rejected_naming_it(
     assert len(microsoft.sent()) == 1
 
 
-def test_a_body_under_4_000_000_bytes_goes_out_as_one_sendmail_request(
+def test_an_attachment_over_150_000_000_bytes_is_rejected_before_writing(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    archive = message().attach(bytes(150_000_001), filename="archive.zip")
+
+    with pytest.raises(RejectedError, match="150,000,001") as caught:
+        backend(secret).send(archive)
+
+    assert caught.value.__cause__ is None
+    assert microsoft.calls() == []
+
+
+def test_a_body_of_4_000_000_bytes_or_more_goes_out_through_a_draft(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
     # Connection.send sets a Message-ID whose length varies, so this pins one on a submission.
@@ -373,14 +404,250 @@ def test_a_body_under_4_000_000_bytes_goes_out_as_one_sendmail_request(
     short = 3_999_999 - len(microsoft.sent()[0].content)
 
     transport.submit(submission(attached.subject("Weekly numbers" + "x" * short)))
-    with pytest.raises(RejectedError) as caught:
-        transport.submit(
-            submission(attached.subject("Weekly numbers" + "x" * (short + 1)))
-        )
+    transport.submit(submission(attached.subject("Weekly numbers" + "x" * (short + 1))))
 
     assert len(microsoft.sent()[1].content) == 3_999_999
-    assert caught.value.__cause__ is None
-    assert len(microsoft.sent()) == 2
+    assert microsoft.calls() == [
+        ("POST", SEND_MAIL),
+        ("POST", SEND_MAIL),
+        ("POST", DRAFTS),
+        ("POST", f"{DRAFT}/attachments"),
+        ("POST", f"{DRAFT}/send"),
+    ]
+
+
+def test_a_draft_is_created_without_attachments_then_each_is_added_in_order(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    html = '<p>Weekly numbers</p><img src="cid:logo.png" alt="Logo">'
+    sent = (
+        Message(html=html)
+        .to("ada@example.com")
+        .subject("Weekly numbers")
+        .headers({"X-Campaign-Id": "autumn"})
+        .attach(bytes(2_000_000), filename="january.bin")
+        .attach(PDF, filename="numbers.pdf")
+        .attach(bytes(2_000_000), filename="february.bin")
+        .embed(PNG, filename="logo.png")
+    )
+
+    result = backend(secret).send(sent)
+
+    assert microsoft.calls() == [
+        ("POST", DRAFTS),
+        *[("POST", f"{DRAFT}/attachments")] * 4,
+        ("POST", f"{DRAFT}/send"),
+    ]
+    [created] = [one for one in microsoft.requests if url(one) == DRAFTS]
+    assert json.loads(created.content) == {
+        "from": {"emailAddress": {"address": "reports@example.com", "name": "Reports"}},
+        "toRecipients": [{"emailAddress": {"address": "ada@example.com"}}],
+        "subject": "Weekly numbers",
+        "body": {"contentType": "html", "content": html},
+        "internetMessageId": result.message_id,
+        "internetMessageHeaders": [{"name": "X-Campaign-Id", "value": "autumn"}],
+    }
+    added = [
+        json.loads(one.content)
+        for one in microsoft.requests
+        if url(one) == f"{DRAFT}/attachments"
+    ]
+    assert [one["name"] for one in added] == [
+        "january.bin",
+        "numbers.pdf",
+        "february.bin",
+        "logo.png",
+    ]
+    assert added[-1] == {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "name": "logo.png",
+        "contentType": "image/png",
+        "contentBytes": "iVBORw0KGgogbG9nbw==",
+        "isInline": True,
+        "contentId": "logo.png",
+    }
+
+
+def test_an_attachment_of_3_000_000_bytes_or_more_goes_up_in_puts_without_the_bearer(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    sent = (
+        message()
+        .attach(bytes(2_999_999), filename="january.bin")
+        .attach(bytes(6_000_001), filename="february.bin")
+        .embed(bytes(3_000_000), filename="chart.png")
+    )
+
+    backend(secret).send(sent)
+
+    assert microsoft.calls() == [
+        ("POST", DRAFTS),
+        ("POST", f"{DRAFT}/attachments"),
+        ("POST", f"{DRAFT}/attachments/createUploadSession"),
+        *[("PUT", UPLOAD)] * 3,
+        ("POST", f"{DRAFT}/attachments/createUploadSession"),
+        ("PUT", UPLOAD),
+        ("POST", f"{DRAFT}/send"),
+    ]
+    sessions = [
+        json.loads(one.content)
+        for one in microsoft.requests
+        if url(one).endswith("/createUploadSession")
+    ]
+    assert sessions == [
+        {
+            "AttachmentItem": {
+                "attachmentType": "file",
+                "name": "february.bin",
+                "size": 6_000_001,
+                "contentType": "application/octet-stream",
+            }
+        },
+        {
+            "AttachmentItem": {
+                "attachmentType": "file",
+                "name": "chart.png",
+                "size": 3_000_000,
+                "contentType": "image/png",
+                "isInline": True,
+                "contentId": "chart.png",
+            }
+        },
+    ]
+    puts = [one for one in microsoft.requests if one.method == "PUT"]
+    assert [one.headers["Content-Range"] for one in puts] == [
+        "bytes 0-2999999/6000001",
+        "bytes 3000000-5999999/6000001",
+        "bytes 6000000-6000000/6000001",
+        "bytes 0-2999999/3000000",
+    ]
+    assert [len(one.content) for one in puts] == [3_000_000, 3_000_000, 1, 3_000_000]
+    for put in puts:
+        assert str(put.url) == f"{UPLOAD}?authtoken=eyJ0"
+        assert put.headers["Content-Type"] == "application/octet-stream"
+        assert "Authorization" not in put.headers
+
+
+def test_a_401_on_an_upload_put_is_an_authentication_error_without_a_retry(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[UPLOAD] = [httpx2.Response(401)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
+    assert microsoft.calls().count(("PUT", UPLOAD)) == 1
+    assert [url(one) for one in microsoft.requests].count(TOKEN_URI) == 1
+
+
+@pytest.mark.parametrize(
+    ("where", "deleted"),
+    [
+        pytest.param(
+            f"{DRAFT}/attachments/createUploadSession",
+            [(DRAFT, True)],
+            id="creating the session",
+        ),
+        pytest.param(UPLOAD, [(UPLOAD, False), (DRAFT, True)], id="uploading"),
+        pytest.param(f"{DRAFT}/send", [(DRAFT, True)], id="sending"),
+    ],
+)
+def test_a_failure_after_the_draft_exists_deletes_the_open_session_then_the_draft(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    where: str,
+    deleted: list[tuple[str, bool]],
+):
+    failure = httpx2.ConnectError("refused")
+    microsoft.replies[where] = [failure]
+
+    with backend(secret).connect() as connection:
+        with pytest.raises(TransportError) as caught:
+            connection.send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+        assert microsoft.clients[0].is_closed
+
+    assert caught.value.__cause__ is failure
+    # Only the draft's DELETE carries the bearer, because the upload URL holds its own token.
+    assert [
+        (url(one), "Authorization" in one.headers)
+        for one in microsoft.requests
+        if one.method == "DELETE"
+    ] == deleted
+
+
+def test_a_failed_delete_does_not_replace_the_original_error(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[UPLOAD] = [
+        error(503, "ServiceNotAvailable"),
+        httpx2.ConnectError("refused"),
+    ]
+    microsoft.replies[DRAFT] = [error(500, "InternalServerError")]
+
+    with pytest.raises(ProviderError, match="503") as caught:
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
+    assert microsoft.calls()[-2:] == [("DELETE", UPLOAD), ("DELETE", DRAFT)]
+
+
+def test_a_403_on_creating_the_draft_is_an_authentication_error_that_deletes_nothing(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    # An app without Mail.ReadWrite gets this before any draft exists (ADR-0012).
+    microsoft.replies[DRAFTS] = [error(403, "ErrorAccessDenied")]
+
+    with pytest.raises(AuthenticationError):
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert microsoft.calls() == [("POST", DRAFTS)]
+
+
+def test_a_401_partway_through_a_draft_re_sends_only_the_request_that_got_it(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[f"{DRAFT}/attachments"] = [httpx2.Response(401)]
+    sent = (
+        message()
+        .attach(bytes(2_000_000), filename="january.bin")
+        .attach(bytes(2_000_000), filename="february.bin")
+    )
+
+    backend(secret).send(sent)
+
+    assert [
+        (url(one), one.headers["Authorization"])
+        for one in microsoft.requests
+        if one.url.host == "graph.microsoft.com"
+    ] == [
+        (DRAFTS, "Bearer token-1"),
+        (f"{DRAFT}/attachments", "Bearer token-1"),
+        (f"{DRAFT}/attachments", "Bearer token-2"),
+        (f"{DRAFT}/attachments", "Bearer token-2"),
+        (f"{DRAFT}/send", "Bearer token-2"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("where", "deleted"),
+    [
+        pytest.param(DRAFTS, [], id="draft"),
+        pytest.param(
+            f"{DRAFT}/attachments/createUploadSession", [DRAFT], id="upload session"
+        ),
+    ],
+)
+def test_a_reply_without_the_draft_id_or_upload_url_is_a_provider_error(
+    microsoft: Microsoft, secret: graph.ClientSecret, where: str, deleted: list[str]
+):
+    microsoft.replies[where] = [httpx2.Response(201, json={})]
+
+    with pytest.raises(ProviderError, match="Graph's reply"):
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert [url(one) for one in microsoft.requests if one.method == "DELETE"] == deleted
 
 
 # --- Credentials -------------------------------------------------------------

@@ -801,7 +801,7 @@ A network failure one level down is `TransportError`, and any other failed refre
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, `json.JSONDecodeError` on a token reply that is not JSON, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, `json.JSONDecodeError` on a token reply that is not JSON, the error from reading a draft or upload session reply that holds no `id` or `uploadUrl`, and `None` when `msal` returned an error dict.
 
 | Status and `error.code` | Epistole |
 | --- | --- |
@@ -809,7 +809,7 @@ The qualified row applies first, per the precedence rule (ADR-0009).
 | `401`, any other `403` (including `403` on draft creation), msal error dict, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that is not JSON | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that is not JSON, a draft or upload session reply without its `id` or `uploadUrl` | `ProviderError` |
 | network failure | `TransportError` |
 
 `msal` returns an error dict when Entra rejects a credential.
@@ -851,6 +851,7 @@ Each changes a docstring, a private constant, or a mapping row.
 5. Graph: is `internetMessageId` kept in the sent message on both paths (ADR-0012).
 6. Graph: what the exact `sendMail` request cap is, and whether any mail endpoint caps requests below 4 MB (ADR-0012, #22).
 7. Graph: what the exact `POST /attachments` limit and upload-session minimum are (ADR-0012).
+   A `POST` of an attachment named `numbers.bin` reaches the 4,000,000-byte request cap at 2,999,902 raw bytes, under the 3,000,000 cut.
 8. Graph: whether the shared-mailbox large-attachment `403` occurs, and whether it maps to `AuthenticationError` (ADR-0012).
 9. Graph: whether create accepts `internetMessageHeaders` despite the property table's Read-only mark, and whether Exchange caps header count or size (ADR-0016).
 

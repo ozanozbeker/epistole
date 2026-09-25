@@ -19,7 +19,7 @@ __all__ = ["Certificate", "ClientSecret", "GraphBackend", "ManagedIdentity"]
 
 
 class GraphBackend(Backend):
-    """A Graph backend sends each message through Microsoft Graph's `sendMail`, as JSON.
+    """A Graph backend sends each message through Microsoft Graph, as JSON.
 
     `connect()` builds one HTTP client and gets an access token. So a rejected credential raises `AuthenticationError` on that line. A tenant ID that does not exist in Entra raises `msal`'s `ValueError` there instead. It sends nothing to Graph, so an app without the `Mail.Send` permission raises on the first send instead. Every request times out after 60 seconds, and no setting changes it. See ADR-0005 and ADR-0009.
 
@@ -27,7 +27,9 @@ class GraphBackend(Backend):
 
     A Graph body holds HTML or plain text, not both. So an HTML message goes out without its plain text, and Exchange derives its own. See ADR-0012.
 
-    Before writing, a send raises `RejectedError` for more than 500 recipients, or for a custom header whose name does not start with `x-`. See ADR-0016 and ADR-0019. It also raises `RejectedError` for a `sendMail` request of 4,000,000 bytes or more, because Epistole does not support Graph's draft path yet. See ADR-0012.
+    A message whose `sendMail` request would be 4,000,000 bytes or more goes through a draft instead: Epistole creates the draft, adds each attachment by its own call, and sends it. That path needs the `Mail.ReadWrite` permission as well as `Mail.Send`. Without it, the send raises `AuthenticationError`. When a send fails partway, Epistole deletes the draft. See ADR-0012.
+
+    Before writing, a send raises `RejectedError` for more than 500 recipients, for an attachment over 150,000,000 bytes, or for a custom header whose name does not start with `x-`. See ADR-0016 and ADR-0019.
 
     Graph accepts or refuses the whole message, so `SendResult.refused` is always empty.
 
