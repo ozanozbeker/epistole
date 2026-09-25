@@ -1,6 +1,7 @@
-"""`Address` writes an address with its display name. `check_address` and `addr_spec` check and parse an address string. `LINE_BREAK` matches what no header value may hold."""
+"""`Address` writes an address with its display name. `check_address`, `addr_spec` and `name_and_addr_spec` check and parse an address string. `LINE_BREAK` matches what no header value may hold."""
 
 import re
+from email.policy import default
 from email.utils import formataddr, getaddresses
 from typing import Self
 
@@ -76,3 +77,12 @@ def addr_spec(address: str) -> str:
     Every caller has run `check_address` first, so `getaddresses` returns exactly one pair.
     """
     return getaddresses([address])[0][1]
+
+
+def name_and_addr_spec(address: str) -> tuple[str, str]:
+    """Return the display name of `address` as text, and its addr-spec.
+
+    `Address` writes a non-ASCII name as RFC 2047 encoded-words, and an unstructured header decodes them without raising on a malformed one.
+    """
+    name, spec = getaddresses([address])[0]
+    return str(default.header_factory("Comments", name)), spec

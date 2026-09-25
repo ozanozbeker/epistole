@@ -34,7 +34,7 @@ type Reply = httpx2.Response | Exception
 class Google:
     """A fake of Google's token endpoint and the Gmail API, which every `httpx2.Client` the backend builds sends to.
 
-    `replies` maps a URL to the replies it serves first, in order, where an exception is raised instead of answered. After those, the token endpoint issues `token-1`, `token-2`, and so on, and the send endpoint accepts.
+    `replies` maps a URL to the replies it serves first, in order. An exception among them is raised rather than returned. After those, the token endpoint issues `token-1`, `token-2`, and so on, and the send endpoint accepts.
     """
 
     def __init__(self) -> None:

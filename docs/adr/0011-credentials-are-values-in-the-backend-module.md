@@ -18,6 +18,7 @@ The Gmail REST backend requests `gmail.send` rather than the SMTP scope.
 `Certificate` requires one complete form.
 `TokenCredential` and `AccessToken` are exported as Protocols.
 Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): no secret appears in a value's `repr`.
+Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `ManagedIdentity` does not work on Service Fabric, because `msal` 1.38 requires a real `requests.Session` there.
 
 ## Why
 
@@ -126,6 +127,9 @@ No backend would change.
   A future `Login` value would be the first delegated Graph value.
   It would reopen the question.
 - `msal.ManagedIdentityClient` needs an `http_client` with the `requests.Session` shape, so the `httpx2` adapter from ADR-0009 satisfies that shape too.
+  Service Fabric is the exception.
+  There `msal` pins the endpoint's certificate on a session it derives from a real `requests.Session`, and it raises `ManagedIdentityError` for any other client.
+  So `ManagedIdentity` does not work on Service Fabric.
 - Epistole ships no password-file or keyring helpers.
   `os.environ[...]` is one line.
   `keyring` is a library the caller can call.

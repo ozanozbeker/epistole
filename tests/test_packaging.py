@@ -25,3 +25,8 @@ def test_the_gmail_backend_imports_without_its_extra():
     # None in sys.modules makes an import raise, as if the extra were not installed.
     code = "import sys; sys.modules.update(dict.fromkeys(['httpx2', 'google.auth'])); from epistole import GmailBackend"
     subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603
+
+
+def test_the_graph_backend_imports_without_its_extra():
+    code = "import sys; sys.modules.update(dict.fromkeys(['httpx2', 'msal'])); from epistole import GraphBackend"
+    subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603

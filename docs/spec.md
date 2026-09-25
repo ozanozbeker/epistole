@@ -574,6 +574,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `ManagedIdentity` requests the resource `https://graph.microsoft.com`, because `msal.ManagedIdentityClient` takes a resource and accepts no scope (ADR-0011).
   Neither spelling appears in a signature.
   The private token-source adapter selects one by the credential's type.
+  `ManagedIdentity` does not work on Service Fabric, because `msal` accepts only a real `requests.Session` there (ADR-0011).
 - `Certificate` takes exactly one complete form: `pfx` with an optional `passphrase`, or `private_key` and `thumbprint` together.
   Neither form, both forms, either half of the second form alone, and `passphrase` without `pfx` are each a `TypeError`.
 - Every request names the mailbox as `/users/{addr-spec}`.
@@ -800,7 +801,7 @@ A network failure one level down is `TransportError`, and any other failed refre
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, `json.JSONDecodeError` on a token reply that is not JSON, and `None` when `msal` returned an error dict.
 
 | Status and `error.code` | Epistole |
 | --- | --- |
@@ -808,8 +809,14 @@ The qualified row applies first, per the precedence rule (ADR-0009).
 | `401`, any other `403` (including `403` on draft creation), msal error dict, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509` | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that is not JSON | `ProviderError` |
 | network failure | `TransportError` |
+
+`msal` returns an error dict when Entra rejects a credential.
+It returns one for a managed identity endpoint's error reply too, whatever its status.
+It raises `MsalServiceError` when Entra's discovery or token endpoint replies `5xx`, so that failure maps like any other `5xx` (ADR-0009).
+A tenant ID that does not exist in Entra raises `msal`'s own `ValueError` from `connect()`, unmapped.
+`msal` raises the same `ValueError` for a pfx it cannot read, so Epistole cannot tell that service reply from a caller mistake (ADR-0009).
 
 ## `html_to_text`
 

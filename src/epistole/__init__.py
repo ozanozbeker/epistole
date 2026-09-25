@@ -13,6 +13,7 @@ from epistole._message import Attachment, Message
 from epistole._result import Refusal, SendResult
 from epistole._text import html_to_text
 from epistole.gmail import GmailBackend
+from epistole.graph import GraphBackend
 from epistole.smtp import SMTPBackend
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "Connection",
     "ConsoleBackend",
     "GmailBackend",
+    "GraphBackend",
     "MemoryBackend",
     "Message",
     "Refusal",

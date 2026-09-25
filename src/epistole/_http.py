@@ -59,17 +59,22 @@ def request(
     method: str,
     url: str,
     *,
-    json: object = None,
+    content: bytes | None = None,
 ) -> httpx2.Response:
     """Send one request with a bearer token, and on `401` refresh once and retry it once.
 
-    The budget is per request, not per send, because a token can expire partway through a send of several requests (ADR-0009).
+    `content` is a JSON body. The caller serializes it, so a pre-check can measure the bytes sent (ADR-0019). The budget is per request, not per send, because a token can expire partway through a send of several requests (ADR-0009).
     """
     headers = {"Authorization": f"Bearer {tokens.token()}"}
-    response: httpx2.Response = client.request(method, url, headers=headers, json=json)
+    if content is not None:
+        headers["Content-Type"] = "application/json"
+
+    response: httpx2.Response = client.request(
+        method, url, headers=headers, content=content
+    )
     if response.status_code == HTTPStatus.UNAUTHORIZED:
-        headers = {"Authorization": f"Bearer {tokens.refresh()}"}
-        response = client.request(method, url, headers=headers, json=json)
+        headers["Authorization"] = f"Bearer {tokens.refresh()}"
+        response = client.request(method, url, headers=headers, content=content)
 
     return response.raise_for_status()
 

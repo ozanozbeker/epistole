@@ -11,6 +11,10 @@ Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the `401` r
 A backend constructor names the extra its credential value needs, even when that value comes from another backend's module.
 Amended on [#44](https://github.com/ozanozbeker/epistole/issues/44): `google-auth` 2.57 raises the request adapter's own `google.auth.exceptions.TransportError` for a network failure during a refresh, not a `RefreshError`.
 So Epistole reads any `google-auth` error one level down.
+Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `msal` 1.38 does not always return an error dict.
+It raises `MsalServiceError` for a `5xx` from Entra's discovery or token endpoint, and `json.JSONDecodeError` for a token reply that is not JSON.
+Epistole maps both to `ProviderError`.
+It raises a plain `ValueError` for a tenant that does not exist, and Epistole leaves that unmapped, because `msal` raises the same class for a pfx it cannot read.
 
 ## Why
 
@@ -103,7 +107,9 @@ It is token freshness, not the backoff policy #2 rules out.
   | connect, TLS, read, write, timeout | the `httpx2.TransportError` subclass raised | `TransportError` |
   | Google refresh failed | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
-  | msal token call failed | `None`; msal returns an error dict and raises nothing, so the message carries `error` and `error_description` | `AuthenticationError` |
+  | msal token call failed | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
+  | Entra's discovery or token endpoint replied `5xx` | `msal.exceptions.MsalServiceError`, which msal raises instead of returning a dict | `ProviderError` |
+  | token reply is not JSON | `json.JSONDecodeError`, which msal raises | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |
 

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
@@ -115,7 +116,13 @@ class _GmailTransport:
 
         raw: str = base64.urlsafe_b64encode(data).decode("ascii")
         with _mapping():
-            _http.request(self._client, self._tokens, "POST", _SEND, json={"raw": raw})
+            _http.request(
+                self._client,
+                self._tokens,
+                "POST",
+                _SEND,
+                content=json.dumps({"raw": raw}).encode(),
+            )
 
         return {}
 
