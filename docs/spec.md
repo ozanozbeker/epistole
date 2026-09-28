@@ -224,10 +224,12 @@ class Attachment:
   Epistole does not read `.name` on a file object.
 - `content_type` is inferred from the filename and falls back to `application/octet-stream`.
   A compressed filename such as `weekly.csv.gz` falls back too, because its bytes are gzip and not `text/csv`.
+  An inferred `message/*` or `multipart/*` type such as `fwd.eml`'s falls back too, because RFC 2045 forbids base64 on either.
   It is always explicit in the sent message.
   `content_type=` overrides it.
   Epistole never sniffs the bytes.
   A media type with parameters is a `ValueError`, as is any other `content_type=` that is not a bare `type/subtype` in RFC 6838's grammar.
+  A `content_type=` of `message/*` or `multipart/*` is a `ValueError` too, whatever its letter case.
 - `.embed()`: `filename` and `cid` default to each other, so `.embed(Path("logo.png"))` resolves `<img src="cid:logo.png">`.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
   The content type must be `image/*` after inference or override, else `ValueError`.

@@ -13,6 +13,7 @@ Decided on [#30](https://github.com/ozanozbeker/epistole/issues/30), which found
 Amended on [#37](https://github.com/ozanozbeker/epistole/issues/37): a compressed filename falls back to `application/octet-stream`, and `content_type=` must match RFC 6838's `type/subtype` grammar.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): a filename or a content id that holds a line break is a `ValueError`.
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): a content id that is not ASCII is a `ValueError`.
+Amended on [#51](https://github.com/ozanozbeker/epistole/issues/51): an inferred `message/*` or `multipart/*` type falls back to `application/octet-stream`, and a `content_type=` of either is a `ValueError`.
 
 ## Why
 
@@ -55,6 +56,17 @@ Epistole does not accept media-type parameters.
 A `content_type=` of `text/csv; charset=utf-8` is a `ValueError`, not a value Epistole must handle in three backend formats.
 The content type is written explicitly on every backend, because without it the receiving client guesses instead.
 
+**A `message/*` or `multipart/*` type is never sent, because MIME cannot carry one as bytes.**
+RFC 2045 section 6.4 forbids any encoding but `7bit`, `8bit` or `binary` on a composite type, and `message` and `multipart` are the two composite types.
+An attachment is bytes, and the RFC 5322 builder writes bytes as base64.
+So `.attach(Path("fwd.eml"))` sent a `message/rfc822` part, and `email.parser` read its base64 text as the attached message's headers.
+`message/delivery-status` made the stdlib generator raise `AttributeError` at send.
+A `multipart/*` part also needs a `boundary` parameter, and Epistole accepts no parameters.
+`application/octet-stream` carries the same bytes unchanged on all three backends.
+The rule covers both types rather than a list of extensions, because `mimetypes` also reads the platform's own table.
+Python maps `.eml`, `.mht`, `.mhtml` and `.nws` to `message/rfc822`, and macOS's `/etc/apache2/mime.types` adds `.mime`.
+Measured on Python 3.13.12.
+
 **`.embed()` is a second method, not a flag on `.attach()`.**
 An inline image has two requirements an attachment does not.
 Its content type must be `image/*`, and the HTML must be able to name it by a content id.
@@ -91,6 +103,10 @@ This does not amend ADR-0002's append rule.
   So a malformed value such as `csv` fails at the call, not inside a backend.
   The type is written explicitly on SMTP, Gmail, and Graph alike.
   Bytes are never inspected.
+- **A `message/*` or `multipart/*` type is never sent.**
+  An inferred one falls back to `application/octet-stream`, so `.attach(Path("fwd.eml"))` sends the file's bytes unchanged.
+  A `content_type=` of either is a `ValueError` at the call.
+  The check ignores letter case, because RFC 2045 makes a media type case-insensitive.
 - **`.embed()` defaults `filename` and `cid` to each other**, so `.embed(Path("logo.png"))` matches `<img src="cid:logo.png">`.
   Supplying neither, with a source that is not a `Path`, is a `TypeError`.
 - **A filename or a content id that holds a line break is a `ValueError`**, including a `Path`'s own name.
@@ -132,6 +148,21 @@ This does not amend ADR-0002's append rule.
   Rejected above: replacing contradicts ADR-0002's append rule, and appending produces HTML that cannot resolve.
 - **Accept media-type parameters and pass them through.**
   Rejected because the three backend formats spell them differently and none of the three needs one in v1.
+- **Write a `message/rfc822` body from the caller's bytes, labelled `8bit`.**
+  It would send the file unchanged.
+  Rejected because `BytesGenerator` raises `UnicodeEncodeError` on the first non-ASCII byte, and it writes a bare LF to the wire.
+  8-bit bytes would also break ADR-0020.
+- **Parse the bytes and attach the parsed message, which `add_attachment` supports.**
+  The recipient's client then shows an attached message.
+  A 7-bit file with CRLF line ends goes out byte-identical, because the builder's policy sets `refold_source="none"`.
+  Rejected for v1 for three reasons.
+  It rewrites an 8-bit part as base64 or quoted-printable, which breaks a DKIM signature on the attached message.
+  A file that is not an email raises `UnicodeEncodeError` at send.
+  What Exchange writes for a `message/rfc822` `fileAttachment` on Graph is untested.
+  It is the reopener if a caller needs the attached message shown.
+- **Allow `message/global`, for which RFC 6532 section 3.7 permits any encoding.**
+  Rejected because nothing infers it and `email.parser` reads its base64 as headers anyway.
+  One rule for both types needs no exception.
 
 ## Consequences
 
@@ -144,3 +175,5 @@ This does not amend ADR-0002's append rule.
   Its own reading rules call that a defect.
 - [#21](https://github.com/ozanozbeker/epistole/issues/21) tells authors to `.embed()` rather than write `data:`.
   It can now cite a rule for filenames and content types.
+- The recipient's client lists an attached `.eml` as a file to open, not as an attached message.
+  No v1 surface sends an attached message, a delivery report, or a multipart the caller built.
