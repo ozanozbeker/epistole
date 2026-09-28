@@ -20,6 +20,7 @@ The Gmail REST backend requests `gmail.send` rather than the SMTP scope.
 Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): no secret appears in a value's `repr`.
 Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `ManagedIdentity` does not work on Service Fabric, because `msal` 1.38 requires a real `requests.Session` there.
 Amended on [#47](https://github.com/ozanozbeker/epistole/issues/47): `connect()` sends a token only to a server that offers `AUTH XOAUTH2`.
+Amended on [#53](https://github.com/ozanozbeker/epistole/issues/53): `connect()` ignores an access token saved in an `AuthorizedUser` file.
 
 ## Why
 
@@ -116,6 +117,11 @@ No backend would change.
   It requests `https://www.googleapis.com/auth/gmail.send`.
   `smtp.OAuth` with a Gmail value requests `https://mail.google.com/`.
   Application Default Credentials are not offered: sending as a mailbox from ADC needs a signed delegation JWT that keyless ADC cannot produce.
+- **`connect()` ignores an access token saved in an `AuthorizedUser` file.**
+  `Credentials.to_json()` writes `token` and `expiry` next to the refresh token, and `from_authorized_user_file` would load both.
+  So Epistole reads the file itself and drops both keys.
+  Every `connect()` requests a token for its own scope.
+  A refresh token that Google has expired or revoked then raises `AuthenticationError` on the `connect()` line (ADR-0005).
 - Every value is a frozen dataclass of inputs.
   A field that holds a secret, such as `Password.password`, takes `field(repr=False)`.
   A dataclass `repr` includes every field, and tracebacks and log lines include the `repr`.
@@ -159,6 +165,12 @@ No backend would change.
   Rejected above and by #2.
 - **Copy blastula's password file and keyring helpers.**
   Rejected: the file is unencrypted JSON and the keyring path needs an OS keyring that servers lack.
+- **Send an access token saved in an `AuthorizedUser` file while it is unexpired.**
+  It saves one token request per connection.
+  Rejected because a revoked refresh token would then raise on a later send, not on the `connect()` line.
+  The saved token also holds the scopes of the consent, not the scope Epistole requests.
+  Measured on `google-auth` 2.57.1: with a saved token that expires in 2099, `connect()` sent no token request.
+  The send carried the saved token.
 
 ## Consequences
 

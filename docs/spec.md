@@ -564,6 +564,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - Gmail uses REST on `httpx2`, with `google-auth` for tokens.
   `ServiceAccount` is domain-wide delegation acting as `subject`.
   `AuthorizedUser` is a saved user consent.
+  Epistole ignores an access token saved in its file.
+  So every `connect()` requests one, on `GmailBackend` and inside `smtp.OAuth` (ADR-0011).
   Epistole does not offer Application Default Credentials.
 - The scope is `https://www.googleapis.com/auth/gmail.send`, which is narrower than the `https://mail.google.com/` that SMTP XOAUTH2 requires (ADR-0011).
 - Gmail sends `POST users/me/messages/send` with the RFC 5322 bytes as base64url `raw`.
