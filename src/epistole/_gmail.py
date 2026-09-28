@@ -251,7 +251,17 @@ class _GoogleTokens:
 
     def refresh(self) -> str:
         """Refresh the credential's token, even before its expiry."""
-        self._credentials.refresh(self._request)
+        replies: int = self._request.replies
+        try:
+            self._credentials.refresh(self._request)
+        except _http.REPLY_ERRORS as error:
+            # With no new 200, these come from the caller's file rather than from google-auth reading a reply (ADR-0009).
+            if self._request.replies == replies:
+                raise
+
+            msg = f"Google's token reply could not be read: {error}"
+            raise ProviderError(msg) from error
+
         return cast("str", self._credentials.token)
 
 
@@ -260,6 +270,8 @@ class _Request(Request):
 
     def __init__(self, client: httpx2.Client, /) -> None:
         self._client = client
+        self.replies = 0
+        """How many `200` replies this adapter has returned to `google-auth`."""
 
     @override
     def __call__(
@@ -287,6 +299,7 @@ class _Request(Request):
             )
             raise GoogleTransportError(status) from status
 
+        self.replies += 1
         return _Response(response.status_code, response.headers, response.content)
 
 

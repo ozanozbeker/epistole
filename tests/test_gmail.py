@@ -149,6 +149,16 @@ class Credential:
         return AccessToken(f"foreign-{len(self.scopes)}", int(time.time()) + 3600)
 
 
+class Broken:
+    """A `TokenCredential` whose `get_token` raises `error`."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def get_token(self, *_: str) -> AccessToken:
+        raise self.error
+
+
 def backend(
     credential: gmail.ServiceAccount | gmail.AuthorizedUser | TokenCredential,
 ) -> GmailBackend:
@@ -537,6 +547,91 @@ def test_a_token_reply_other_than_200_is_one_request_mapped_by_its_status(
     assert caught.value.backend is configured
 
 
+@pytest.mark.parametrize("fixture", ["service_account", "authorized_user"])
+@pytest.mark.parametrize(
+    ("body", "cause"),
+    [
+        pytest.param(b"<html>proxy login</html>", TypeError, id="a proxy login page"),
+        pytest.param(b"", TypeError, id="empty"),
+        pytest.param(b"[]", TypeError, id="an array"),
+        pytest.param(b'"token"', TypeError, id="a string"),
+        pytest.param(b"null", TypeError, id="null"),
+        pytest.param(b"123", TypeError, id="a number"),
+        pytest.param(b"\xff\xfe", UnicodeDecodeError, id="not UTF-8"),
+        pytest.param(
+            b'{"access_token": "t", "expires_in": "soon"}',
+            ValueError,
+            id="expires_in not a number",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "expires_in": "3600.5"}',
+            ValueError,
+            id="expires_in a decimal string",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "expires_in": [1]}',
+            TypeError,
+            id="expires_in an array",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "expires_in": "99999999999999"}',
+            OverflowError,
+            id="expires_in out of range",
+        ),
+    ],
+)
+def test_a_200_token_reply_google_auth_cannot_read_is_a_provider_error(
+    google: Google,
+    request: pytest.FixtureRequest,
+    fixture: str,
+    body: bytes,
+    cause: type[Exception],
+):
+    google.replies[TOKEN_URI] = [httpx2.Response(200, content=body)]
+    configured = backend(request.getfixturevalue(fixture))
+
+    with pytest.raises(ProviderError) as caught:
+        configured.connect()
+
+    assert type(caught.value.__cause__) is cause
+    assert caught.value.backend is configured
+    assert google.clients[0].is_closed
+
+
+@pytest.mark.parametrize("scope", [None, [SCOPE]], ids=["null", "an array"])
+def test_a_token_reply_whose_scope_is_not_a_string_is_a_provider_error(
+    google: Google, authorized_user: gmail.AuthorizedUser, scope: list[str] | None
+):
+    body = {"access_token": "token-1", "expires_in": 3600, "scope": scope}
+    google.replies[TOKEN_URI] = [httpx2.Response(200, json=body)]
+
+    with pytest.raises(ProviderError) as caught:
+        backend(authorized_user).connect()
+
+    assert type(caught.value.__cause__) is AttributeError
+
+
+def test_an_error_raised_before_the_token_reply_stays_unmapped(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    key = json.loads(service_account.path.read_text())
+    service_account.path.write_text(json.dumps(key | {"token_uri": 123}))
+
+    with pytest.raises(TypeError, match="url"):
+        backend(service_account).connect()
+
+    assert google.requests == []
+
+
+def test_an_error_from_get_token_stays_unmapped(google: Google):
+    error = TypeError("get_token failed")
+
+    with pytest.raises(TypeError) as caught:
+        backend(Broken(error)).connect()
+
+    assert caught.value is error
+
+
 def test_a_network_failure_on_a_refresh_is_a_transport_error(
     google: Google, authorized_user: gmail.AuthorizedUser
 ):
@@ -566,6 +661,12 @@ def test_a_network_failure_on_a_refresh_is_a_transport_error(
             AuthenticationError,
             RefreshError,
             id="no access token",
+        ),
+        pytest.param(
+            httpx2.Response(200, content=b"[]"),
+            ProviderError,
+            TypeError,
+            id="unreadable",
         ),
         pytest.param(
             httpx2.ConnectError("refused"),

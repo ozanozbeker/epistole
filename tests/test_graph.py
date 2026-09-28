@@ -212,6 +212,16 @@ class Credential:
         return AccessToken(f"foreign-{len(self.scopes)}", int(time.time()) + 3600)
 
 
+class Broken:
+    """A `TokenCredential` whose `get_token` raises `error`."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def get_token(self, *_: str) -> AccessToken:
+        raise self.error
+
+
 def backend(
     credential: graph.ClientSecret
     | graph.Certificate
@@ -866,21 +876,117 @@ def test_a_5xx_from_the_identity_platform_is_a_provider_error(
 
 
 @pytest.mark.parametrize("kind", ["client secret", "managed identity"])
-def test_a_token_reply_that_is_not_json_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, kind: str
+@pytest.mark.parametrize(
+    ("body", "cause"),
+    [
+        pytest.param(b"<html>Sign in</html>", json.JSONDecodeError, id="not JSON"),
+        pytest.param(b"[]", (AttributeError, TypeError), id="an array"),
+        pytest.param(b'"token"', (AttributeError, TypeError), id="a string"),
+        pytest.param(b"null", (AttributeError, TypeError), id="null"),
+        pytest.param(b"123", (AttributeError, TypeError), id="a number"),
+        pytest.param(
+            b'{"access_token": "t", "token_type": "Bearer", "expires_in": "soon"}',
+            ValueError,
+            id="expires_in not a number",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "token_type": "Bearer", "expires_in": "3600.5"}',
+            ValueError,
+            id="expires_in a decimal string",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "token_type": "Bearer", "expires_in": [1]}',
+            TypeError,
+            id="expires_in an array",
+        ),
+        pytest.param(
+            b'{"access_token": "t", "token_type": "Bearer", "expires_in": 1e400}',
+            OverflowError,
+            id="expires_in infinite",
+        ),
+    ],
+)
+def test_a_token_reply_msal_cannot_read_is_a_provider_error(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    kind: str,
+    body: bytes,
+    cause: type[Exception] | tuple[type[Exception], ...],
 ):
     where, credential = (
         (TOKEN_URI, secret)
         if kind == "client secret"
         else (IMDS, graph.ManagedIdentity())
     )
-    microsoft.replies[where] = [httpx2.Response(200, text="<html>Sign in</html>")]
+    microsoft.replies[where] = [httpx2.Response(200, content=body)]
 
     with pytest.raises(ProviderError) as caught:
         backend(credential).connect()
 
-    assert isinstance(caught.value.__cause__, json.JSONDecodeError)
+    assert isinstance(caught.value.__cause__, cause)
     assert microsoft.clients[0].is_closed
+
+
+def test_a_token_reply_whose_id_token_is_not_a_jwt_is_a_provider_error(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    body = {"access_token": "t", "token_type": "Bearer", "id_token": "abc"}
+    microsoft.replies[TOKEN_URI] = [httpx2.Response(200, json=body)]
+
+    with pytest.raises(ProviderError) as caught:
+        backend(secret).connect()
+
+    assert type(caught.value.__cause__) is IndexError
+
+
+def test_a_rejection_msal_cannot_read_is_a_provider_error(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[TOKEN_URI] = [httpx2.Response(400, content=b"[]")]
+
+    with pytest.raises(ProviderError):
+        backend(secret).connect()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TypeError("get_token failed"), json.JSONDecodeError("get_token failed", "", 0)],
+    ids=["TypeError", "JSONDecodeError"],
+)
+def test_an_error_from_get_token_stays_unmapped(microsoft: Microsoft, error: Exception):
+    with pytest.raises(type(error)) as caught:
+        backend(Broken(error)).connect()
+
+    assert caught.value is error
+
+
+def test_an_error_raised_before_the_token_reply_stays_unmapped(
+    microsoft: Microsoft, rsa_key: rsa.RSAPrivateKey
+):
+    encrypted = rsa_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.BestAvailableEncryption(b"hunter2"),
+    ).decode()
+    certificate = graph.Certificate(
+        TENANT, "epistole", private_key=encrypted, thumbprint="a1b2c3d4" * 5
+    )
+
+    with pytest.raises(TypeError, match="encrypted"):
+        backend(certificate).connect()
+
+    assert TOKEN_URI not in [url(one) for one in microsoft.requests]
+
+
+def test_a_tenant_that_does_not_exist_raises_msals_value_error(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[DISCOVERY] = [
+        httpx2.Response(400, json={"error": "invalid_tenant"})
+    ]
+
+    with pytest.raises(ValueError, match="authority configuration"):
+        backend(secret).connect()
 
 
 # --- Refreshing on 401 -------------------------------------------------------
@@ -922,6 +1028,9 @@ def test_a_second_401_on_the_same_request_is_an_authentication_error(
             httpx2.Response(400, json={"error": "invalid_client"}),
             AuthenticationError,
             id="rejected",
+        ),
+        pytest.param(
+            httpx2.Response(200, content=b"[]"), ProviderError, id="unreadable"
         ),
         pytest.param(
             httpx2.ConnectError("refused"), TransportError, id="network failure"

@@ -94,6 +94,7 @@ def _tokens(
 ) -> _http.Tokens:
     """Build the tokens for `credential`, in the spelling of `audience` its `msal` client takes (ADR-0011)."""
     cache = msal.TokenCache()
+    http_client = _HttpClient(client)
     scope = f"{audience}/.default"
     match credential:
         case ManagedIdentity(client_id=client_id):
@@ -103,22 +104,26 @@ def _tokens(
                 else msal.UserAssignedManagedIdentity(client_id=client_id)
             )
             managed = msal.ManagedIdentityClient(
-                identity, http_client=_HttpClient(client), token_cache=cache
+                identity, http_client=http_client, token_cache=cache
             )
             return _MsalTokens(
-                partial(managed.acquire_token_for_client, resource=audience), cache
+                partial(managed.acquire_token_for_client, resource=audience),
+                cache,
+                http_client,
             )
         case ClientSecret() | Certificate():
             app = msal.ConfidentialClientApplication(
                 credential.client_id,
                 client_credential=_client_credential(credential),
                 authority=f"https://login.microsoftonline.com/{credential.tenant_id}",
-                http_client=_HttpClient(client),
+                http_client=http_client,
                 token_cache=cache,
                 # Otherwise msal fetches the host's aliases after a rejection, to find a refresh token a client credential never has.
                 instance_discovery=False,
             )
-            return _MsalTokens(partial(app.acquire_token_for_client, [scope]), cache)
+            return _MsalTokens(
+                partial(app.acquire_token_for_client, [scope]), cache, http_client
+            )
         case _:
             return _http.ForeignTokens(credential, scope)
 
@@ -261,9 +266,6 @@ def _mapping() -> Generator[None]:
         # msal raises this for a 5xx from Entra, where it returns a dict for a rejected credential.
         msg = f"Entra failed: {error}"
         raise ProviderError(msg) from error
-    except json.JSONDecodeError as error:
-        msg = f"the token reply is not JSON: {error}"
-        raise ProviderError(msg) from error
 
 
 def _mapped(response: httpx2.Response) -> EpistoleError:
@@ -383,14 +385,29 @@ class _MsalTokens:
     """The tokens of an `msal` client, which caches them in `cache`."""
 
     def __init__(
-        self, acquire: Callable[[], dict[str, Any]], cache: msal.TokenCache, /
+        self,
+        acquire: Callable[[], dict[str, Any]],
+        cache: msal.TokenCache,
+        http_client: _HttpClient,
+        /,
     ) -> None:
         self._acquire = acquire
         self._cache = cache
+        self._http_client = http_client
 
     def token(self) -> str:
         """Return the cached token, or a new one once the cached one is within five minutes of expiry."""
-        result: dict[str, Any] = self._acquire()
+        replies: int = self._http_client.replies
+        try:
+            result: dict[str, Any] = self._acquire()
+        except _http.REPLY_ERRORS as error:
+            # With no new reply, these come from the caller's key rather than from msal reading a reply (ADR-0009).
+            if self._http_client.replies == replies:
+                raise
+
+            msg = f"Microsoft's token reply could not be read: {error}"
+            raise ProviderError(msg) from error
+
         if "access_token" not in result:
             # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
             msg = f"the credential could not get an access token: {result.get('error')}: {result.get('error_description')}"
@@ -416,6 +433,8 @@ class _HttpClient:
 
     def __init__(self, client: httpx2.Client, /) -> None:
         self._client = client
+        self.replies = 0
+        """How many replies this adapter has returned to `msal`."""
 
     def get(
         self,
@@ -425,7 +444,11 @@ class _HttpClient:
         **_: object,
     ) -> httpx2.Response:
         """Ignore `timeout` and any other keyword, because the client's 60 seconds covers token requests too (ADR-0009)."""
-        return self._client.get(url, params=params, headers=headers)
+        response: httpx2.Response = self._client.get(
+            url, params=params, headers=headers
+        )
+        self.replies += 1
+        return response
 
     def post(
         self,
@@ -436,4 +459,8 @@ class _HttpClient:
         **_: object,
     ) -> httpx2.Response:
         """Ignore any other keyword, as `get` does."""
-        return self._client.post(url, params=params, data=data, headers=headers)
+        response: httpx2.Response = self._client.post(
+            url, params=params, data=data, headers=headers
+        )
+        self.replies += 1
+        return response

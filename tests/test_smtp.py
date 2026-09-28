@@ -255,7 +255,7 @@ class Credential:
 class Issuer:
     """A fake of the token endpoints of Microsoft and Google, which issues `token-1` and records each request.
 
-    Once `failure` is set, the issuer returns it for every request, or raises it when it is an exception.
+    Once `failure` is set, the issuer returns it for every token request, or raises it when it is an exception.
     """
 
     def __init__(self) -> None:
@@ -265,12 +265,6 @@ class Issuer:
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
-        if isinstance(self.failure, httpx2.Response):
-            return self.failure
-
-        if self.failure is not None:
-            raise self.failure
-
         if request.url.path.endswith("/openid-configuration"):
             return httpx2.Response(
                 200,
@@ -280,6 +274,12 @@ class Issuer:
                     "issuer": f"{MICROSOFT}/v2.0",
                 },
             )
+
+        if isinstance(self.failure, httpx2.Response):
+            return self.failure
+
+        if self.failure is not None:
+            raise self.failure
 
         return httpx2.Response(
             200,
@@ -648,6 +648,26 @@ def test_a_503_from_googles_token_endpoint_is_one_request_and_a_provider_error(
 
     assert len(issuer.requests) == 1
     assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
+    assert caught.value.backend is configured
+
+
+@pytest.mark.parametrize("fixture", ["service_account", "secret"])
+def test_a_token_reply_the_library_cannot_read_is_a_provider_error(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    request: pytest.FixtureRequest,
+    fixture: str,
+):
+    issuer.failure = httpx2.Response(200, content=b"[]")
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
+    configured = backend(serve(), credential=oauth)
+
+    with pytest.raises(ProviderError) as caught:
+        configured.connect()
+
+    assert isinstance(caught.value.__cause__, (AttributeError, TypeError))
     assert caught.value.backend is configured
 
 
