@@ -352,6 +352,17 @@ def authorized_user(tmp_path: Path) -> gmail.AuthorizedUser:
     return gmail.AuthorizedUser(path)
 
 
+@pytest.fixture
+def user_with_saved_token(
+    authorized_user: gmail.AuthorizedUser,
+) -> gmail.AuthorizedUser:
+    """Save an unexpired access token in `authorized_user`'s file, as `Credentials.to_json()` writes one."""
+    consent = json.loads(authorized_user.path.read_text())
+    consent |= {"token": "saved-token", "expiry": "2099-01-01T00:00:00Z"}
+    authorized_user.path.write_text(json.dumps(consent))
+    return authorized_user
+
+
 # --- Sending -----------------------------------------------------------------
 
 
@@ -523,13 +534,17 @@ def test_oauth_over_a_service_account_requests_the_gmail_smtp_scope(
     assert all(one.is_closed for one in issuer.clients)
 
 
+@pytest.mark.parametrize("fixture", ["authorized_user", "user_with_saved_token"])
 def test_oauth_over_an_authorized_user_requests_the_gmail_smtp_scope(
     serve: Callable[..., Server],
     issuer: Issuer,
-    authorized_user: gmail.AuthorizedUser,
+    request: pytest.FixtureRequest,
+    fixture: str,
 ):
     server = serve()
-    oauth = smtp.OAuth(username="reports@example.com", credential=authorized_user)
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
 
     with backend(server, credential=oauth).connect():
         assert server.commands[-1] == XOAUTH2

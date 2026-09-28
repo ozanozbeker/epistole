@@ -120,6 +120,17 @@ def authorized_user(tmp_path: Path) -> gmail.AuthorizedUser:
     return gmail.AuthorizedUser(path)
 
 
+@pytest.fixture
+def user_with_saved_token(
+    authorized_user: gmail.AuthorizedUser,
+) -> gmail.AuthorizedUser:
+    """Save an unexpired access token in `authorized_user`'s file, as `Credentials.to_json()` writes one."""
+    consent = json.loads(authorized_user.path.read_text())
+    consent |= {"token": "saved-token", "expiry": "2099-01-01T00:00:00Z"}
+    authorized_user.path.write_text(json.dumps(consent))
+    return authorized_user
+
+
 class AccessToken(NamedTuple):
     """The shape `azure.core.credentials.AccessToken` defines."""
 
@@ -237,15 +248,21 @@ def test_a_service_account_requests_gmail_send_as_its_subject(
     assert claims["sub"] == "reports@example.com"
 
 
+@pytest.mark.parametrize("fixture", ["authorized_user", "user_with_saved_token"])
 def test_an_authorized_user_refreshes_for_gmail_send(
-    google: Google, authorized_user: gmail.AuthorizedUser
+    google: Google, request: pytest.FixtureRequest, fixture: str
 ):
-    backend(authorized_user).send(message())
+    credential: gmail.AuthorizedUser = request.getfixturevalue(fixture)
+    saved = credential.path.read_bytes()
 
+    backend(credential).send(message())
+
+    assert [str(one.url) for one in google.requests] == [TOKEN_URI, SEND]
     form = parse_qs(google.requests[0].content.decode())
     assert form["grant_type"] == ["refresh_token"]
     assert form["scope"] == [SCOPE]
     assert google.sent()[0].headers["Authorization"] == "Bearer token-1"
+    assert credential.path.read_bytes() == saved
 
 
 def test_get_token_is_called_with_gmail_send_before_each_request(
@@ -479,7 +496,9 @@ def test_a_refused_refresh_is_an_authentication_error_on_the_connect_line(
     assert google.clients[0].is_closed
 
 
-@pytest.mark.parametrize("fixture", ["service_account", "authorized_user"])
+@pytest.mark.parametrize(
+    "fixture", ["service_account", "authorized_user", "user_with_saved_token"]
+)
 @pytest.mark.parametrize(
     ("status", "expected"),
     [

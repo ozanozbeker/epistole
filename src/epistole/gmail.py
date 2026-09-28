@@ -98,7 +98,7 @@ class ServiceAccount:
 class AuthorizedUser:
     """An authorized user is a saved user consent.
 
-    Epistole runs no consent flow and never rewrites the file. A refresh token that Google has expired or revoked raises `AuthenticationError` on `connect()`.
+    Epistole runs no consent flow and never rewrites the file. `connect()` ignores any access token the file holds and always requests one. So a refresh token that Google has expired or revoked raises `AuthenticationError` on `connect()`.
 
     Inside `smtp.OAuth`, it requests `https://mail.google.com/`, so the consent must include that scope.
 

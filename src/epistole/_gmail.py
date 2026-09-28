@@ -9,6 +9,7 @@ import base64
 import json
 from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
 
 import httpx2
@@ -98,8 +99,12 @@ def _tokens(
                 )
             )
         case AuthorizedUser(path=path):
-            credentials = UserCredentials.from_authorized_user_file(
-                path, scopes=[scope]
+            consent: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
+            # Every connect() requests a token for this scope, so an expired or revoked refresh token raises there (ADR-0011).
+            consent.pop("token", None)
+            consent.pop("expiry", None)
+            credentials = UserCredentials.from_authorized_user_info(
+                consent, scopes=[scope]
             )
         case _:
             return _http.ForeignTokens(credential, scope)
