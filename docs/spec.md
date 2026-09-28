@@ -817,7 +817,8 @@ Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that holds no `id` or `uploadUrl`, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict.
+`__cause__` is also `None` when a draft or upload session reply holds an `id` or `uploadUrl` that is empty or not a string, because Epistole runs that check itself (ADR-0004).
 
 | Status and `error.code` | Epistole |
 | --- | --- |
@@ -825,7 +826,7 @@ The qualified row applies first, per the precedence rule (ADR-0009).
 | `401`, any other `403` (including `403` on draft creation), msal error dict, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that `msal` cannot read, a draft or upload session reply without its `id` or `uploadUrl` | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that `msal` cannot read, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
 | network failure | `TransportError` |
 
 `msal` returns an error dict when Entra rejects a credential.
