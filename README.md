@@ -140,7 +140,9 @@ connection.send(message)
 ```
 
 The connection refreshes its token through the credential you gave the backend, so an expired token is not an error.
-A refresh that fails for a reason other than the network raises `AuthenticationError` and leaves the connection open.
+A refresh that the token endpoint rejects raises `AuthenticationError`.
+One that fails on the provider's side, such as a `5xx`, raises `ProviderError`.
+Both leave the connection open.
 A refresh that fails on the network raises `TransportError`.
 Like any transport failure, that closes the connection.
 An unclosed connection holds a socket on SMTP and a connection pool on Graph and Gmail until the object is garbage collected.

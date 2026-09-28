@@ -21,7 +21,7 @@ __all__ = ["AuthorizedUser", "GmailBackend", "ServiceAccount"]
 class GmailBackend(Backend):
     """A Gmail backend sends each message through the Gmail API's `messages.send`, as the RFC 5322 message SMTP would write.
 
-    `connect()` reads the credential's file, builds one HTTP client, and gets an access token. So a rejected credential raises `AuthenticationError` on that line. It sends nothing to the Gmail API, so a token without the scope raises on the first send instead. Every request times out after 60 seconds, and no setting changes it. See ADR-0005 and ADR-0009.
+    `connect()` reads the credential's file, builds one HTTP client, and gets an access token. So a rejected credential raises `AuthenticationError` on that line. A token request makes one attempt, and a failure on Google's side raises `ProviderError` there. It sends nothing to the Gmail API, so a token without the scope raises on the first send instead. Every request times out after 60 seconds, and no setting changes it. See ADR-0005 and ADR-0009.
 
     Epistole requests the scope `https://www.googleapis.com/auth/gmail.send` alone, which grants no right to read or delete messages. See ADR-0011.
 

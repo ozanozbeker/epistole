@@ -52,7 +52,7 @@ class Backend(ABC):
     def connect(self) -> Connection:
         """Open one live link and return the connection that holds it.
 
-        Opening is eager, so this call, not the first send, raises `AuthenticationError` and `TransportError`. See ADR-0005.
+        Opening is eager, so this call, not the first send, raises `AuthenticationError` and `TransportError`. A token endpoint that fails on the provider's side raises `ProviderError` here too. See ADR-0005.
 
         Use it in a `with`. A connection left unclosed holds its link until the service times it out.
 

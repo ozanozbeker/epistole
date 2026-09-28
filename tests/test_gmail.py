@@ -459,16 +459,63 @@ def test_a_refused_refresh_is_an_authentication_error_on_the_connect_line(
     google: Google, service_account: gmail.ServiceAccount
 ):
     google.replies[TOKEN_URI] = [
-        httpx2.Response(400, json={"error": "invalid_grant", "error_description": "no"})
+        httpx2.Response(
+            400,
+            json={
+                "error": "invalid_grant",
+                "error_description": "Invalid JWT Signature.",
+            },
+        )
     ]
     configured = backend(service_account)
 
     with pytest.raises(AuthenticationError) as caught:
         configured.connect()
 
-    assert isinstance(caught.value.__cause__, RefreshError)
+    assert "400 invalid_grant" in str(caught.value)
+    assert "Invalid JWT Signature." in str(caught.value)
+    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
     assert google.clients[0].is_closed
+
+
+@pytest.mark.parametrize("fixture", ["service_account", "authorized_user"])
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        pytest.param(202, ProviderError, id="202"),
+        pytest.param(408, ProviderError, id="408"),
+        pytest.param(429, ProviderError, id="429"),
+        pytest.param(500, ProviderError, id="500"),
+        pytest.param(502, ProviderError, id="502"),
+        pytest.param(503, ProviderError, id="503"),
+        pytest.param(504, ProviderError, id="504"),
+        pytest.param(400, AuthenticationError, id="400"),
+        pytest.param(401, AuthenticationError, id="401"),
+        pytest.param(403, AuthenticationError, id="403"),
+    ],
+)
+def test_a_token_reply_other_than_200_is_one_request_mapped_by_its_status(
+    google: Google,
+    request: pytest.FixtureRequest,
+    fixture: str,
+    status: int,
+    expected: type[EpistoleError],
+):
+    # google-auth retries on this error whatever the status, and sleeps before the retry, unless the adapter raises (ADR-0009).
+    body = {"error": "temporarily_unavailable"}
+    google.replies[TOKEN_URI] = [httpx2.Response(status, json=body)]
+    configured = backend(request.getfixturevalue(fixture))
+
+    with pytest.raises(EpistoleError) as caught:
+        configured.connect()
+
+    assert type(caught.value) is expected
+    assert [str(one.url) for one in google.requests] == [TOKEN_URI]
+    cause = caught.value.__cause__
+    assert isinstance(cause, httpx2.HTTPStatusError)
+    assert cause.response.status_code == status
+    assert caught.value.backend is configured
 
 
 def test_a_network_failure_on_a_refresh_is_a_transport_error(
@@ -489,8 +536,17 @@ def test_a_network_failure_on_a_refresh_is_a_transport_error(
         pytest.param(
             httpx2.Response(400, json={"error": "invalid_grant"}),
             AuthenticationError,
-            RefreshError,
+            httpx2.HTTPStatusError,
             id="refused",
+        ),
+        pytest.param(
+            httpx2.Response(503), ProviderError, httpx2.HTTPStatusError, id="503"
+        ),
+        pytest.param(
+            httpx2.Response(200, json={"expires_in": 3600}),
+            AuthenticationError,
+            RefreshError,
+            id="no access token",
         ),
         pytest.param(
             httpx2.ConnectError("refused"),
@@ -520,6 +576,26 @@ def test_a_failed_refresh_after_a_401_maps_as_it_does_on_connect(
         assert type(caught.value.__cause__) is cause
         # Only a TransportError closes the connection (ADR-0005).
         assert google.clients[0].is_closed is (expected is TransportError)
+
+    assert [str(one.url) for one in google.requests].count(TOKEN_URI) == 2
+
+
+def test_a_503_on_the_refresh_at_expiry_is_one_request_and_leaves_the_connection_open(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    # google-auth treats a token as stale within 3 minutes 45 seconds of its expiry.
+    google.replies[TOKEN_URI] = [
+        httpx2.Response(200, json={"access_token": "token-1", "expires_in": 60}),
+        httpx2.Response(503),
+    ]
+
+    with backend(service_account).connect() as connection:
+        with pytest.raises(ProviderError):
+            connection.send(message())
+
+        assert not google.clients[0].is_closed
+
+    assert [str(one.url) for one in google.requests] == [TOKEN_URI, TOKEN_URI]
 
 
 def test_a_reply_that_does_not_decode_is_a_provider_error(

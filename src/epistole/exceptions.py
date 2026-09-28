@@ -92,7 +92,7 @@ class RecipientsRefusedError(EpistoleError):
 class AuthenticationError(EpistoleError):
     """The service rejected the credential, or the credential lacks a permission.
 
-    Both are permanent until someone changes a setting. So an expired token that refreshes cleanly is not an error, and a failed refresh is.
+    Both are permanent until someone changes a setting. So an expired token that refreshes cleanly is not an error, and a refresh the token endpoint rejects is. A token endpoint that fails on the provider's side raises `ProviderError` instead.
     """
 
 

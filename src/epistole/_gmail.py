@@ -157,11 +157,14 @@ def _mapping() -> Generator[None]:
         msg = f"Google's reply could not be read: {error}"
         raise ProviderError(msg) from error
     except GoogleAuthError as error:
-        # _Request raises google-auth's TransportError from httpx2's, so a network failure is one level down (ADR-0009).
-        network: BaseException | None = error.__cause__
-        if isinstance(network, httpx2.TransportError):
-            msg = f"the token request to Google failed: {network}"
-            raise TransportError(msg) from network
+        # _Request raises google-auth's TransportError from the httpx2 error, so a network failure or a token reply other than 200 is one level down (ADR-0009).
+        cause: BaseException | None = error.__cause__
+        if isinstance(cause, httpx2.TransportError):
+            msg = f"the token request to Google failed: {cause}"
+            raise TransportError(msg) from cause
+
+        if isinstance(cause, httpx2.HTTPStatusError):
+            raise _token_mapped(cause.response) from cause
 
         msg = f"the credential could not get an access token: {error}"
         raise AuthenticationError(msg) from error
@@ -187,6 +190,33 @@ def _mapped(response: httpx2.Response) -> EpistoleError:
         return AuthenticationError(msg)
 
     return ProviderError(msg)
+
+
+def _token_mapped(response: httpx2.Response) -> EpistoleError:
+    """Return the Epistole error for a token reply other than `200`, by its status alone (ADR-0009)."""
+    status: int = response.status_code
+    error, description = _oauth_error(response)
+    label: str = f"{status} {error}" if error else str(status)
+    msg = f"Google's token endpoint replied {label}: {description}"
+    if status in {
+        HTTPStatus.BAD_REQUEST,
+        HTTPStatus.UNAUTHORIZED,
+        HTTPStatus.FORBIDDEN,
+    }:
+        return AuthenticationError(msg)
+
+    return ProviderError(msg)
+
+
+def _oauth_error(response: httpx2.Response) -> tuple[str, str]:
+    """Return the `error` and `error_description` of an RFC 6749 error reply."""
+    try:
+        body: dict[str, Any] = response.json()
+        return str(body.get("error", "")), str(
+            body.get("error_description", response.reason_phrase)
+        )
+    except (ValueError, TypeError, AttributeError):
+        return "", response.reason_phrase
 
 
 def _envelope(response: httpx2.Response) -> tuple[str, str]:
@@ -236,11 +266,21 @@ class _Request(Request):
         timeout: float | None = None,
         **kwargs: object,
     ) -> _Response:
-        """Ignore `timeout`, because the client's 60 seconds covers token requests too (ADR-0009)."""
+        """Raise `google.auth.exceptions.TransportError` for any status but `200`, the one `google-auth` accepts, so it never retries a token request (ADR-0009).
+
+        Ignore `timeout`, because the client's 60 seconds covers token requests too.
+        """
         try:
             response = self._client.request(method, url, content=body, headers=headers)
         except httpx2.TransportError as error:
             raise GoogleTransportError(error) from error
+
+        if response.status_code != HTTPStatus.OK:
+            msg = f"Google's token endpoint replied {response.status_code}"
+            status = httpx2.HTTPStatusError(
+                msg, request=response.request, response=response
+            )
+            raise GoogleTransportError(status) from status
 
         return _Response(response.status_code, response.headers, response.content)
 
