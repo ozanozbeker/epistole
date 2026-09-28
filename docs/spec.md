@@ -188,7 +188,7 @@ class Attachment:
   Its exceptions propagate unwrapped.
   A return value that is not a `str` is a `ValueError`.
 - Derived text may be `""`, and that is not an error.
-  An image-only body and a body whose only text is inside `<style>` both derive to nothing.
+  An image with no alt text and a body whose only text is inside `<style>` both derive to nothing.
   So the invariant is that `text` is always a `str`, not that it always holds characters.
   The rule applies to `text_renderer` too, because the renderer replaces `html_to_text`.
 - `text_renderer=` with `text=` or with `markdown=` is a `TypeError`.
@@ -541,8 +541,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `OAuth` uses XOAUTH2 through `smtplib.SMTP.auth` with `user={username}\x01auth=Bearer {token}\x01\x01`.
   It sends no token to a server that does not offer `AUTH XOAUTH2`, and raises `AuthenticationError` instead.
   `auth` returns normally on a `503`, which Postfix sends when AUTH is off (ADR-0011).
-- `OAuth.scope` is derived from the issuer: `https://outlook.office365.com/.default` for a Graph value, `https://mail.google.com/` for a Gmail value.
-  It is required for a `TokenCredential`.
+- `OAuth` derives the scope from the issuer: `https://outlook.office365.com/.default` for a Graph value, `https://mail.google.com/` for a Gmail value.
+  `scope=` is required for a `TokenCredential`.
   Supplying it alongside a Graph or a Gmail value is a `TypeError`.
   A `graph.ManagedIdentity` inside an `OAuth` requests the resource `https://outlook.office365.com` rather than the scope, per the rule under Graph below.
 - SMTP has no pre-check (ADR-0019).
@@ -611,6 +611,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   Every request is sent on the connection's client.
   On `401`, Epistole refreshes once and retries that one request once.
   A second `401` on it is `AuthenticationError`.
+  A `TokenCredential` has no call that forces a new token, so its refresh is a second `get_token`.
+  One that caches, as `azure-identity`'s credentials do, returns the rejected token again.
   The budget is per request, not per send, because Graph's draft path makes `2 + N` requests and a token can expire partway through one send.
   A retry re-sends only a request the service did not accept, so a draft sequence cannot double-submit.
   The Graph upload `PUT`s carry no bearer and are outside this rule.
@@ -739,6 +741,7 @@ class ProviderError(EpistoleError): ...
   Epistole never sleeps and never retries.
 - The source of the failure sets the class.
   A caller mistake found before any network call is `TypeError` or `ValueError`, never an `EpistoleError`.
+  A missing file raises `FileNotFoundError` from the call that reads it: `.attach()`, `.embed()`, or `connect()` for a credential's key file.
   A knowable backend limit is `RejectedError`.
   Anything the service returned maps under the tables below.
 
@@ -758,7 +761,7 @@ One rule applies to all three tables.
 - A code- or reason-qualified row takes precedence over a bare status row, which takes precedence over a class row.
 - An unmatched status or reason is `ProviderError`, on every table.
   The mapper never raises on its own.
-- On SMTP, a reply code of `421` in any native exception is `TransportError` before any other row is read, because `smtplib` closes the socket on `421` at MAIL FROM, at RCPT, and at DATA.
+- On SMTP, a reply code of `421` in any native exception is `TransportError` before any other row is read, because the server closes its socket after a `421` to any command (RFC 5321).
 - A client-side timeout is the `httpx2.TransportError` subclass and so `TransportError`.
   A `504` is a status the service returned and so `ProviderError`.
 
@@ -782,7 +785,7 @@ Everything below `421` classifies on `smtp_code // 100`.
 `SMTPTransport` catches it and returns its `.recipients` as refusal data.
 `Connection.send` checks whether that is a full refusal (ADR-0015).
 The `421` rule runs first, so a `SMTPRecipientsRefused` carrying `421` becomes `TransportError` and is never returned as data.
-In that case `smtplib` reports one refused recipient, never tries the rest, and closes the socket.
+In that case `smtplib` reports the refusals up to and including the `421`, never tries the rest, and closes the socket.
 `552` on MAIL FROM is the server rejecting the message against its advertised `SIZE`.
 That is a fact about the message, not about the from address.
 `login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, and no retry changes that.
@@ -833,7 +836,7 @@ def html_to_text(html: str, /) -> str: ...
   It drops `<head>`, `<style>`, `<script>`, `<title>`, and comments.
   It prints image alt text in brackets and decodes entities.
   It never raises on malformed HTML (ADR-0008).
-- It returns `""` for HTML holding no text, such as an image-only body or one whose only text is inside `<style>`.
+- It returns `""` for HTML holding no text, such as an image with no alt text or a body whose only text is inside `<style>`.
   That is not an error, and `Message` keeps it (ADR-0008).
 - Output is best effort and pinned by fixtures, not a contract.
   It may change in a minor version (ADR-0008).
@@ -842,6 +845,7 @@ def html_to_text(html: str, /) -> str: ...
 
 These are facts the ADRs took from documentation or set conservatively.
 The decision on [#23](https://github.com/ozanozbeker/epistole/issues/23) left them out of the written spec.
+The build made no live send, so it settled none of them, and every item below is still open on #23.
 
 **Facts.**
 None changes a signature above.

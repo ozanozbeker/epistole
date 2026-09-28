@@ -326,7 +326,6 @@ def _mapped(error: OSError, /, *, sending: bool) -> EpistoleError:
     msg: str = f"the server replied {code} {_text(reply)}" if code else _text(reply)
     kind: type[EpistoleError]
     if code == _CLOSING:
-        # smtplib closes the socket after a 421 reply to any command.
         kind = TransportError
     elif isinstance(error, SMTPSenderRefused):
         # The server sends 552 for a message over its advertised SIZE, and the from address is not at fault.

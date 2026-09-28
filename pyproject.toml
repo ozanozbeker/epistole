@@ -31,7 +31,9 @@ markdown = ["markdown-it-py>=4.2"]
 
 [dependency-groups]
 dev = [
+  "css-inline>=0.21.3",
   "epistole[gmail,graph,markdown]",
+  "inscriptis>=2.7.4",
   "prek>=0.5.2",
   "pyrefly>=1.2.0",
   "pytest>=9.1.1",

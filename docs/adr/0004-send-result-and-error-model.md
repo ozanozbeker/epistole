@@ -30,7 +30,7 @@ Gmail returns a mailbox-local id that is not an RFC 5322 `Message-ID`.
 The only identifier that exists on all three is the `Message-ID` that `send` sets on each submission (ADR-0002).
 So the send result carries that and nothing provider-specific.
 It is never `None`, because Epistole wrote it.
-Whether Gmail and Graph keep it in the sent message is still the live-test question on #2.
+Whether Gmail and Graph keep it in the sent message is still a live-test question, open on [#23](https://github.com/ozanozbeker/epistole/issues/23).
 The answer does not change the send result: the id names the submission Epistole made either way.
 The prototype's `accepted`, `backend`, and `retry_after` fields are gone.
 A returned send result means accepted.
@@ -142,7 +142,8 @@ Epistole never sleeps and never retries.
   The mapper never raises on its own.
 - **`421` overrides every SMTP row.**
   A reply code of `421` in any native exception is `TransportError`, whatever class carried it.
-  `smtplib` closes the socket on `421` at MAIL FROM, at RCPT, and at DATA.
+  The server closes its socket after a `421` to any command (RFC 5321).
+  `smtplib` also closes its own after a `421` to MAIL FROM, to RCPT, and to the end of the message data.
   It raises `SMTPSenderRefused`, `SMTPRecipientsRefused`, and `SMTPDataError` there, respectively.
   Reporting any of those as something that leaves the connection open would give the caller an open connection over a closed socket.
 - **These tables map native failures to Epistole classes.**

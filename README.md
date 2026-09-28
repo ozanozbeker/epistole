@@ -15,10 +15,6 @@ This is an early project and the API is not yet stable.
 
 ## User guide
 
-This guide is a work in progress.
-It describes an API that is still being designed, so the names are provisional.
-None of this runs yet.
-The shapes are settled.
 A `Message` is an immutable value you build by chaining.
 A backend holds the credentials and the from address.
 `backend.send(message)` or `connection.send(message)` sends the message.
@@ -27,16 +23,16 @@ A backend holds the credentials and the from address.
 
 ```python
 from pathlib import Path
-from epistole import Message, SMTPBackend
+from epistole import Message, SMTPBackend, smtp
 
-smtp = SMTPBackend(
+backend = SMTPBackend(
     host="mail.corp.example",
     port=587,
     from_address="reports@corp.example",
-    credential=...,
+    credential=smtp.Password(username="reports", password=...),
 )
 
-smtp.send(
+backend.send(
     Message(html=Path("kpis.html").read_text(encoding="utf-8"))
     .subject("Daily KPIs")
     .to("boss@corp.example")
@@ -83,7 +79,7 @@ report = (
     .attach(Path("weekly.pdf"))
 )
 
-with smtp.connect() as connection:
+with backend.connect() as connection:
     for subscriber in subscribers:
         connection.send(report.to(subscriber.email))
 ```
@@ -102,19 +98,19 @@ Nothing is skipped silently.
 
 ```python
 for subscriber in subscribers:
-    smtp.send(report.to(subscriber.email))
+    backend.send(report.to(subscriber.email))
 ```
 
 This loop is still correct, only slower.
 It makes one handshake per subscriber.
-A relay with a rate limit may throttle the loop partway through.
-The throttled send raises `ProviderError`.
+A relay that limits connections may refuse a handshake partway through.
+That send raises `TransportError`.
 Use `connect()` for loops.
 
 ### Kept a connection past its `with`
 
 ```python
-with smtp.connect() as connection:
+with backend.connect() as connection:
     pass
 
 connection.send(report)
@@ -128,10 +124,10 @@ To send again, call `connect()` again.
 
 ### Notebook, two cells, Graph
 
-Cell one opens the connection:
+Cell one opens a connection on a `GraphBackend`:
 
 ```python
-connection = graph.connect()
+connection = backend.connect()
 ```
 
 This line acquires the token.
@@ -182,7 +178,7 @@ Pass exactly one of `html=` or `markdown=` per message.
 ### Plain text only
 
 ```python
-smtp.send(
+backend.send(
     Message(text="Pipeline failed at 03:12. See run 4821.")
     .subject("Pipeline failed")
     .to("oncall@corp.example")
@@ -200,7 +196,7 @@ The extractor keeps links, marks list items, and drops the stylesheet.
 To supply your own, pass `text=`, and Epistole derives nothing:
 
 ```python
-Message(html=body, text=Path("weekly.txt").read_text(encoding="utf-8"))
+Message(html=html, text=Path("weekly.txt").read_text(encoding="utf-8"))
 ```
 
 To derive it with a library you prefer, pass `text_renderer=`, a callable from HTML to text.
@@ -213,7 +209,7 @@ from inscriptis.model.config import ParserConfig
 
 config = ParserConfig(display_links=True)
 
-Message(html=body, text_renderer=lambda h: get_text(h, config))
+Message(html=html, text_renderer=lambda h: get_text(h, config))
 ```
 
 `inscriptis` aligns table columns, which Epistole's extractor does not.
@@ -284,7 +280,7 @@ If an image has to render, give it an `<img>` tag rather than a `background-imag
 For an image you already hold as a file, skip the round trip:
 
 ```python
-Message(html=body).embed(Path("logo.png"))
+Message(html=html).embed(Path("logo.png"))
 ```
 
 The content id defaults to the filename, so the HTML refers to it as `<img src="cid:logo.png">`.
@@ -403,7 +399,7 @@ Use **Gmail** when you are already authenticated against a Google account and wo
 
 Gmail and Graph also take any object with `get_token`, the `TokenCredential` shape `azure-identity` implements.
 SMTP takes one inside `OAuth`, with an explicit `scope=`.
-Epistole pre-checks only what a vendor documents: Gmail's 35 MiB request and 500 recipients, Graph's 150 MB attachment and 500 recipients.
+Epistole pre-checks only what a vendor documents: Gmail's 35 MiB request and 500 recipients, and Graph's 150 MB attachment, 500 recipients, and custom header names that start with `x-`.
 SMTP gets none, because `smtplib` already negotiates `SIZE` with the server.
 Everywhere else, Epistole maps the service's reply onto the same error a pre-check would have raised.
 
