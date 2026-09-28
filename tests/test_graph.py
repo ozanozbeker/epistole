@@ -654,10 +654,43 @@ def test_a_reply_without_the_draft_id_or_upload_url_is_a_provider_error(
 ):
     microsoft.replies[where] = [httpx2.Response(201, json={})]
 
-    with pytest.raises(ProviderError, match="Graph's reply"):
+    with pytest.raises(ProviderError, match="Graph's reply") as caught:
         backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
 
+    assert isinstance(caught.value.__cause__, KeyError)
     assert [url(one) for one in microsoft.requests if one.method == "DELETE"] == deleted
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="null"),
+        pytest.param("", id="empty"),
+        pytest.param(5, id="a number"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("where", "name"),
+    [
+        pytest.param(DRAFTS, "id", id="draft"),
+        pytest.param(
+            f"{DRAFT}/attachments/createUploadSession", "uploadUrl", id="upload session"
+        ),
+    ],
+)
+def test_a_draft_id_or_upload_url_that_is_empty_or_not_a_string_is_a_provider_error(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    where: str,
+    name: str,
+    value: object,
+):
+    microsoft.replies[where] = [httpx2.Response(201, json={name: value})]
+
+    with pytest.raises(ProviderError, match="Graph's reply") as caught:
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert caught.value.__cause__ is None
 
 
 # --- Credentials -------------------------------------------------------------

@@ -304,12 +304,18 @@ def _envelope(response: httpx2.Response) -> tuple[str, str]:
 
 
 def _read(response: httpx2.Response, name: str) -> str:
-    """Return the field `name` of a Graph reply, raising `ProviderError` when the reply lacks it."""
+    """Return the field `name` of a Graph reply, raising `ProviderError` unless it is a non-empty string."""
     try:
-        return response.json()[name]
+        value: object = response.json()[name]
     except (ValueError, LookupError, TypeError) as error:
         msg = f"Graph's reply holds no {name}."
         raise ProviderError(msg) from error
+
+    if not isinstance(value, str) or not value:
+        msg = f"Graph's reply holds {value!r} as its {name}, not a non-empty string."
+        raise ProviderError(msg)
+
+    return value
 
 
 def _json(value: object) -> bytes:
