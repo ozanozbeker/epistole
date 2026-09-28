@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 _MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
 """The type and the subtype each match RFC 6838's restricted-name."""
 
+_COMPOSITE_PREFIXES = ("message/", "multipart/")
+"""RFC 2045 calls these the composite types and forbids base64 on them. The RFC 5322 builder writes every attachment as base64 (ADR-0018)."""
+
 _ATTRIBUTE = re.compile(
     r"""[\t\n\f\r /]*(?P<name>[^\t\n\f\r />][^\t\n\f\r /=>]*)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"(?P<double>[^"]*)"|'(?P<single>[^']*)'|(?P<bare>[^\t\n\f\r >]*)))?"""
 )
@@ -250,21 +253,24 @@ class Message:
         filename
             The name the recipient sees. Bytes and a file object need one, because Epistole never reads a file object's `.name`.
         content_type
-            A bare media type such as `application/pdf`. It defaults to the type `filename` implies, or to `application/octet-stream` when the filename implies none or names a compressed file. Epistole never inspects the bytes.
+            A bare media type such as `application/pdf`. It defaults to the type `filename` implies. It falls back to `application/octet-stream` when the filename implies no type, a compressed file, or a `message/*` or `multipart/*` type. Epistole never inspects the bytes.
 
         Raises
         ------
         TypeError
             When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. See ADR-0018.
         ValueError
-            When the filename holds a line break, or when `content_type` is not a bare `type/subtype`, such as one with parameters.
+            When the filename holds a line break, or when `content_type` is not a bare `type/subtype`, such as one with parameters. When `content_type` is a `message/*` or `multipart/*` type. See ADR-0018.
         """
         name: str = _filename(source, filename)
+        kind: str = _content_type(name, content_type)
+        # RFC 2045 makes a media type case-insensitive.
+        if kind.lower().startswith(_COMPOSITE_PREFIXES):
+            msg = f"content_type={kind!r} is a message/* or multipart/* type. Epistole writes every attachment as base64, so it sends neither type. Pass content_type='application/octet-stream' to attach the bytes as a file."
+            raise ValueError(msg)
+
         attachment = Attachment(
-            filename=name,
-            content_type=_content_type(name, content_type),
-            data=_read(source),
-            content_id=None,
+            filename=name, content_type=kind, data=_read(source), content_id=None
         )
         return self._copy(attachments=(*self.attachments, attachment))
 
@@ -385,7 +391,7 @@ class Attachment:
     filename
         The name the recipient sees.
     content_type
-        A bare media type, with no parameters.
+        A bare media type, with no parameters. Within a message it is never a `message/*` or `multipart/*` type, so a transport can write the bytes as base64.
     data
         The bytes, which the builder method reads at call time.
     content_id
@@ -493,7 +499,10 @@ def _content_type(filename: str, content_type: str | None) -> str:
     if content_type is None:
         guessed, encoding = mimetypes.guess_file_type(filename)
         # A compressed file's bytes are not its inner type, and MIME has no header to mark the compression.
-        return guessed if guessed and not encoding else "application/octet-stream"
+        if not guessed or encoding or guessed.lower().startswith(_COMPOSITE_PREFIXES):
+            return "application/octet-stream"
+
+        return guessed
 
     if _MEDIA_TYPE.fullmatch(content_type) is None:
         msg = f"content_type={content_type!r} is not a media type without parameters, such as 'application/pdf'"

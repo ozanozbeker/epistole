@@ -452,6 +452,11 @@ def test_a_text_mode_file_raises_naming_binary_mode(tmp_path: Path):
         ("weekly.epistole", "application/octet-stream"),
         # mimetypes reads this as text/csv with a gzip encoding.
         ("weekly.csv.gz", "application/octet-stream"),
+        # mimetypes reads each of these as message/rfc822.
+        ("fwd.eml", "application/octet-stream"),
+        ("fwd.mht", "application/octet-stream"),
+        ("fwd.mhtml", "application/octet-stream"),
+        ("fwd.nws", "application/octet-stream"),
     ],
 )
 def test_attach_infers_the_content_type_from_the_filename_alone(
@@ -460,6 +465,20 @@ def test_attach_infers_the_content_type_from_the_filename_alone(
     message = Message(text="hi").attach(PDF, filename=filename)
 
     assert message.attachments[0].content_type == content_type
+
+
+# A platform's own table can map an extension to either, as macOS maps .mime to message/rfc822.
+@pytest.mark.parametrize("inferred", ["message/global", "Multipart/Digest"])
+def test_attach_never_infers_a_message_or_multipart_type(
+    monkeypatch: pytest.MonkeyPatch, inferred: str
+):
+    monkeypatch.setattr(
+        mimetypes, "guess_file_type", {"weekly.bin": (inferred, None)}.get
+    )
+
+    message = Message(text="hi").attach(PDF, filename="weekly.bin")
+
+    assert message.attachments[0].content_type == "application/octet-stream"
 
 
 def test_content_type_overrides_the_inferred_one():
@@ -481,6 +500,26 @@ def test_content_type_overrides_the_inferred_one():
 )
 def test_content_type_must_be_a_media_type_without_parameters(content_type: str):
     with pytest.raises(ValueError, match=re.escape(repr(content_type))):
+        Message(text="hi").attach(PDF, filename="weekly.csv", content_type=content_type)
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "message/rfc822",
+        "message/global",
+        "message/delivery-status",
+        "multipart/mixed",
+        "Message/RFC822",
+    ],
+)
+def test_a_message_or_multipart_content_type_raises_naming_octet_stream(
+    content_type: str,
+):
+    with pytest.raises(
+        ValueError,
+        match=f"{re.escape(repr(content_type))}.*{re.escape("'application/octet-stream'")}",
+    ):
         Message(text="hi").attach(PDF, filename="weekly.csv", content_type=content_type)
 
 
@@ -536,7 +575,13 @@ def test_embed_needs_a_filename_or_a_content_id_for_bytes():
 
 @pytest.mark.parametrize(
     ("cid", "content_type"),
-    [("weekly.pdf", None), ("logo", None), ("logo.png", "application/pdf")],
+    [
+        ("weekly.pdf", None),
+        ("logo", None),
+        ("logo.png", "application/pdf"),
+        ("fwd.eml", None),
+        ("logo.png", "message/rfc822"),
+    ],
 )
 def test_embed_needs_an_image_content_type(cid: str, content_type: str | None):
     with pytest.raises(ValueError, match=re.escape("image/*")):

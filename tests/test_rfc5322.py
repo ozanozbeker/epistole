@@ -15,6 +15,8 @@ DATE = datetime(2026, 9, 23, 21, 54, 23, tzinfo=timezone(timedelta(hours=-4)))
 PDF = b"%PDF-1.7 weekly numbers"
 CSV = b"region,total\r\nnorth,12\r\n"
 PNG = b"\x89PNG\r\n\x1a\n logo"
+EML = "From: ada@example.com\nSubject: Café\n\nNumbers attached.\n".encode()
+"""Each message/rfc822 route that ADR-0018 declines changes or raises on its non-ASCII byte and its LF line ends."""
 LOGO_HTML = '<p><img src="cid:logo.png" alt="Logo"></p>'
 UNSUBSCRIBE = "<mailto:unsubscribe@example.com>"
 NON_ASCII = "用户@例子.广告"
@@ -91,6 +93,7 @@ def test_attachments_read_back_with_their_names_types_and_bytes():
         .to("ada@example.com")
         .attach(PDF, filename="rapport-financiér.pdf")
         .attach(CSV, filename="weekly.csv")
+        .attach(EML, filename="fwd.eml")
     )
 
     assert parsed.get_content_type() == "multipart/mixed"
@@ -100,6 +103,7 @@ def test_attachments_read_back_with_their_names_types_and_bytes():
     ] == [
         ("rapport-financiér.pdf", "application/pdf", PDF),
         ("weekly.csv", "text/csv", CSV),
+        ("fwd.eml", "application/octet-stream", EML),
     ]
 
 
