@@ -17,6 +17,8 @@ Epistole maps both to `ProviderError`.
 It raises a plain `ValueError` for a tenant that does not exist, and Epistole leaves that unmapped, because `msal` raises the same class for a pfx it cannot read.
 Amended on [#52](https://github.com/ozanozbeker/epistole/issues/52): the Google auth adapter raises for any token reply but `200`, so `google-auth` never retries a token request.
 Epistole maps that reply by its status, so a `5xx` is `ProviderError`, as on Graph ([#54](https://github.com/ozanozbeker/epistole/issues/54)).
+Amended on [#55](https://github.com/ozanozbeker/epistole/issues/55): a token reply that `google-auth` or `msal` cannot read is `ProviderError`, with the library's exception as `__cause__`.
+The same classes raised before the library's auth adapter returns a reply stay unmapped.
 
 ## Why
 
@@ -119,6 +121,18 @@ It is token freshness, not the backoff policy #2 rules out.
   Epistole maps the reply by its status: `400`, `401` and `403` are `AuthenticationError`, and any other status is `ProviderError`.
   A `429` is `ProviderError`, not `ThrottledError`.
   `smtp.OAuth` gets a Gmail token on the same path, and the SMTP backend never raises `ThrottledError` (ADR-0004).
+- **A token reply that `google-auth` or `msal` cannot read is `ProviderError`.**
+  A proxy login page served with status `200` is one such reply.
+  A body that is not a JSON object is another.
+  So is a field of the wrong type, such as `expires_in`, `scope` or `id_token`.
+  Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError`.
+  Measured on `google-auth` 2.57.1 and `msal` 1.38.0.
+  Each auth adapter counts the replies it returns, and Epistole maps those five classes only when the count increased during the library call.
+  Before any reply, the same classes come from the caller's credential.
+  `msal` raises `TypeError` for an encrypted PEM, and `AttributeError` for a public key passed as `private_key`.
+  Those stay unmapped.
+  The rule also covers a `GoogleAuthError` that subclasses one of the five, such as `MalformedError`.
+  `google-auth` 2.57.1 raises none after a reply.
 - **`__cause__` on the HTTP backends is as follows.**
 
   | Failure | `__cause__` | Epistole class |
@@ -130,7 +144,7 @@ It is token freshness, not the backoff policy #2 rules out.
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | msal token call failed | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
   | Entra's discovery or token endpoint replied `5xx` | `msal.exceptions.MsalServiceError`, which msal raises instead of returning a dict | `ProviderError` |
-  | token reply is not JSON | `json.JSONDecodeError`, which msal raises | `ProviderError` |
+  | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |
 
@@ -170,6 +184,12 @@ It is token freshness, not the backoff policy #2 rules out.
 - **Map a failed refresh by `RefreshError.retryable`.**
   `google.oauth2.reauth` sets it to `False` for any reply that is not JSON, so an `AuthorizedUser` `503` with an empty body reads as permanent.
   Measured on `google-auth` 2.57.1.
+- **Map the five classes from the whole token call, without counting replies.**
+  `msal` raises `TypeError` for an encrypted PEM inside the same call, before its token request.
+  So a caller's key would read as a transient `ProviderError`.
+- **Check the reply's shape in the auth adapter.**
+  The adapter can raise for a body that is not a JSON object.
+  It cannot check the fields each library reads, such as `expires_in` and `scope`, without copying the libraries' parsing.
 
 ## Consequences
 
@@ -178,6 +198,12 @@ It is token freshness, not the backoff policy #2 rules out.
   Each release exact-pins `httpcore2`.
 - The Google auth adapter rule depends on `google-auth` passing the adapter's `TransportError` out of its loop without a retry, as 2.57.1 does.
   A test that counts the token requests on a `503` fails on a release that changes this.
+- The unreadable-reply rule names the five classes measured on the replies above.
+  A library release or an unmeasured reply can raise another class.
+  That exception propagates unmapped.
+  Each measured reply has a test that expects `ProviderError`, so a release that changes its class fails that test.
+- A token reply nested deeply enough raises `RecursionError`.
+  It stays unmapped here, as it does in the error envelope readers (#62).
 - `httpx2.TransportError` and `epistole.TransportError` share a name.
   Epistole imports `httpx2` as a module and never re-exports it.
 - Epistole raises an insufficient-scope error on the first `send`, not on `connect()`, as on SMTP.

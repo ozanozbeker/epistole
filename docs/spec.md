@@ -796,24 +796,28 @@ That is a fact about the message, not about the from address.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, and `google.auth.exceptions.RefreshError` on any other failed refresh.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, the exception `google-auth` raised on a `200` token reply it cannot read, and `google.auth.exceptions.RefreshError` on any other failed refresh.
 
 | Status and `errors[].reason` | Epistole |
 | --- | --- |
 | `400`, `404`, `403 domainPolicy` | `RejectedError` |
 | `401`, `403 authError`, `403 insufficientPermissions`, any other `403`, a token endpoint `400`, `401` or `403`, any other failed refresh, second `401` | `AuthenticationError` |
 | `403 rateLimitExceeded`, `403 userRateLimitExceeded`, `403 dailyLimitExceeded`, `429` | `ThrottledError` |
-| `5xx`, any other token endpoint status but `200`, including `429` | `ProviderError` |
+| `5xx`, a `200` token reply that `google-auth` cannot read, any other token endpoint status but `200`, including `429` | `ProviderError` |
 | network failure, including one during a refresh | `TransportError` |
 
 A `google-auth` error is read one level down.
 The auth adapter raises `google.auth.exceptions.TransportError` for a network failure and for any token reply but `200`, so `google-auth` never retries a token request (ADR-0009).
 One level down, a network failure is `TransportError`, and Epistole maps a token reply by its status.
+A `200` token reply that `google-auth` cannot read is `ProviderError`.
+A proxy login page is one, and so is an `expires_in` that is not a number.
+Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
+The same classes raised before the adapter returns a reply stay unmapped (ADR-0009).
 Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, `json.JSONDecodeError` on a token reply that is not JSON, the error from reading a draft or upload session reply that holds no `id` or `uploadUrl`, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that holds no `id` or `uploadUrl`, and `None` when `msal` returned an error dict.
 
 | Status and `error.code` | Epistole |
 | --- | --- |
@@ -821,12 +825,17 @@ The qualified row applies first, per the precedence rule (ADR-0009).
 | `401`, any other `403` (including `403` on draft creation), msal error dict, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that is not JSON, a draft or upload session reply without its `id` or `uploadUrl` | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that `msal` cannot read, a draft or upload session reply without its `id` or `uploadUrl` | `ProviderError` |
 | network failure | `TransportError` |
 
 `msal` returns an error dict when Entra rejects a credential.
 It returns one for a managed identity endpoint's error reply too, whatever its status.
 It raises `MsalServiceError` when Entra's discovery or token endpoint replies `5xx`, so that failure maps like any other `5xx` (ADR-0009).
+A token reply that `msal` cannot read is `ProviderError`, whatever its status.
+A body that is not a JSON object is one.
+Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` that `msal` raises reading it.
+`msal` raises the same classes for a caller's key before its token request, such as `TypeError` for an encrypted PEM.
+Those stay unmapped (ADR-0009).
 A tenant ID that does not exist in Entra raises `msal`'s own `ValueError` from `connect()`, unmapped.
 `msal` raises the same `ValueError` for a pfx it cannot read, so Epistole cannot tell that service reply from a caller mistake (ADR-0009).
 
