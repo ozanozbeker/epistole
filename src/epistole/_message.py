@@ -10,7 +10,7 @@ from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, override
-from urllib.parse import unquote_to_bytes
+from urllib.parse import unquote, unquote_to_bytes
 
 from epistole._address import LINE_BREAK, check_address
 from epistole._text import Parser, html_to_text
@@ -98,6 +98,7 @@ class Message:
     """
 
     __slots__ = (
+        "_cids",
         "_header_pairs",
         "attachments",
         "bcc_",
@@ -118,6 +119,8 @@ class Message:
     subject_: str | None
     headers_: Mapping[str, str]
     _header_pairs: tuple[tuple[str, str], ...]
+    _cids: tuple[str, ...]
+    """The content id each `<img src>` names as `cid:`, which `Connection.send` checks against `inline_images`."""
     html: str | None
     text: str
     attachments: tuple[Attachment, ...]
@@ -155,8 +158,9 @@ class Message:
                 text = markdown
 
         inline_images: tuple[Attachment, ...] = ()
+        cids: tuple[str, ...] = ()
         if html is not None:
-            html, inline_images = _rewrite_data_images(html)
+            html, inline_images, cids = _rewrite_data_images(html)
 
         if text is None and html is not None:
             rendered: object = (
@@ -178,6 +182,7 @@ class Message:
                 "subject_": None,
                 "headers_": MappingProxyType({}),
                 "_header_pairs": (),
+                "_cids": cids,
                 "html": html,
                 "text": text,
                 "attachments": (),
@@ -393,6 +398,19 @@ class Attachment:
     content_id: str | None
 
 
+def unresolved_cids(message: Message) -> list[str]:
+    """Return each content id an `<img src>` names that no inline image of `message` holds.
+
+    RFC 2392 percent-encodes a content id in a `cid:` URL, as Markdown does for a space, so either spelling resolves.
+    """
+    held: set[str | None] = {image.content_id for image in message.inline_images}
+    return [
+        cid
+        for cid in message._cids  # noqa: SLF001
+        if cid not in held and unquote(cid) not in held
+    ]
+
+
 def _write(message: Message, fields: Mapping[str, object]) -> None:
     """Set `fields` on `message`, bypassing its frozen `__setattr__`."""
     for name, value in fields.items():
@@ -500,22 +518,28 @@ def _read(source: Path | bytes | BinaryIO) -> bytes:
     return data
 
 
-def _rewrite_data_images(html: str) -> tuple[str, tuple[Attachment, ...]]:
-    """Return `html` with the `src` of each `data:` image rewritten to `cid:`, and the inline images the rewrite made (ADR-0003)."""
-    found: list[tuple[int, int, Attachment]] = _DataImageFinder(html).found
+def _rewrite_data_images(
+    html: str,
+) -> tuple[str, tuple[Attachment, ...], tuple[str, ...]]:
+    """Return `html` with the `src` of each `data:` image rewritten to `cid:`, the inline images the rewrite made (ADR-0003), and the content id each `cid:` `src` already named."""
+    finder = _ImageFinder(html)
     parts: list[str] = []
     end: int = 0
-    for start, stop, image in found:
+    for start, stop, image in finder.found:
         parts += (html[end:start], f"cid:{image.content_id}")
         end = stop
 
     parts.append(html[end:])
     # Two images with one media type and one set of bytes are equal, so this keeps the first of each.
-    return "".join(parts), tuple(dict.fromkeys(image for *_, image in found))
+    return (
+        "".join(parts),
+        tuple(dict.fromkeys(image for *_, image in finder.found)),
+        tuple(dict.fromkeys(finder.cids)),
+    )
 
 
-class _DataImageFinder(Parser):
-    """A finder holds the span of each `<img>` `src` value that is a `data:` image in the HTML it parses, and the inline image decoded from that value."""
+class _ImageFinder(Parser):
+    """A finder holds the span of each `<img>` `src` value that is a `data:` image in the HTML it parses, the inline image decoded from that value, and the content id of each `src` that is a `cid:` URL."""
 
     def __init__(self, html: str) -> None:
         super().__init__()
@@ -525,6 +549,7 @@ class _DataImageFinder(Parser):
         ]
         r"""getpos() counts only "\n" as a line end, so the index of a position is its line's start plus its column."""
         self.found: list[tuple[int, int, Attachment]] = []
+        self.cids: list[str] = []
         self.feed(html)
         self.close()
 
@@ -536,6 +561,11 @@ class _DataImageFinder(Parser):
         # HTML5 keeps the first of two attributes with one name.
         src: str | None = next((value for name, value in attrs if name == "src"), None)
         if src is None:
+            return
+
+        scheme, _, cid = src.strip().partition(":")
+        if scheme.lower() == "cid":
+            self.cids.append(cid)
             return
 
         line, column = self.getpos()

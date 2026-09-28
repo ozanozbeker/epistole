@@ -9,6 +9,7 @@ Decided on [#10](https://github.com/ozanozbeker/epistole/issues/10), based on th
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): `Connection.send` builds a `Submission` that carries the identity, in place of a copy with the identity set (ADR-0015).
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): `.headers(mapping)` is now one of the field-named methods that replace.
 It follows the same at-least-one rule as the address methods (ADR-0016).
+Amended on [#48](https://github.com/ozanozbeker/epistole/issues/48): the `cid:` check in `Connection.send` reads the `<img src>` values the `data:` rewrite reads (ADR-0003), and a percent-encoded content id matches too.
 
 ## Why
 

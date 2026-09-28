@@ -244,6 +244,47 @@ def test_a_message_with_no_recipient_never_reaches_the_transport():
     assert backend.transport.submitted == []
 
 
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<p>Weekly numbers</p><img src="cid:chart.png">',
+        '<IMG SRC=" CID:chart.png ">',
+        '<img src="cid:logo.png"><img src="cid:chart.png">',
+    ],
+)
+def test_send_needs_an_inline_image_for_every_cid_an_img_names(html: str):
+    backend = FakeBackend()
+    built = Message(html=html).embed(b"\x89PNG", cid="logo.png").to("ada@example.com")
+
+    with (
+        backend.connect() as connection,
+        pytest.raises(ValueError, match=re.escape("matches cid:chart.png, which")),
+    ):
+        connection.send(built)
+
+    assert backend.transport.submitted == []
+
+
+@pytest.mark.parametrize(
+    "built",
+    [
+        Message(html='<img src="cid:logo.png">').embed(b"\x89PNG", cid="logo.png"),
+        Message(markdown="![Q3](<cid:Q3 chart.png>)").embed(
+            b"\x89PNG", cid="Q3 chart.png"
+        ),
+        Message(html='<!-- <img src="cid:logo.png"> -->'),
+        Message(html='<td style="background: url(cid:logo.png)">'),
+    ],
+    ids=["embedded", "percent-encoded", "in a comment", "outside an img"],
+)
+def test_a_cid_that_resolves_or_that_no_img_names_sends(built: Message):
+    backend = MemoryBackend()
+
+    backend.send(built.to("ada@example.com"))
+
+    assert len(backend.submissions) == 1
+
+
 # --- Submission --------------------------------------------------------------
 
 

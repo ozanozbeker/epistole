@@ -12,6 +12,7 @@ from email.utils import localtime, make_msgid
 from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
 from epistole._address import addr_spec, check_address
+from epistole._message import unresolved_cids
 from epistole._result import SendResult
 from epistole.exceptions import EpistoleError, RecipientsRefusedError, TransportError
 
@@ -106,7 +107,7 @@ class Connection:
         Raises
         ------
         ValueError
-            When the connection is closed, or when the message names no recipient.
+            When the connection is closed, when the message names no recipient, or when an `<img src>` names a `cid:` that no inline image holds.
         RecipientsRefusedError
             When the service refused every recipient.
         EpistoleError
@@ -118,6 +119,11 @@ class Connection:
 
         if not message.recipients:
             msg = "the message names no recipient. Address it with .to(), .cc(), or .bcc()."
+            raise ValueError(msg)
+
+        if unresolved := unresolved_cids(message):
+            names: str = ", ".join(f"cid:{cid}" for cid in unresolved)
+            msg = f"no inline image matches {names}, which the HTML names in an <img src>. Add each with .embed()."
             raise ValueError(msg)
 
         submission = Submission(

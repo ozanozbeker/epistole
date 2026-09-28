@@ -352,12 +352,14 @@ class Submission:
   It stays open on every other `EpistoleError`.
 - `Connection.send` runs these steps in order:
   1. Raise `ValueError` if closed.
-  2. Check completeness (at least one recipient; every `cid:` the HTML names matched by an inline image) and raise `ValueError` if not.
+  2. Check completeness (at least one recipient; an inline image for every `cid:` an `<img src>` names) and raise `ValueError` if not.
   3. Build a `Submission`, setting `message_id` and `date`.
   4. Call `transport.submit`.
   5. Re-key the returned refusals from addr-spec to the matching entry of `message.recipients`.
   6. Raise `RecipientsRefusedError` if every recipient was refused.
   7. Return `SendResult(message_id, date, refused)`.
+- The completeness check reads the `<img src>` values the `data:` rewrite reads, so an `<img>` inside a comment does not count (ADR-0002, ADR-0003).
+  A content id matches as written or percent-decoded, because RFC 2392 percent-encodes it in a `cid:` URL and Markdown writes a space as `%20`.
 - Only `Connection.send` raises `RecipientsRefusedError`, on every backend including the doubles (ADR-0015).
   A transport returns refusals and never raises it.
 - `send` sets `backend` to `self.backend` on any `EpistoleError` before the error propagates (ADR-0005).
