@@ -13,6 +13,17 @@ if TYPE_CHECKING:
     from epistole._backend import Backend
     from epistole._result import Refusal
 
+__all__ = [
+    "AuthenticationError",
+    "EpistoleError",
+    "ProviderError",
+    "RecipientsRefusedError",
+    "RejectedError",
+    "SenderRefusedError",
+    "ThrottledError",
+    "TransportError",
+]
+
 
 class EpistoleError(Exception):
     """An `EpistoleError` reports an error reply from a mail service, or a network failure.
