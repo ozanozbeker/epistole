@@ -15,6 +15,8 @@ Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `msal` 1.38
 It raises `MsalServiceError` for a `5xx` from Entra's discovery or token endpoint, and `json.JSONDecodeError` for a token reply that is not JSON.
 Epistole maps both to `ProviderError`.
 It raises a plain `ValueError` for a tenant that does not exist, and Epistole leaves that unmapped, because `msal` raises the same class for a pfx it cannot read.
+Amended on [#52](https://github.com/ozanozbeker/epistole/issues/52): the Google auth adapter raises for any token reply but `200`, so `google-auth` never retries a token request.
+Epistole maps that reply by its status, so a `5xx` is `ProviderError`, as on Graph ([#54](https://github.com/ozanozbeker/epistole/issues/54)).
 
 ## Why
 
@@ -50,6 +52,18 @@ The Gmail extra does not install `requests`, so Gmail needs an adapter over `htt
 `msal` defaults to `requests`, and the adapter is optional.
 Without it, a proxy or CA set on Epistole's client does not apply to the token call.
 A corporate network then fails, and Epistole's error does not show why.
+
+**The Google auth adapter raises for any token reply but `200`, because `google-auth` retries and sleeps.**
+`google-auth` accepts only a `200` from the token endpoint.
+It retries any other reply whose status is `408`, `429`, `500`, `503` or `504`, or whose `error` or `error_description` is `internal_failure`, `server_error` or `temporarily_unavailable`.
+It makes 3 attempts, and sleeps about 1 s and then about 2 s between them.
+Measured on `google-auth` 2.57.1: a token endpoint that always replies `503` received 3 requests, and `connect()` raised after 3 s.
+ADR-0004 says Epistole never sleeps and never retries.
+A caller's retry loop would also triple every attempt.
+No public setting turns the retry off.
+The adapter already raises `google.auth.exceptions.TransportError` for a network failure, and `google-auth` passes that out of its loop without a retry.
+So the adapter raises the same class for any reply but `200`, and the loop ends before its first sleep.
+Epistole then picks the class from the status one level down, because `RefreshError` carries no status.
 
 **A backend takes a credential, never a client.**
 Unwrapping a built SDK client reads the credential through private attributes: one on Google and three on Graph.
@@ -99,13 +113,20 @@ It is token freshness, not the backoff policy #2 rules out.
 - **The backend takes no caller-supplied `httpx2.Client` in v1.**
   Proxy and CA come from the environment (`trust_env`) and the OS trust store (`truststore`), which `httpx2` reads by default.
   `httpx2` is not part of the public signature, so it can be swapped without breaking a caller.
+- **The Google auth adapter raises `google.auth.exceptions.TransportError` for any token reply but `200`.**
+  Its cause is an `httpx2.HTTPStatusError`, as a network failure's cause is the `httpx2.TransportError` subclass.
+  So `google-auth` makes one attempt per token request and never sleeps.
+  Epistole maps the reply by its status: `400`, `401` and `403` are `AuthenticationError`, and any other status is `ProviderError`.
+  A `429` is `ProviderError`, not `ThrottledError`.
+  `smtp.OAuth` gets a Gmail token on the same path, and the SMTP backend never raises `ThrottledError` (ADR-0004).
 - **`__cause__` on the HTTP backends is as follows.**
 
   | Failure | `__cause__` | Epistole class |
   | --- | --- | --- |
   | mail endpoint returned non-2xx | `httpx2.HTTPStatusError`; `.response` keeps status, headers, and body | ADR-0004 status tables |
   | connect, TLS, read, write, timeout | the `httpx2.TransportError` subclass raised | `TransportError` |
-  | Google refresh failed | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
+  | Google's token endpoint replied with any status but `200` | `httpx2.HTTPStatusError`, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `AuthenticationError` on `400`, `401` or `403`; `ProviderError` otherwise |
+  | Google refresh failed otherwise | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | msal token call failed | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
   | Entra's discovery or token endpoint replied `5xx` | `msal.exceptions.MsalServiceError`, which msal raises instead of returning a dict | `ProviderError` |
@@ -140,12 +161,23 @@ It is token freshness, not the backoff policy #2 rules out.
 - **Probe the mail endpoint at `connect()`.**
   It catches a missing scope early.
   But it needs a permission Epistole otherwise never requests.
+- **Pass `can_retry=False` to `google-auth`'s grant functions.**
+  Only the private module `google.oauth2._client` takes it.
+  `AuthorizedUser` refreshes through `google.oauth2.reauth.refresh_grant`, which takes no such argument.
+  So Epistole would rebuild each credential's refresh from private attributes.
+- **Document `google-auth`'s retry as an exception to ADR-0004.**
+  Rejected because #2 puts retry and backoff policy out of scope.
+- **Map a failed refresh by `RefreshError.retryable`.**
+  `google.oauth2.reauth` sets it to `False` for any reply that is not JSON, so an `AuthorizedUser` `503` with an empty body reads as permanent.
+  Measured on `google-auth` 2.57.1.
 
 ## Consequences
 
 - Two pins need watching.
   `httpx2` moved from 2.6 to 2.12 in five weeks.
   Each release exact-pins `httpcore2`.
+- The Google auth adapter rule depends on `google-auth` passing the adapter's `TransportError` out of its loop without a retry, as 2.57.1 does.
+  A test that counts the token requests on a `503` fails on a release that changes this.
 - `httpx2.TransportError` and `epistole.TransportError` share a name.
   Epistole imports `httpx2` as a module and never re-exports it.
 - Epistole raises an insufficient-scope error on the first `send`, not on `connect()`, as on SMTP.

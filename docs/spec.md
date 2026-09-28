@@ -794,19 +794,20 @@ That is a fact about the message, not about the from address.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, and `google.auth.exceptions.RefreshError` on a failed refresh.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, and `google.auth.exceptions.RefreshError` on any other failed refresh.
 
 | Status and `errors[].reason` | Epistole |
 | --- | --- |
 | `400`, `404`, `403 domainPolicy` | `RejectedError` |
-| `401`, `403 authError`, `403 insufficientPermissions`, any other `403`, refresh failed, second `401` | `AuthenticationError` |
+| `401`, `403 authError`, `403 insufficientPermissions`, any other `403`, a token endpoint `400`, `401` or `403`, any other failed refresh, second `401` | `AuthenticationError` |
 | `403 rateLimitExceeded`, `403 userRateLimitExceeded`, `403 dailyLimitExceeded`, `429` | `ThrottledError` |
-| `5xx` | `ProviderError` |
+| `5xx`, any other token endpoint status but `200`, including `429` | `ProviderError` |
 | network failure, including one during a refresh | `TransportError` |
 
 A `google-auth` error is read one level down.
-`google-auth` raises the request adapter's `google.auth.exceptions.TransportError` for a network failure, not a `RefreshError`.
-A network failure one level down is `TransportError`, and any other failed refresh is `AuthenticationError`.
+The auth adapter raises `google.auth.exceptions.TransportError` for a network failure and for any token reply but `200`, so `google-auth` never retries a token request (ADR-0009).
+One level down, a network failure is `TransportError`, and Epistole maps a token reply by its status.
+Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
