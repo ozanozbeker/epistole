@@ -74,14 +74,14 @@ __all__ = [
   `epistole.smtp` exports `SMTPBackend`, `Password`, and `OAuth`.
   `epistole.gmail` exports `GmailBackend`, `ServiceAccount`, and `AuthorizedUser`.
   `epistole.graph` exports `GraphBackend`, `ClientSecret`, `Certificate`, and `ManagedIdentity`.
-- `SMTPTransport`, `GmailTransport`, `GraphTransport`, and the doubles' transports are not exported (ADR-0006).
+- `_SMTPTransport`, `_GmailTransport`, `_GraphTransport`, and the doubles' transports are private and not exported (ADR-0006).
   Each is the `Transport` its backend's `_open()` returns, and no other code names it.
 - One private RFC 5322 builder turns a `Submission` into an `email.message.EmailMessage`.
-  `SMTPTransport` writes it, and `GmailTransport` sends it as base64url `raw` (ADR-0009).
-  `GraphTransport` never calls it, because every Graph request is JSON (ADR-0012).
+  `_SMTPTransport` writes it, and `_GmailTransport` sends it as base64url `raw` (ADR-0009).
+  `_GraphTransport` never calls it, because every Graph request is JSON (ADR-0012).
   It is defined in the core and takes no dependency.
   It writes `Bcc`, because Gmail sends to the addresses in `To`, `Cc`, and `Bcc` (ADR-0016).
-  `SMTPTransport` writes it through `smtplib`'s `send_message`, which deletes `Bcc` first.
+  `_SMTPTransport` writes it through `smtplib`'s `send_message`, which deletes `Bcc` first.
   It writes non-ASCII text as quoted-printable or base64, so a message whose headers are ASCII is 7-bit and SMTP needs no `BODY=8BITMIME` (ADR-0020).
 - `from epistole import GmailBackend` and `GraphBackend` always succeed.
   The constructor runs the vendor imports (ADR-0009).
@@ -100,6 +100,7 @@ class Address(str):
 - Raises `ValueError` with the `UnicodeEncodeError` as `__cause__` when `email` is not ASCII, because `formataddr` cannot format it (ADR-0014).
   The plain-string path accepts the same address.
 - Raises `ValueError` naming the argument when `name` or `email` holds a surrogate, a code point from U+D800 to U+DFFF (ADR-0014).
+- Raises `TypeError` naming the argument when `name` or `email` is not a `str` (ADR-0014).
 
 ```python
 class Message:
@@ -179,16 +180,20 @@ class Attachment:
 
 - The constructor takes exactly one of `html=` or `markdown=`, or neither with `text=` alone.
   Both, or none of the three, is a `TypeError`.
-- `html=`, `markdown=`, or `text=` that holds a surrogate is a `ValueError` naming the keyword (ADR-0008).
+- `html=`, `markdown=`, or `text=` that is not a `str` is a `TypeError` naming the keyword (ADR-0008).
+  One that holds a surrogate is a `ValueError` naming the keyword.
 - `text=` may be passed with `html=` or `markdown=`, or alone.
   Epistole sends it verbatim and never merges it.
+  The one change is to line breaks: SMTP and Gmail write each CR, LF, or CRLF in the plain text and the HTML as CRLF, and end each with one (ADR-0008).
+  RFC 5322 allows a CR in a body only before an LF.
+  Graph sends both as written.
   It overrides anything Epistole would have derived.
   `text=""` sends empty plain text, for a caller who puts the whole message in the subject.
 - HTML with no `text=`: `text` is `text_renderer(rewritten_html)` when given, else `html_to_text(rewritten_html)`.
   The renderer runs once at construction, on the HTML after the `data:` rewrite.
   The message does not store it.
   Its exceptions propagate unwrapped.
-  A return value that is not a `str`, or that holds a surrogate, is a `ValueError`.
+  A return value that is not a `str` is a `TypeError`, and one that holds a surrogate is a `ValueError`.
 - Derived text may be `""`, and that is not an error.
   An image with no alt text and a body whose only text is inside `<style>` both derive to nothing.
   So the invariant is that `text` is always a `str`, not that it always holds characters.
@@ -206,6 +211,9 @@ class Attachment:
   There is no flag.
 - The HTML is byte-identical except the rewritten `src` values.
   `<img>` inside comments, `data:` in CSS `url()`, `srcset`, and non-image media types stay as written.
+- A comment ends where HTML5 ends one, on every supported Python: at the first `-->` or `--!>`, or at once when written `<!-->` or `<!--->` (ADR-0003).
+- Epistole strips only the C0 controls and spaces at the ends of a `src` before it reads the scheme, as a URL parser does (ADR-0003).
+  So `src=" data:..."` stays as written, and `src=" cid:logo.png"` names no `cid:`.
 - The rewrite makes one inline image per distinct (media type, bytes).
   The content id is the first 16 hex characters of the SHA-256 of the media type, a `NUL` byte, and the payload, plus `mimetypes.guess_extension`'s extension.
   It has no `@domain`.
@@ -253,7 +261,7 @@ class Attachment:
 **Addresses (ADR-0014).**
 
 - An address is checked where it is supplied: in the four address methods and in `from_address`.
-  A failed check is a `ValueError`.
+  A failed check is a `ValueError`, and an address that is not a `str` is a `TypeError`.
   A string passes when it holds no line break and no surrogate, `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
   Epistole inspects nothing else: no character set, no DNS, no punycode.
 - `recipients` is `to_ + cc_ + bcc_` in that order, duplicates kept (ADR-0007).
@@ -273,12 +281,13 @@ class Attachment:
   `headers_` is a `MappingProxyType` built once at construction and returned by reference.
   `__hash__` reads the tuple, because no read-only mapping in the stdlib is hashable.
   `headers_ == {"X-Campaign-Id": "autumn"}` holds, so a test reads it as a dict.
+- A name or a value that is not a `str` is a `TypeError`, checked in `Message` (ADR-0016).
 - A legal name is one or more characters in printable ASCII 33 to 126 excluding `:`.
-  A legal value is a `str` with no character that `str.splitlines()` splits on, such as `\r`, `\n`, or `\u2028`.
+  A legal value holds no character that `str.splitlines()` splits on, such as `\r`, `\n`, or `\u2028`.
   It also holds no surrogate.
   `EmailMessage` raises on a value that `str.splitlines()` splits, and on most surrogates.
   It writes a surrogate from `os.fsdecode` as an `unknown-8bit` encoded-word instead (ADR-0016).
-  Anything else is a `ValueError`, checked in `Message`.
+  Any other `str` is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - `Resent-Bcc` is a `ValueError`, matched case-insensitively on the exact name, because no backend sends it intact.
   The error names the header and points to `.bcc()`.
@@ -341,6 +350,7 @@ class Submission:
   It is not a context manager: `with backend:` is a `TypeError`.
 - `from_address` is checked at construction on every backend per ADR-0014.
   There is no per-send override.
+  It is read-only, so assigning it raises `AttributeError` (ADR-0005).
   `SMTPBackend`, `GmailBackend`, and `GraphBackend` require it.
   The two doubles default it to `epistole@example.invalid`, because a double has no mail service to authorize one (ADR-0015).
 - `Backend.send(message)` is `with self.connect() as c: return c.send(message)`, written once on the base.
@@ -403,7 +413,9 @@ class Submission:
   That error is not an `EpistoleError` and is in no mapping table.
   A `Message-ID` is an identifier and not a route, so nothing resolves the encoded domain.
   The stdlib codec's IDNA 2003 folding is therefore harmless here.
-  `Connection.send` raises `ValueError` for a domain the codec cannot encode: one with an empty label, or with a label longer than 63 characters once encoded.
+  `Connection.send` raises `ValueError` for a domain with an empty label, ASCII or not, such as `example..com` or `example.com.` (ADR-0015).
+  RFC 5322 writes the `id-right` of a `msg-id` as a dot-atom, which holds no empty label.
+  It also raises for a non-ASCII domain the codec cannot encode, such as one with a label longer than 63 characters once encoded.
   ADR-0014 is still in force.
   The encoding covers what Epistole sets, not what it checks.
   Epistole still accepts a non-ASCII address.
@@ -568,7 +580,9 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `send_message` would otherwise read it from the headers, so a custom `Sender` header would override the from address (ADR-0001).
   A repeated addr-spec gets one `RCPT TO`, because `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients (ADR-0004).
 - SMTP asks the server for `SMTPUTF8` whenever the built message has UTF-8 headers, including when the envelope is ASCII but `Reply-To` or a custom header value needs them (ADR-0014, ADR-0016).
-  For that case Epistole checks the extension itself and raises `RejectedError`, because `sendmail` drops every option on a server that answered `HELO`.
+  Epistole checks the extension itself before `send_message`, and raises `RejectedError` with `__cause__` `None` when the server does not advertise it (ADR-0010, ADR-0014).
+  So `send_message` never raises `SMTPNotSupportedError`.
+  For an ASCII envelope Epistole also passes the options itself, because `send_message` adds them for a non-ASCII envelope alone.
 - The timeout is 60 s, and no setting changes it.
 
 **Gmail (ADR-0009, ADR-0011, ADR-0016, ADR-0019).**
@@ -617,7 +631,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   Exchange derives its own plain text, so the recipient does not receive the caller's plain text.
   A `text=`-only message carries `contentType: "text"` with the caller's text (ADR-0008).
   This is documented, not rejected.
-- Size constants are private to `GraphTransport`.
+- Size constants are private to `_GraphTransport`.
 - Epistole does not expose `saveToSentItems`.
 
 **HTTP backends, both (ADR-0009).**
@@ -643,6 +657,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - Neither takes a credential.
   Both default `from_address` to `epistole@example.invalid`.
 - `MemoryBackend.submissions` is a live list on the backend.
+  The attribute is read-only, so a test empties the list with `list.clear()` rather than binding a new one (ADR-0005).
   It persists across every connection, and there is no reset method.
   `refuse` maps an address to a `Refusal`, matched against each recipient's addr-spec and applied at submit.
   Nothing else is injectable.
@@ -745,9 +760,9 @@ class ProviderError(EpistoleError): ...
 - The hierarchy is flat: seven error classes under `EpistoleError`, with no transient base.
   The transient set is `(ThrottledError, TransportError, ProviderError)`.
 - Each takes its message positionally and its extras keyword-only, so `raise RejectedError("...")` keeps the shape every Python exception has.
-- The raise site does not fill `backend`.
-  A transport raises the error without one.
+- A transport raises its error without `backend`.
   `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
+  `Connection.send` also sets it on the `RecipientsRefusedError` it raises itself (ADR-0004).
   So `backend` is the configured backend on every error a caller receives.
   It is `None` only on an error inspected before it has propagated.
 - The native exception is `__cause__`, raised with `from`.
@@ -757,9 +772,11 @@ class ProviderError(EpistoleError): ...
   Epistole never sleeps and never retries.
 - The source of the failure sets the class.
   A caller mistake found before any network call is `TypeError` or `ValueError`, never an `EpistoleError`.
+  A text argument that is not a `str` is a `TypeError` naming the argument: content, a subject, an address, an argument of `Address()`, a filename, a content id, a content type, a custom header name or value, and what `text_renderer` returns.
   A missing file raises `FileNotFoundError` from the call that reads it: `.attach()`, `.embed()`, or `connect()` for a credential's key file.
   A knowable backend limit is `RejectedError`.
   Anything the service returned maps under the tables below.
+  An exception from a caller's `TokenCredential` is not a reply, so it propagates unchanged from `connect()` or a send, on every backend (ADR-0009).
 
 | Class | Meaning |
 | --- | --- |
@@ -781,7 +798,7 @@ One rule applies to all three tables.
 - A client-side timeout is the `httpx2.TransportError` subclass and so `TransportError`.
   A `504` is a status the service returned and so `ProviderError`.
 
-**SMTP mapping (ADR-0004, ADR-0011, ADR-0014, ADR-0017).**
+**SMTP mapping (ADR-0004, ADR-0011, ADR-0017).**
 Everything below `421` classifies on `smtp_code // 100`.
 
 | Native | Epistole |
@@ -790,7 +807,6 @@ Everything below `421` classifies on `smtp_code // 100`.
 | `SMTPSenderRefused` `552` | `RejectedError` |
 | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
 | `SMTPAuthenticationError`; `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth`; `AUTH XOAUTH2` not offered | `AuthenticationError` |
-| `SMTPNotSupportedError` from `send_message` (non-ASCII address, no `SMTPUTF8`) | `RejectedError` |
 | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors, STARTTLS not offered | `TransportError` |
 | `SMTPDataError` `5yz` | `RejectedError` |
 | `SMTPDataError` `4yz` | `ProviderError` |
@@ -798,7 +814,7 @@ Everything below `421` classifies on `smtp_code // 100`.
 | any other bare `SMTPException` | `ProviderError` |
 
 `SMTPRecipientsRefused` has no row.
-`SMTPTransport` catches it and returns its `.recipients` as refusal data.
+`_SMTPTransport` catches it and returns its `.recipients` as refusal data.
 `Connection.send` checks whether that is a full refusal (ADR-0015).
 The `421` rule runs first, so a `SMTPRecipientsRefused` carrying `421` becomes `TransportError` and is never returned as data.
 In that case `smtplib` reports the refusals up to and including the `421`, never tries the rest, and closes the socket.
@@ -823,10 +839,12 @@ The auth adapter raises `google.auth.exceptions.TransportError` for a network fa
 One level down, a network failure is `TransportError`, and Epistole maps a token reply by its status.
 A `200` token reply that `google-auth` cannot read is `ProviderError`.
 A proxy login page is one, and so is an `expires_in` that is not a number.
-Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
+Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
 The same classes raised before the adapter returns a reply stay unmapped (ADR-0009).
 Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
+A reason in any entry of `errors[]` qualifies a row.
+The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
 `__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict.
@@ -846,7 +864,7 @@ It returns one for a managed identity endpoint's error reply too, whatever its s
 It raises `MsalServiceError` when Entra's discovery or token endpoint replies `5xx`, so that failure maps like any other `5xx` (ADR-0009).
 A token reply that `msal` cannot read is `ProviderError`, whatever its status.
 A body that is not a JSON object is one.
-Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` that `msal` raises reading it.
+Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `msal` raises reading it.
 `msal` raises the same classes for a caller's key before its token request, such as `TypeError` for an encrypted PEM.
 Those stay unmapped (ADR-0009).
 A tenant ID that does not exist in Entra raises `msal`'s own `ValueError` from `connect()`, unmapped.
@@ -859,8 +877,12 @@ def html_to_text(html: str, /) -> str: ...
 ```
 
 - It is the default plain-text extractor, built on stdlib `html.parser` with no dependency (ADR-0008).
-- It keeps links as `label <url>`, marks list items, and writes one table row per line.
-  It drops `<head>`, `<style>`, `<script>`, `<title>`, and comments.
+- It writes a link as `label <url>`, or as its label alone when the label is the URL or the `mailto:` address, or when the `href` is a fragment such as `#top`.
+  It marks list items.
+  It writes a table row on one line when its cells hold only inline content.
+  A block or a `<br>` inside a cell starts a new line, which keeps the paragraphs of a layout table apart.
+  It drops `<style>`, `<script>`, `<title>`, and comments.
+  It keeps other text in a `<head>`, such as a `<noscript>`, because HTML5 moves it into the body when scripting is off.
   It prints image alt text in brackets and decodes entities.
   It never raises on malformed HTML (ADR-0008).
 - It returns `""` for HTML holding no text, such as an image with no alt text or a body whose only text is inside `<style>`.

@@ -20,6 +20,10 @@ It mapped `552` on MAIL FROM to `RejectedError`.
 It gave the leaves constructors.
 It made `retry_after` conditional on the header rather than hard-coded per backend.
 Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): a bare `SMTPException` from `login` or `auth` is `AuthenticationError`, and SMTP names each addr-spec once in its envelope.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a text argument that is not a `str` is a `TypeError` naming the argument.
+ADR-0008, ADR-0014, ADR-0016 and ADR-0018 apply the rule to content, addresses, custom headers and attachments.
+The SMTP mapping loses its `SMTPUTF8` row, because SMTP checks the extension itself before `send_message` (ADR-0014).
+A reason in any entry of Gmail's `errors[]` qualifies a row, and the throttle reasons are read first.
 
 ## Why
 
@@ -122,15 +126,19 @@ Epistole never sleeps and never retries.
   The signatures are `EpistoleError(message, /, *, backend=None)`, `RecipientsRefusedError(message, /, *, refused, backend=None)`, and `ThrottledError(message, /, *, retry_after=None, backend=None)`.
   The other four inherit the base.
   `raise RejectedError("text")` stays the shape every Python exception has.
-- **The raise site does not fill `backend`.
+- **A transport does not fill `backend`.
   The caller sets it.**
   A transport raises the mapped error with `backend` unset.
   `Connection.send` and `Backend.connect()` each catch `EpistoleError`, set `backend` to their own, and re-raise (ADR-0005).
+  `Connection.send` raises `RecipientsRefusedError` itself, outside that `try`, so it passes `backend=` at the raise.
   So `backend` is set on every error that reaches a caller, and `None` only on an error inspected before it has propagated.
   `backend` is therefore a plain mutable attribute rather than a constructor-only field.
 - **The class depends on which party rejected the send.**
   A mistake Epistole finds before it writes to the network is a `TypeError` or `ValueError`, never an `EpistoleError`.
   Examples are no recipients, `send` on a closed connection, or a `cid:` with no matching inline image.
+  A text argument that is not a `str` is a `TypeError` naming the argument, as Python raises for a wrong type.
+  `ValueError` is for a `str` whose content fails a check.
+  The type check runs first, so no caller sees the `TypeError` that `re` raises for a non-`str`, which names no argument.
   A backend-local limit checked before writing is `RejectedError` with `__cause__` `None`.
   Examples are Graph's 150 MB attachment limit and its 500-recipient limit.
   The class is `RejectedError` because the same message succeeds on SMTP, and the caller should get one class whether Epistole or the service rejects it first.
@@ -155,7 +163,6 @@ Epistole never sleeps and never retries.
   | `SMTPSenderRefused` `552` | `RejectedError` |
   | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
   | `SMTPAuthenticationError`, `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth` | `AuthenticationError` |
-  | `SMTPNotSupportedError` from `send_message`, meaning a non-ASCII address and no `SMTPUTF8` | `RejectedError` (ADR-0014) |
   | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors | `TransportError` |
   | `SMTPDataError` `5yz` | `RejectedError` |
   | `SMTPDataError` `4yz` | `ProviderError` |
@@ -163,12 +170,12 @@ Epistole never sleeps and never retries.
   | any other bare `SMTPException` | `ProviderError` |
 
   `SMTPRecipientsRefused` has no row.
-  `SMTPTransport` catches it and returns its `.recipients` as ordinary refusal data.
+  `_SMTPTransport` catches it and returns its `.recipients` as ordinary refusal data.
   `Connection.send` raises `RecipientsRefusedError` when every recipient was refused.
   So the rule holds on every backend, including the doubles (ADR-0015).
   `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients.
   A repeated addr-spec breaks that count, so `smtplib` sends `DATA` anyway and raises on the server's reply.
-  So `SMTPTransport` names each addr-spec once.
+  So `_SMTPTransport` names each addr-spec once.
   `login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, such as a server that offers only NTLM.
   No retry changes that, so it is `AuthenticationError`, as the catch-all Gmail `403` below is.
   As a `ProviderError` it would be in the transient set.
@@ -188,6 +195,9 @@ Epistole never sleeps and never retries.
   | `5xx` | `ProviderError` |
   | network failure | `TransportError` |
 
+  A reason in any entry of `errors[]` qualifies a row.
+  The throttle reasons are read first, then `domainPolicy`, so a `403` that names `authError` and `rateLimitExceeded` is `ThrottledError`.
+  Every reply Google documents holds one entry, and the worst case is one retry that then gets the permanent error.
   Gmail's catch-all `403` row matches Graph's.
   A `403` is permanent and permission-shaped, and `AuthenticationError` means exactly that.
   Leaving it to the table's `ProviderError` fallback would put a permanent failure in the transient set.

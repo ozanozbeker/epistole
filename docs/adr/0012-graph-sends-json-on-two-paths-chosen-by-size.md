@@ -1,6 +1,6 @@
 # The Graph backend sends JSON on every request and picks one of two paths by encoded size
 
-`GraphTransport` sends JSON to Microsoft Graph on every request and never uses the `text/plain` MIME form.
+`_GraphTransport` sends JSON to Microsoft Graph on every request and never uses the `text/plain` MIME form.
 Under 4 MB of encoded request, it calls `POST /users/{addr-spec}/sendMail`.
 Over that, it creates a JSON draft, adds each attachment by its own call, sends the draft, and deletes the draft if anything fails in between.
 The switch is automatic and has no constructor argument.
@@ -34,7 +34,7 @@ Neither path covers the other.
 An upload session for an attachment under 3 MB fails with `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize`.
 The draft path needs `Mail.ReadWrite` on top of `Mail.Send`.
 Shipping the `sendMail` path alone would cap Graph attachments near 2 MB, below one PDF report.
-`docs/choosing-a-backend.md` already documents 150 MB.
+The README's [Choosing a backend](../../README.md#choosing-a-backend) section already documents 150 MB.
 
 **The `sendMail` path uses JSON too, not MIME.**
 `sendMail` and `POST /users/{addr-spec}/messages` both accept the whole RFC 5322 message base64-encoded under `Content-Type: text/plain`, the bytes the SMTP backend writes.
@@ -115,7 +115,7 @@ It can be added later if a use appears.
   Whether Exchange keeps it needs a live test.
   ADR-0004 already defines `SendResult.message_id` as the id of the submission Epistole made, so the result changes documentation, not the contract.
 - **Inline images** are `fileAttachment` with `isInline: true` and a bare `contentId`, on both paths and in upload-session `AttachmentItem`s.
-- **Every size constant is private** to `GraphTransport`.
+- **Every size constant is private** to `_GraphTransport`.
   Microsoft writes "4 MB" and "3 MB" without defining the unit.
   3 MiB raw encodes above 4 MiB, so the attachment cut must be decimal.
   The request cap is taken conservatively.
@@ -153,7 +153,7 @@ It can be added later if a use appears.
 - Custom headers on Graph must start with `x-` at every size.
   [#27](https://github.com/ozanozbeker/epistole/issues/27) specified the surface for this inherited rule.
   `.headers(mapping)` sets them on the message.
-  `GraphTransport` raises `RejectedError` naming the offending custom header before it writes (ADR-0016).
+  `_GraphTransport` raises `RejectedError` naming the offending custom header before it writes (ADR-0016).
   `Importance` and read receipts cannot use it, because both are non-`x-`.
   Graph represents those meanings as the `importance` and `isReadReceiptRequested` properties instead.
   Neither gets a v1 surface.

@@ -8,6 +8,8 @@ No flag turns it off.
 The content id Epistole generates is a digest with no `@domain` part, against RFC 2045.
 Decided on [#11](https://github.com/ozanozbeker/epistole/issues/11), based on the prototype findings in [#8](https://github.com/ozanozbeker/epistole/issues/8).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the digest covers the media type as well as the bytes, so the content id is unique per dedupe key by construction.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a comment ends where HTML5 ends one, on every supported Python.
+Epistole strips only the C0 controls and spaces at the ends of a `src`, as a URL parser does.
 
 ## Why
 
@@ -49,12 +51,17 @@ No RFC records either bug.
   The constructor raises on a payload that does not decode.
   A `data:` URI in CSS `url()`, in `srcset`, or with a non-image media type stays as written.
   `cid:` inside CSS has no reliable client support, and no inline image can replace a stylesheet or a font.
+  Epistole strips only the C0 controls and spaces at the ends of a `src` before it reads the scheme, as the WHATWG URL parser does.
+  `str.strip()` would also strip U+00A0, so it would rewrite `src=" data:..."`, which a client reads as a relative URL.
 - **The output is byte-identical except the `src` values it rewrote.**
   The rewrite leaves quotes, whitespace, entities, attribute order, and comments untouched.
   Zero `data:` images means output identical to input.
   It locates each image with `html.parser.HTMLParser` and splices in place, never re-serializing.
   So it adds no dependency and no drift.
   The rewrite skips an `<img>` inside an HTML comment, including Outlook `<!--[if mso]>` blocks.
+  A comment ends at the first `-->` or `--!>`, or at once when written `<!-->` or `<!--->`, as HTML5 ends one.
+  `html.parser` does not end `<!-->` at once on 3.13.12 and does on 3.14.7, so Epistole's parser ends a comment itself.
+  So the same HTML makes the same inline images on every supported Python.
 - **The rewrite makes one inline image per distinct (media type, bytes).**
   A logo in the header and the footer is sent once.
   This is not the `.attach(x).attach(x)` rule.

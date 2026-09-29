@@ -13,6 +13,7 @@ Decided on [#13](https://github.com/ozanozbeker/epistole/issues/13).
 The verb moved from the message to the backend and connection on [#14](https://github.com/ozanozbeker/epistole/issues/14) (ADR-0006).
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): the backend-held list is `MemoryBackend.submissions`.
 `Connection.send` builds every send result from the `Submission` it built (ADR-0015).
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): `from_address` and `MemoryBackend.submissions` are read-only, so assigning either raises `AttributeError`.
 
 ## Why
 
@@ -71,6 +72,11 @@ Using Graph's four concurrent requests per mailbox takes four connections, not o
 - **A backend is not a context manager.**
   `with SMTPBackend(...)` is a `TypeError`.
   There is one way to get a connection, as with `Engine`.
+- **`from_address` and `MemoryBackend.submissions` are read-only properties.**
+  Assigning `from_address` would skip the ADR-0014 check that runs at construction.
+  Binding a new list to `submissions` would leave an open connection appending to the old one.
+  The list itself stays mutable, so `submissions.clear()` still empties it (ADR-0015).
+  Freezing the whole backend through `__setattr__`, as `Message` does, would break a subclass that sets its own attributes after `super().__init__()`.
 - **Copy `Engine`'s shape, not its internals.**
   There is no pool: `connect()` opens a real socket and `close()` closes it.
   A pool gives a report loop no benefit, and SMTP servers time idle sockets out.

@@ -17,6 +17,7 @@ Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP raises
 Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail write a message that holds a non-ASCII value with UTF-8 headers, so they write every value as the caller wrote it.
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): a subject or a value that holds a surrogate is a `ValueError`, because no backend sends one intact. ADR-0008, ADR-0014 and ADR-0018 apply the same rule to content, addresses and filenames.
 Amended on [#64](https://github.com/ozanozbeker/epistole/issues/64): `.headers()` raises `ValueError` on `Resent-Bcc`, because no backend sends it intact. The rule replaces the SMTP pre-check from #57.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a name or a value that is not a `str` is a `TypeError`, as every text argument is (ADR-0004).
 
 ## Why
 
@@ -132,7 +133,8 @@ A check left to each transport would let `MemoryBackend` pass a test for a messa
   Address lists already become tuples for the same reason.
 - **A legal name is one or more characters from printable ASCII 33 to 126, excluding colon.**
   This is RFC 5322 `ftext`.
-  Anything else is a `ValueError`, including an empty name.
+  Any other `str` is a `ValueError`, including an empty name.
+  A name that is not a `str` is a `TypeError` (ADR-0004).
 - **A legal value is a `str` holding no line break and no surrogate.**
   A line break is any character `str.splitlines()` splits on: `\r`, `\n`, `\v`, `\f`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\u2028`, and `\u2029`.
   `EmailMessage` raises on a value that `str.splitlines()` splits, tested on 3.13.12.
@@ -145,7 +147,8 @@ A check left to each transport would let `MemoryBackend` pass a test for a messa
   They write it as an `unknown-8bit` encoded-word, such as `=?unknown-8bit?q?=FF?=`.
   They did both on 3.13.12 and on 3.14.7.
   `unknown-8bit` names no charset, so a client can only guess what the byte meant.
-  Anything else is a `ValueError`.
+  Any other `str` is a `ValueError`.
+  A value that is not a `str` is a `TypeError` (ADR-0004).
   The character set is not otherwise checked, matching ADR-0014.
 - **A subject takes the same line-break and surrogate checks, in `.subject()`.**
   `EmailMessage` raises on a line break at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
@@ -182,7 +185,7 @@ A check left to each transport would let `MemoryBackend` pass a test for a messa
   For unstructured text, a caller who needs 7 bits passes an encoded-word they built, such as `email.header.Header("Café", "utf-8").encode()`.
   It is ASCII, so SMTP and Gmail write it as the caller wrote it.
   Graph sends every value as UTF-8 in JSON.
-- **`GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
+- **`_GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
   The check runs before it writes, on both the `sendMail` path and the draft path (ADR-0004, ADR-0012).
   The error names the offending header.
 - **Epistole caps neither the count nor the total size of custom headers.**

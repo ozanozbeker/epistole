@@ -10,6 +10,7 @@ Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the renderi
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): `Message-ID` and `Date` get their generators, and `MemoryBackend` records a submission only when at least one recipient is accepted.
 Amended on [#35](https://github.com/ozanozbeker/epistole/issues/35): a non-ASCII domain is IDNA-encoded before it is written into `message_id`.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): the rendering includes the from address, which the submission holds and the message does not. `ConsoleBackend` flushes the stream after each rendering.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a domain with an empty label, ASCII or not, is a `ValueError` at send, because it would make an invalid `msg-id`.
 
 ## Why
 
@@ -33,7 +34,7 @@ The rule no longer contradicts itself.
 **A double that records the real argument makes tests stronger.**
 Had `Submission` stayed local to `MemoryBackend`, its record would hold a shape no real transport ever receives.
 A passing test would then prove something about the double rather than about the send path.
-Recording the same type `SMTPTransport` and `GraphTransport` receive makes the double faithful instead of merely convenient.
+Recording the same type `_SMTPTransport` and `_GraphTransport` receive makes the double faithful instead of merely convenient.
 
 **The transport returns refusals, and the send result is built once.**
 ADR-0006 put the code that sets `Message-ID` and `Date` in one place with a plain argument: "A third-party backend that forgot it would send mail with no `Message-ID`."
@@ -97,6 +98,10 @@ The entries are `Submission` values, so the attribute name matches the type, as 
   For the same reason, the stdlib codec's IDNA 2003 folding does not matter.
   That folding turns `straße.de` into `strasse.de` rather than IDNA 2008's `xn--strae-oqa.de`.
   ADR-0014 is unchanged: it covers what Epistole checks, and this ADR covers what Epistole sets.
+  A domain with an empty label, ASCII or not, is a `ValueError` in `Connection.send`, such as `example..com` or `example.com.`.
+  RFC 5322 writes the `id-right` of a `msg-id` as a dot-atom, which holds no empty label.
+  ADR-0014's check passes such a domain, and the IDNA codec passes a trailing dot.
+  A 64-character ASCII label still passes, because a dot-atom sets no length.
   `date` is `email.utils.localtime()`: timezone-aware, with the sending machine's offset.
   A mail client writes the same, and a recipient reading a timestamp expects it.
 - **`Transport` is `submit(submission, /) -> Mapping[str, Refusal]` and `close() -> None`.**
@@ -106,7 +111,7 @@ The entries are `Submission` values, so the attribute name matches the type, as 
   It checks the message, builds the `Submission`, calls `submit`, then constructs the `SendResult` from the submission's `message_id` and `date` plus the returned mapping.
   A transport never constructs a `SendResult`.
 - **`Connection.send` alone raises `RecipientsRefusedError` when every recipient is refused.**
-  A transport returns refusals and never raises it, `SMTPTransport` included.
+  A transport returns refusals and never raises it, `_SMTPTransport` included.
   It catches `SMTPRecipientsRefused` and returns its `.recipients` as data.
   The rule moved here so that it holds on every backend, including the doubles (ADR-0004).
 - **`MemoryBackend.submissions` is a live `list[Submission]`.**

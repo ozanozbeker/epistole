@@ -10,6 +10,8 @@ Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): an address 
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers.
 Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail also write a message that holds a non-ASCII custom header value with UTF-8 headers (ADR-0016).
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): an address that holds a surrogate is a `ValueError` (ADR-0016), and `Address()` names the argument that holds one.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): an address, or an argument of `Address()`, that is not a `str` is a `TypeError` (ADR-0004).
+SMTP checks for `SMTPUTF8` itself on every message that needs UTF-8 headers, so ADR-0004's SMTP mapping loses the `SMTPNotSupportedError` row.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -107,9 +109,11 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   The helper formats what `formataddr` can format.
   The plain-string path accepts the rest.
   It checks `name` and `email` for a surrogate first, and its `ValueError` names the argument that holds one.
+  An argument that is not a `str` is a `TypeError` naming it (ADR-0004).
   `formataddr` raises the same `UnicodeEncodeError` for a surrogate in either argument, so only a check before it can name the right one.
 - **Epistole checks structure where the caller supplies the address**, in `.to()` and the other address methods and in a backend's constructor.
   A failure raises `ValueError` per ADR-0004.
+  An address that is not a `str` raises `TypeError` instead.
   A string passes when it holds no line break and no surrogate, `getaddresses` returns exactly one pair, its addr-spec is non-empty, and both halves of the addr-spec's last `@` are non-empty.
   A line break fails anywhere in the string, because `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
   A surrogate fails anywhere in the string, for the reasons ADR-0016 gives for a header value.
@@ -136,12 +140,15 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   `smtplib.send_message` asks the server for `SMTPUTF8` only when the envelope is not ASCII.
   When the envelope is ASCII but `Reply-To` or a custom header value needs UTF-8 headers, SMTP must ask for it too.
   Otherwise a server without `SMTPUTF8` receives UTF-8 headers, and the caller gets no error.
+  So SMTP checks that the server advertises `SMTPUTF8` before `send_message`, for every message that needs UTF-8 headers.
 - **`Connection.send` adds no check.**
   Its completeness checks stay as ADR-0006 and `CONTEXT.md` *Complete message* define them.
   A message cannot hold a structurally bad address, because the method that would have added one raised.
-- **ADR-0004's SMTP mapping gets one more row**: `SMTPNotSupportedError` from `send_message` maps to `RejectedError`, with the original as `__cause__`.
+- **A server without `SMTPUTF8` is `RejectedError` with `__cause__` `None`** (ADR-0010).
   The error is permanent against that server, and the message as written cannot be sent to it.
   `RejectedError` means exactly that.
+  SMTP runs the check itself, so `send_message` never raises `SMTPNotSupportedError` and ADR-0004's SMTP mapping has no row for it.
+  `smtplib` runs the same check for a non-ASCII envelope alone, and its error would add a native cause to one of the two cases.
 
 ## Considered options
 

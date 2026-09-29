@@ -14,6 +14,9 @@ Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): a test read
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): derived plain text may be empty, so the non-empty rule holds for `text=` alone.
 Amended on [#36](https://github.com/ozanozbeker/epistole/issues/36): `text=""` is allowed, because some callers send the subject alone.
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): content that holds a surrogate is a `ValueError`, and so is a `text_renderer` return that holds one (ADR-0016).
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): content or a `text_renderer` return that is not a `str` is a `TypeError` (ADR-0004).
+SMTP and Gmail write each line break as CRLF.
+The extractor's rules for links, table rows and `<head>` text are written out in full.
 
 ## Why
 
@@ -82,6 +85,7 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Both is a `TypeError`.
   `text=` may accompany either, or stand alone.
   `Message()` with no content is a `TypeError`.
+- **Content that is not a `str` is a `TypeError` at construction**, and the error names the keyword (ADR-0004).
 - **Content that holds a surrogate is a `ValueError` at construction**, whether it came as `html=`, `markdown=`, or `text=` (ADR-0016).
   SMTP, Gmail, and Graph raise `UnicodeEncodeError` on one at send, and `ConsoleBackend` raises on one in HTML.
   The error names the keyword that held it.
@@ -91,6 +95,11 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Epistole never checks it against the HTML, never merges, and never derives.
   `text=""` is allowed and sends empty plain text, because some callers put the whole message in the subject.
   It differs from `None`: with `html=`, `None` derives the plain text and `""` sends none.
+- **SMTP and Gmail write each line break as CRLF.**
+  `EmailMessage.set_content` writes each CR, LF, or CRLF in the plain text and the HTML as CRLF, and ends each part with one.
+  RFC 5322 section 2.3 allows a CR in a body only before an LF, so no RFC 5322 message holds a bare CR.
+  "Verbatim" in these rules means every other character.
+  Graph sends both as written, in JSON.
 - **Plain text from HTML is `text_renderer(rewritten_html)` when given, else `epistole.html_to_text(rewritten_html)`.**
   The renderer is `Callable[[str], str]` and runs once at construction.
   It is not stored on the value, so equality stays by content (ADR-0002).
@@ -98,7 +107,7 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Passing it with `text=` or with `markdown=` is a `TypeError`, because it would be silently ignored otherwise.
   An exception it raises propagates unwrapped at the line that built the message.
   It is not an `EpistoleError` (ADR-0004).
-  A return that is not a `str`, or that holds a surrogate, is a `ValueError`.
+  A return that is not a `str` is a `TypeError` (ADR-0004), and one that holds a surrogate is a `ValueError`.
   A return of `""` is not.
   The renderer replaces `html_to_text`, and `html_to_text` returns `""` for HTML with no text.
 - **Plain text from Markdown is the source, verbatim.**
@@ -116,8 +125,13 @@ It also keeps `html2text`'s licence with the caller who chose it.
 - **`epistole.html_to_text` is exported.**
   The default is visible, testable, and wrappable.
 - **The extractor is best effort, pinned by fixtures.**
-  It keeps links as `label <url>`, marks list items, and keeps one table row per line.
-  It drops `<head>`, `<style>`, `<script>`, `<title>`, and comments.
+  It writes a link as `label <url>`, or as its label alone when the label is the URL or the `mailto:` address, or when the `href` is a fragment such as `#top`.
+  It marks list items.
+  It writes a table row on one line when its cells hold only inline content.
+  A block or a `<br>` inside a cell starts a new line.
+  Email lays out most bodies in tables, and a cell there holds paragraphs, so the break keeps them apart.
+  It drops `<style>`, `<script>`, `<title>`, and comments.
+  It keeps other text in a `<head>`, such as a `<noscript>`, because HTML5 moves it into the body when scripting is off.
   It prints an image's alt text in brackets and decodes entities.
   It never raises on malformed HTML.
   The exact output is not a contract.

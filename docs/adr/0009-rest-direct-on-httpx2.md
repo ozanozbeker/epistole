@@ -19,6 +19,8 @@ Amended on [#52](https://github.com/ozanozbeker/epistole/issues/52): the Google 
 Epistole maps that reply by its status, so a `5xx` is `ProviderError`, as on Graph ([#54](https://github.com/ozanozbeker/epistole/issues/54)).
 Amended on [#55](https://github.com/ozanozbeker/epistole/issues/55): a token reply that `google-auth` or `msal` cannot read is `ProviderError`, with the library's exception as `__cause__`.
 The same classes raised before the library's auth adapter returns a reply stay unmapped.
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a reply nested too deeply for `json` is unreadable too, so `RecursionError` joins the five classes, in the error envelope readers as well.
+An exception from a caller's `TokenCredential` propagates unchanged.
 
 ## Why
 
@@ -127,12 +129,19 @@ It is token freshness, not the backoff policy #2 rules out.
   So is a field of the wrong type, such as `expires_in`, `scope` or `id_token`.
   Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError`.
   Measured on `google-auth` 2.57.1 and `msal` 1.38.0.
-  Each auth adapter counts the replies it returns, and Epistole maps those five classes only when the count increased during the library call.
+  A reply nested 10,000 levels deep makes `json` raise `RecursionError`, measured on 3.13.12, and 1,000 levels parse.
+  Each auth adapter counts the replies it returns, and Epistole maps those six classes only when the count increased during the library call.
   Before any reply, the same classes come from the caller's credential.
   `msal` raises `TypeError` for an encrypted PEM, and `AttributeError` for a public key passed as `private_key`.
   Those stay unmapped.
   The rule also covers a `GoogleAuthError` that subclasses one of the five, such as `MalformedError`.
   `google-auth` 2.57.1 raises none after a reply.
+- **An error body or a Graph draft reply that is too deeply nested to parse is unreadable too.**
+  An error body then maps by its status alone, and a draft or upload session reply is `ProviderError`.
+  So the mapper never raises on its own (ADR-0004).
+- **An exception from a caller's `TokenCredential` propagates unchanged.**
+  It is not a reply from the mail service, so no mapping table has a row for it.
+  `get_token` raises whatever its own library raises, so Epistole cannot tell a failure the credential reports from a bug in it.
 - **`__cause__` on the HTTP backends is as follows.**
 
   | Failure | `__cause__` | Epistole class |
@@ -198,12 +207,10 @@ It is token freshness, not the backoff policy #2 rules out.
   Each release exact-pins `httpcore2`.
 - The Google auth adapter rule depends on `google-auth` passing the adapter's `TransportError` out of its loop without a retry, as 2.57.1 does.
   A test that counts the token requests on a `503` fails on a release that changes this.
-- The unreadable-reply rule names the five classes measured on the replies above.
+- The unreadable-reply rule names the six classes measured on the replies above.
   A library release or an unmeasured reply can raise another class.
   That exception propagates unmapped.
   Each measured reply has a test that expects `ProviderError`, so a release that changes its class fails that test.
-- A token reply nested deeply enough raises `RecursionError`.
-  It stays unmapped here, as it does in the error envelope readers (#62).
 - `httpx2.TransportError` and `epistole.TransportError` share a name.
   Epistole imports `httpx2` as a module and never re-exports it.
 - Epistole raises an insufficient-scope error on the first `send`, not on `connect()`, as on SMTP.

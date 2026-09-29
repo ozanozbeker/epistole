@@ -15,6 +15,7 @@ Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): a filename 
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): a content id that is not ASCII is a `ValueError`.
 Amended on [#51](https://github.com/ozanozbeker/epistole/issues/51): an inferred `message/*` or `multipart/*` type falls back to `application/octet-stream`, and a `content_type=` of either is a `ValueError`.
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): a filename that holds a surrogate is a `ValueError` (ADR-0016).
+Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a filename, a content id, or a `content_type=` that is not a `str` is a `TypeError` (ADR-0004).
 
 ## Why
 
@@ -90,6 +91,7 @@ This does not amend ADR-0002's append rule.
 - **`source` is `Path`, `bytes`, or a binary file object with `.read()`.**
   `str` is a `TypeError` naming `Path()`.
   `bytearray`, `memoryview`, and a text-mode file are each a `TypeError`.
+- **A filename, a content id, or a `content_type=` that is not a `str` is a `TypeError`** that names it (ADR-0004).
 - **Bytes are read when the method is called.**
   A file object is read once and left open for the caller (ADR-0002).
 - **A `Path` supplies its own filename, and every other source needs `filename=`.**

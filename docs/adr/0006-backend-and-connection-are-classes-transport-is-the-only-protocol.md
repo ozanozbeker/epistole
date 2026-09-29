@@ -41,7 +41,7 @@ A backend author importing Epistole is normal, as Django backends import Django.
   The parameter is positional-only, so a third-party `submit(self, sub)` still matches (ADR-0015).
 - The abstract surface of `Backend` is `_open()` alone.
   Adding an abstract method later breaks every subclass, so nothing else is abstract.
-- `epistole` does not export the concrete transports, `SMTPTransport` and the rest.
+- `epistole` does not export the concrete transports, `_SMTPTransport` and the rest.
   Users never construct one.
 
 ## Considered options
