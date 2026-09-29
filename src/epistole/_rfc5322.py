@@ -21,11 +21,11 @@ def build(submission: Submission, /) -> EmailMessage:
     It holds `Bcc`, because Gmail sends to the addresses in `To`, `Cc`, and `Bcc`. `smtplib`'s `send_message` deletes that header before it writes, so SMTP sends to the bcc addresses without naming them.
     """
     message: Message = submission.message
-    # RFC 2047 forbids an encoded-word in an addr-spec, so a non-ASCII one needs UTF-8 headers (ADR-0014).
+    # RFC 2047 allows an encoded-word in a display name but not in an addr-spec, and Epistole keeps no table of which custom headers allow one (ADR-0014, ADR-0016).
     ascii_only: bool = all(
         addr_spec(one).isascii()
         for one in (submission.from_address, *message.recipients, *message.reply_to_)
-    )
+    ) and all(value.isascii() for value in message.headers_.values())
     # SMTP ends each line with CRLF. refold_source="none" writes a value stored with set_raw, the parser's API, as it stands.
     # With cte_type="7bit", EmailMessage writes non-ASCII text as quoted-printable or base64, so SMTP needs no BODY=8BITMIME (ADR-0020).
     mime = EmailMessage(
@@ -70,7 +70,7 @@ def build(submission: Submission, /) -> EmailMessage:
         )
 
     for name, value in message.headers_.items():
-        # Assigning writes an ASCII word too long to fold as an encoded-word, which breaks a List-Unsubscribe URL. With utf8 off, set_raw still encodes a non-ASCII value.
+        # Assigning writes an ASCII word too long to fold as an encoded-word, which breaks a List-Unsubscribe URL.
         mime.set_raw(name, value)
 
     return mime

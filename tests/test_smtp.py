@@ -1059,13 +1059,20 @@ def test_a_server_that_is_not_listening_is_a_transport_error(
 NON_ASCII = "用户@例子.广告"
 
 
-@pytest.mark.parametrize("method", ["to", "reply_to"])
+@pytest.mark.parametrize(
+    "sent",
+    [
+        pytest.param(message(NON_ASCII), id="to"),
+        pytest.param(message().reply_to(NON_ASCII), id="reply_to"),
+        pytest.param(message().headers({"Sender": NON_ASCII}), id="custom header"),
+    ],
+)
 def test_a_non_ascii_address_puts_smtputf8_in_mail_from_once(
-    serve: Callable[..., Server], method: str
+    serve: Callable[..., Server], sent: Message
 ):
     server = serve()
 
-    backend(server).send(getattr(message(), method)(NON_ASCII))
+    backend(server).send(sent)
 
     mail = server.commands[server.verbs().index("MAIL")]
     assert mail.count("SMTPUTF8") == 1
@@ -1073,23 +1080,36 @@ def test_a_non_ascii_address_puts_smtputf8_in_mail_from_once(
     assert NON_ASCII.encode() in server.messages[0]
 
 
-# smtplib checks a non-ASCII envelope itself, and Epistole checks the Reply-To case.
+# smtplib checks a non-ASCII envelope itself, and Epistole checks the rest.
 @pytest.mark.parametrize(
-    ("method", "cause"), [("to", SMTPNotSupportedError), ("reply_to", NoneType)]
+    ("sent", "cause", "reason"),
+    [
+        pytest.param(message(NON_ASCII), SMTPNotSupportedError, "SMTPUTF8", id="to"),
+        pytest.param(
+            message().reply_to(NON_ASCII), NoneType, "Reply-To", id="reply_to"
+        ),
+        pytest.param(
+            message().headers({"Sender": NON_ASCII}),
+            NoneType,
+            "custom header",
+            id="custom header",
+        ),
+    ],
 )
 @pytest.mark.parametrize(
     "replies", [{}, {"EHLO": "502 5.5.1 no"}], ids=["EHLO", "HELO"]
 )
 def test_a_non_ascii_address_without_smtputf8_is_rejected_before_mail_from(
     serve: Callable[..., Server],
-    method: str,
+    sent: Message,
     cause: type[BaseException | None],
+    reason: str,
     replies: dict[str, Reply],
 ):
     server = serve(replies, extensions=("8BITMIME",))
 
-    with pytest.raises(RejectedError) as caught:
-        backend(server).send(getattr(message(), method)(NON_ASCII))
+    with pytest.raises(RejectedError, match=reason) as caught:
+        backend(server).send(sent)
 
     assert type(caught.value.__cause__) is cause
     assert "MAIL" not in server.verbs()

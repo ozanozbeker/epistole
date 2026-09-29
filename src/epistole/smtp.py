@@ -286,7 +286,7 @@ class _SMTPTransport:
         ):
             # send_message adds SMTPUTF8 for a non-ASCII envelope alone, and sendmail drops every option after HELO (ADR-0014).
             if not self._smtp.has_extn("smtputf8"):
-                msg = "Reply-To holds a non-ASCII address, which requires SMTPUTF8. The server does not advertise SMTPUTF8."
+                msg = "The message needs SMTPUTF8, because Reply-To holds a non-ASCII address or a custom header holds a non-ASCII value. The server does not advertise SMTPUTF8."
                 raise RejectedError(msg)
 
             options = ("SMTPUTF8", "BODY=8BITMIME")

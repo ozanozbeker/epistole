@@ -234,11 +234,29 @@ def test_a_custom_header_value_too_long_to_fold_is_written_unchanged():
     )
 
 
-def test_a_non_ascii_custom_header_value_reads_back():
-    parsed = read_back(
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        pytest.param("Sender", NON_ASCII, id="address"),
+        pytest.param("In-Reply-To", "<abc@例子.广告>", id="message id"),
+        pytest.param("X-Campaign-Name", "Café d'automne", id="text"),
+    ],
+)
+def test_a_non_ascii_custom_header_value_is_written_in_utf_8(name: str, value: str):
+    message = Message(text="Weekly numbers").to("ada@example.com")
+
+    assert f"{name}: {value}".encode() in unfolded(message.headers({name: value}))
+
+
+def test_a_custom_header_value_the_caller_encoded_is_written_in_7_bits():
+    message = (
         Message(text="Weekly numbers")
         .to("ada@example.com")
-        .headers({"X-Campaign-Name": "Café d'automne"})
+        .subject("Café numbers")
+        .headers({"X-Campaign-Name": "=?utf-8?b?Q2Fmw6k=?="})
     )
 
-    assert parsed["X-Campaign-Name"] == "Café d'automne"
+    written = build(submission(message)).as_bytes()
+
+    assert written.isascii()
+    assert b"X-Campaign-Name: =?utf-8?b?Q2Fmw6k=?=" in written
