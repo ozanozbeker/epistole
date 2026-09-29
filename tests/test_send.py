@@ -1,10 +1,15 @@
 import base64
 import contextlib
+import dataclasses
+import inspect
 import io
 import re
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable, Iterator, Mapping
+from datetime import timedelta
 from email.message import EmailMessage
 from email.utils import format_datetime
+from functools import partial
 from pathlib import Path
 from typing import override
 
@@ -14,12 +19,18 @@ from epistole import (
     Backend,
     Connection,
     ConsoleBackend,
+    GmailBackend,
+    GraphBackend,
     MemoryBackend,
     Message,
     Refusal,
     SendResult,
+    SMTPBackend,
     Submission,
     Transport,
+    gmail,
+    graph,
+    smtp,
 )
 from epistole.exceptions import (
     EpistoleError,
@@ -29,6 +40,9 @@ from epistole.exceptions import (
 )
 
 REFUSED = Refusal(550, "No such mailbox")
+SERVICE_ACCOUNT = gmail.ServiceAccount(Path("key.json"), subject="reports@example.com")
+TENANT = "contoso.onmicrosoft.com"
+SECRET = graph.ClientSecret(TENANT, "epistole", "hunter2")
 
 
 def message(*recipients: str) -> Message:
@@ -90,9 +104,31 @@ class FakeBackend(Backend):
         return self.transport
 
 
+@pytest.fixture
+def india_standard_time() -> Iterator[None]:
+    """Set this process's local zone to UTC+05:30 for one test."""
+    # POSIX writes the offset west of UTC, so -5:30 is UTC+05:30. The string needs no tz database.
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("TZ", "IST-5:30")
+        time.tzset()
+        yield
+
+    time.tzset()
+
+
 # --- Backend -----------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    "build",
+    [
+        MemoryBackend,
+        partial(SMTPBackend, "smtp.example.com"),
+        partial(GmailBackend, credential=SERVICE_ACCOUNT),
+        partial(GraphBackend, credential=SECRET),
+    ],
+    ids=["MemoryBackend", "SMTPBackend", "GmailBackend", "GraphBackend"],
+)
 @pytest.mark.parametrize(
     "address",
     [
@@ -102,9 +138,42 @@ class FakeBackend(Backend):
         f"reports{chr(0xDCFF)}@example.com",
     ],
 )
-def test_a_backend_checks_its_from_address(address: str):
+def test_a_backend_checks_its_from_address(build: Callable[..., Backend], address: str):
     with pytest.raises(ValueError, match=re.escape(repr(address))):
-        MemoryBackend(from_address=address)
+        build(from_address=address)
+
+
+@pytest.mark.parametrize("backend", [SMTPBackend, GmailBackend, GraphBackend])
+def test_from_address_is_keyword_only(backend: type[Backend]):
+    parameter = inspect.signature(backend).parameters["from_address"]
+
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+@pytest.mark.parametrize(
+    ("credential", "field"),
+    [
+        (smtp.Password("reports", "hunter2"), "password"),
+        (smtp.OAuth("reports@example.com", SECRET), "credential"),
+        (SERVICE_ACCOUNT, "subject"),
+        (gmail.AuthorizedUser(Path("consent.json")), "path"),
+        (SECRET, "client_secret"),
+        (graph.Certificate(TENANT, "epistole", pfx=Path("app.pfx")), "pfx"),
+        (graph.ManagedIdentity(), "client_id"),
+    ],
+    ids=[
+        "Password",
+        "OAuth",
+        "ServiceAccount",
+        "AuthorizedUser",
+        "ClientSecret",
+        "Certificate",
+        "ManagedIdentity",
+    ],
+)
+def test_a_credential_is_frozen(credential: object, field: str):
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(credential, field, None)
 
 
 @pytest.mark.parametrize("double", [MemoryBackend, ConsoleBackend])
@@ -190,12 +259,17 @@ def test_leaving_the_with_closes_the_connection():
     assert backend.transport.closes == 1
 
 
-def test_send_after_close_raises():
+@pytest.mark.parametrize(
+    "sent",
+    [message(), Message(text="Weekly numbers")],
+    ids=["complete", "no recipient"],
+)
+def test_send_after_close_raises(sent: Message):
     connection = FakeBackend().connect()
     connection.close()
 
     with pytest.raises(ValueError, match="closed"):
-        connection.send(message())
+        connection.send(sent)
 
 
 def test_re_entry_after_close_raises():
@@ -322,6 +396,13 @@ def test_the_message_id_takes_its_domain_from_the_from_address():
 
 def test_the_date_is_timezone_aware():
     assert MemoryBackend().send(message()).date.utcoffset() is not None
+
+
+def test_the_date_carries_the_sending_machines_offset(india_standard_time: None):
+    # On a machine in UTC, datetime.now(UTC) gives the same offset, so the fixture sets another zone.
+    date = MemoryBackend().send(message()).date
+
+    assert date.utcoffset() == timedelta(hours=5, minutes=30)
 
 
 def test_sending_one_message_twice_makes_two_ids():
@@ -663,8 +744,13 @@ def test_a_generated_message_id_serializes_to_bytes():
     assert result.message_id.encode() in built.as_bytes()
 
 
-def test_a_domain_the_codec_cannot_encode_raises():
-    backend = MemoryBackend(from_address=f"ada@{'例' * 64}.com")
+@pytest.mark.parametrize(
+    "domain",
+    [f"{'例' * 64}.com", "例子..广告"],
+    ids=["label over 63 characters", "empty label"],
+)
+def test_a_domain_the_codec_cannot_encode_raises(domain: str):
+    backend = MemoryBackend(from_address=f"ada@{domain}")
 
     with pytest.raises(ValueError, match="Message-ID"):
         backend.send(message())

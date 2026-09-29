@@ -14,6 +14,10 @@ from epistole import exceptions, gmail, graph, smtp
 
 SPEC = Path(__file__).parents[1] / "docs" / "spec.md"
 EXPORTS = re.compile(r"^# (epistole\S*)\n__all__ = (\[.*?\])", re.MULTILINE | re.DOTALL)
+REQUIREMENT = re.compile(
+    r"(?P<name>[\w.-]+(?:\[[\w,]+\])?)[^;]*; extra == '(?P<extra>\w+)'"
+)
+"""Match one requirement in the metadata: its name with any extras, then the extra that installs it."""
 
 
 def test_the_package_imports():
@@ -42,6 +46,33 @@ def test_every_dependency_belongs_to_an_extra():
     requirements = importlib.metadata.requires("epistole") or []
 
     assert all("extra ==" in requirement for requirement in requirements)
+
+
+def test_each_extra_installs_the_packages_the_spec_lists():
+    # The dev group installs every extra, so only the metadata shows a package missing from one.
+    installs: dict[str, set[str]] = {}
+    for requirement in importlib.metadata.requires("epistole") or []:
+        match = REQUIREMENT.fullmatch(requirement)
+        assert match is not None, requirement
+        installs.setdefault(match["extra"], set()).add(match["name"])
+
+    assert installs == {
+        "gmail": {"google-auth", "httpx2"},
+        "graph": {"httpx2", "msal"},
+        "markdown": {"markdown-it-py"},
+        "all": {"epistole[gmail,graph,markdown]"},
+    }
+
+
+def test_epistole_re_exports_no_error_class_and_not_httpx2():
+    bound = vars(epistole)
+
+    assert "httpx2" not in bound
+    assert [
+        name
+        for name, value in bound.items()
+        if isinstance(value, type) and issubclass(value, BaseException)
+    ] == []
 
 
 @pytest.mark.parametrize("module", [epistole, exceptions])

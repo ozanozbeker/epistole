@@ -224,11 +224,12 @@ def test_text_renderer_with_markdown_raises():
         Message(markdown="Weekly numbers", text_renderer=lambda _: "Rendered")
 
 
-def test_text_renderer_with_text_raises():
+@pytest.mark.parametrize("text", ["Weekly numbers", ""], ids=["text", "empty text"])
+def test_text_renderer_with_text_raises(text: str):
     with pytest.raises(TypeError, match="text_renderer="):
         Message(
             html="<p>Weekly numbers</p>",
-            text="Weekly numbers",
+            text=text,
             text_renderer=lambda _: "Rendered",
         )
 
@@ -554,6 +555,7 @@ def test_content_type_overrides_the_inferred_one():
         "csv",
         "text/",
         "text/csv\r\nBcc: eve@example.com",
+        "text/csvé",
     ],
 )
 def test_content_type_must_be_a_media_type_without_parameters(content_type: str):
@@ -663,6 +665,13 @@ def test_embed_raises_on_a_content_id_the_message_already_holds(data: bytes):
 
     with pytest.raises(ValueError, match=re.escape("'logo.png'")):
         message.embed(data, cid="logo.png")
+
+
+def test_embed_raises_on_a_content_id_the_data_rewrite_made():
+    cid = content_id_of(PNG)
+
+    with pytest.raises(ValueError, match=re.escape(repr(cid))):
+        Message(html=f'<img src="{CHART}">').embed(PNG, cid=cid)
 
 
 @pytest.mark.parametrize("method", ["attach", "embed"])
@@ -811,6 +820,12 @@ def test_a_data_image_becomes_an_inline_image():
         ),
         (CHART[:30] + "\n  " + CHART[30:], "image/png", PNG),
         (CHART.rstrip("="), "image/png", PNG),
+        # RFC 2397 puts ;base64 last, so a payload after any other parameter is percent-encoded.
+        (
+            CHART.replace(";base64", ";base64;name=chart.png"),
+            "image/png",
+            base64.b64encode(PNG),
+        ),
     ],
 )
 def test_a_data_image_decodes_either_payload_form(
@@ -843,6 +858,7 @@ def test_the_rewrite_changes_nothing_but_the_src_values():
         f'<img srcset="{CHART} 2x" src="cid:logo.png">',
         f'<img data-src="{CHART}">',
         '<img src="data:text/plain;base64,aGk=">',
+        '<img src="data:image/;base64,aGk=">',
     ],
 )
 def test_a_data_uri_that_is_not_an_img_src_image_stays_as_written(html: str):
@@ -949,6 +965,14 @@ def test_messages_differing_in_headers_are_not_equal():
 
     assert tagged != base
     assert tagged != base.headers({"X-Campaign-Id": "spring"})
+
+
+def test_messages_differing_in_header_order_are_not_equal():
+    base = Message(text="hi")
+
+    assert base.headers({"X-Campaign-Id": "autumn", "X-Segment": "b"}) != base.headers(
+        {"X-Segment": "b", "X-Campaign-Id": "autumn"}
+    )
 
 
 def test_headers_replaces_the_whole_set():

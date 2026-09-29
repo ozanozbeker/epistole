@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from google.auth.exceptions import RefreshError
 
-from epistole import GmailBackend, Message, TokenCredential, gmail, smtp
+from epistole import GmailBackend, Message, Submission, TokenCredential, gmail, smtp
 from epistole.exceptions import (
     AuthenticationError,
     EpistoleError,
@@ -41,6 +41,7 @@ class Google:
         self.replies: dict[str, list[Reply]] = {}
         self.requests: list[httpx2.Request] = []
         self.clients: list[httpx2.Client] = []
+        self.options: list[dict[str, Any]] = []
         self._issued = 0
 
     def sent(self) -> list[httpx2.Request]:
@@ -77,6 +78,7 @@ def google(monkeypatch: pytest.MonkeyPatch) -> Google:
     build = httpx2.Client
 
     def client(**options: Any) -> httpx2.Client:
+        fake.options.append(options)
         fake.clients.append(build(transport=httpx2.MockTransport(fake), **options))
         return fake.clients[-1]
 
@@ -171,6 +173,16 @@ def message(*recipients: str) -> Message:
     return built.to(*recipients) if recipients else built.to("ada@example.com")
 
 
+def submission(message: Message) -> Submission:
+    """Wrap `message` as `Connection.send` would, with a fixed id and date."""
+    return Submission(
+        message=message,
+        from_address="reports@example.com",
+        message_id="<179021486392.66219.11904006491029159968@example.com>",
+        date=datetime(2026, 9, 23, 21, 54, 23, tzinfo=UTC),
+    )
+
+
 def raw(request: httpx2.Request) -> bytes:
     """Return the RFC 5322 bytes a send request carries."""
     return base64.urlsafe_b64decode(json.loads(request.content)["raw"])
@@ -196,9 +208,21 @@ def test_a_send_posts_the_message_as_base64url_raw(
     [request] = google.sent()
     assert request.method == "POST"
     assert request.headers["Authorization"] == "Bearer token-1"
+    assert request.headers["Content-Type"] == "application/json"
     assert f"Message-ID: {result.message_id}".encode() in raw(request)
     assert b"Bcc: cleo@example.com" in raw(request)
     assert result.refused == {}
+
+
+def test_raw_uses_the_url_safe_alphabet(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    # Three ? in a row put one at every offset modulo 3, so standard base64 would write a /.
+    backend(service_account).send(message().subject("Weekly numbers???"))
+
+    encoded = json.loads(google.sent()[0].content)["raw"]
+    assert "/" not in encoded
+    assert "+" not in encoded
 
 
 # --- Pre-checks --------------------------------------------------------------
@@ -241,6 +265,26 @@ def test_the_size_check_measures_the_bytes_sent_rather_than_estimating(
     backend(service_account).send(Message(text=text).to("ada@example.com"))
 
     assert len(raw(google.sent()[0])) > len(text)
+
+
+def test_the_size_check_takes_36_700_160_bytes_and_rejects_one_more(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    # Connection.send sets a Message-ID whose length varies, so this pins one on a submission.
+    transport = backend(service_account)._open()
+    empty = Message(text="").subject("Weekly numbers").to("ada@example.com")
+    transport.submit(submission(empty))
+    # A line of n characters is n + 2 bytes with its CRLF, and an empty text is one CRLF.
+    lines, rest = divmod(36_700_160 - len(raw(google.sent()[0])), 79)
+    text = ("x" * 77 + "\n") * lines + "x" * rest + "\n"
+    at_cap = Message(text=text).to("ada@example.com")
+
+    transport.submit(submission(at_cap.subject("Weekly numbers")))
+    with pytest.raises(RejectedError, match="36,700,161"):
+        transport.submit(submission(at_cap.subject("Weekly numbers!")))
+
+    assert len(raw(google.sent()[1])) == 36_700_160
+    assert len(google.sent()) == 2
 
 
 # --- Credentials -------------------------------------------------------------
@@ -345,6 +389,15 @@ def test_every_request_times_out_after_60_seconds(
     assert google.clients[0].timeout == httpx2.Timeout(60)
 
 
+def test_the_client_takes_proxy_and_ca_settings_from_the_environment(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    # httpx2 reads both by default. MockTransport ignores verify=, so this checks that the client takes no other argument.
+    backend(service_account).connect()
+
+    assert google.options == [{"timeout": 60}]
+
+
 # --- Refreshing on 401 -------------------------------------------------------
 
 
@@ -427,6 +480,19 @@ def test_each_request_gets_its_own_401_retry(
             id="403 outside Google's envelope",
         ),
         pytest.param(
+            httpx2.Response(400, json={}), RejectedError, id="400 JSON without error"
+        ),
+        pytest.param(
+            httpx2.Response(403, json={"error": "denied"}),
+            AuthenticationError,
+            id="403 JSON whose error is a string",
+        ),
+        pytest.param(
+            httpx2.Response(403, json={"error": {"errors": 5}}),
+            AuthenticationError,
+            id="403 JSON whose errors is a number",
+        ),
+        pytest.param(
             error(403, "rateLimitExceeded"), ThrottledError, id="403 rateLimitExceeded"
         ),
         pytest.param(
@@ -463,6 +529,18 @@ def test_a_reply_maps_to_its_row(
     assert type(caught.value) is expected
     assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
+
+
+def test_the_transport_raises_its_error_with_backend_unset(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    google.replies[SEND] = [error(500, "backendError")]
+    transport = backend(service_account)._open()
+
+    with pytest.raises(ProviderError) as caught:
+        transport.submit(submission(message()))
+
+    assert caught.value.backend is None
 
 
 @pytest.mark.parametrize(

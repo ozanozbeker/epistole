@@ -69,6 +69,7 @@ class Microsoft:
         self.replies: dict[str, list[Reply]] = {}
         self.requests: list[httpx2.Request] = []
         self.clients: list[httpx2.Client] = []
+        self.options: list[dict[str, Any]] = []
         self._issued = 0
 
     def sent(self) -> list[httpx2.Request]:
@@ -136,6 +137,7 @@ def microsoft(monkeypatch: pytest.MonkeyPatch) -> Microsoft:
     build = httpx2.Client
 
     def client(**options: Any) -> httpx2.Client:
+        fake.options.append(options)
         fake.clients.append(build(transport=httpx2.MockTransport(fake), **options))
         return fake.clients[-1]
 
@@ -282,6 +284,29 @@ def test_a_send_posts_one_sendmail_request_to_the_from_mailbox(
     assert result.refused == {}
 
 
+def test_every_request_with_a_body_to_graph_is_json(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    with backend(secret).connect() as connection:
+        connection.send(message())
+        connection.send(
+            message()
+            .attach(bytes(3_000_000), filename="numbers.bin")
+            .attach(b"%PDF-1.7", filename="notes.pdf")
+        )
+
+    assert {
+        url(one): one.headers.get("Content-Type")
+        for one in microsoft.requests
+        if url(one).startswith(MAILBOX) and one.content
+    } == {
+        SEND_MAIL: "application/json",
+        DRAFTS: "application/json",
+        f"{DRAFT}/attachments": "application/json",
+        f"{DRAFT}/attachments/createUploadSession": "application/json",
+    }
+
+
 def test_the_mailbox_is_the_from_address_percent_encoded_into_the_path(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
@@ -392,16 +417,29 @@ def test_a_custom_header_not_starting_with_x_is_rejected_naming_it(
     assert len(microsoft.sent()) == 1
 
 
+@pytest.mark.parametrize(
+    ("method", "filename"),
+    [("attach", "archive.zip"), ("embed", "chart.png")],
+    ids=["attachment", "inline image"],
+)
 def test_an_attachment_over_150_000_000_bytes_is_rejected_before_writing(
-    microsoft: Microsoft, secret: graph.ClientSecret
+    microsoft: Microsoft, secret: graph.ClientSecret, method: str, filename: str
 ):
-    archive = message().attach(bytes(150_000_001), filename="archive.zip")
+    oversized = getattr(message(), method)(bytes(150_000_001), filename=filename)
 
     with pytest.raises(RejectedError, match="150,000,001") as caught:
-        backend(secret).send(archive)
+        backend(secret).send(oversized)
 
     assert caught.value.__cause__ is None
     assert microsoft.calls() == []
+
+
+def test_an_attachment_of_exactly_150_000_000_bytes_goes_out(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    backend(secret).send(message().attach(bytes(150_000_000), filename="archive.zip"))
+
+    assert microsoft.calls()[-1] == ("POST", f"{DRAFT}/send")
 
 
 def test_a_body_of_4_000_000_bytes_or_more_goes_out_through_a_draft(
@@ -857,6 +895,23 @@ def test_connect_gets_a_token_on_one_client_and_requests_no_mail_endpoint(
     assert microsoft.clients[0].is_closed
 
 
+def test_every_request_times_out_after_60_seconds(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    backend(secret).connect()
+
+    assert microsoft.clients[0].timeout == httpx2.Timeout(60)
+
+
+def test_the_client_takes_proxy_and_ca_settings_from_the_environment(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    # httpx2 reads both by default. MockTransport ignores verify=, so this checks that the client takes no other argument.
+    backend(secret).connect()
+
+    assert microsoft.options == [{"timeout": 60}]
+
+
 def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
@@ -1022,6 +1077,25 @@ def test_a_tenant_that_does_not_exist_raises_msals_value_error(
         backend(secret).connect()
 
 
+def test_a_pfx_with_the_wrong_passphrase_raises_msals_value_error(
+    microsoft: Microsoft, pfx: Path
+):
+    certificate = graph.Certificate(TENANT, "epistole", pfx=pfx, passphrase="wrong")  # noqa: S106
+
+    with pytest.raises(ValueError, match="PKCS12"):
+        backend(certificate).connect()
+
+
+def test_a_pfx_that_is_not_pkcs_12_raises_msals_value_error(
+    microsoft: Microsoft, tmp_path: Path
+):
+    path = tmp_path / "epistole.pfx"
+    path.write_bytes(b"not a PKCS #12 file")
+
+    with pytest.raises(ValueError, match="PKCS12"):
+        backend(graph.Certificate(TENANT, "epistole", pfx=path)).connect()
+
+
 # --- Refreshing on 401 -------------------------------------------------------
 
 
@@ -1118,6 +1192,17 @@ def test_a_failed_token_request_after_a_401_maps_as_it_does_on_connect(
             AuthenticationError,
             id="403 outside Graph's envelope",
         ),
+        pytest.param(
+            httpx2.Response(400, json={}), RejectedError, id="400 JSON without error"
+        ),
+        pytest.param(
+            httpx2.Response(403, json={"error": "denied"}),
+            AuthenticationError,
+            id="403 JSON whose error is a string",
+        ),
+        pytest.param(
+            httpx2.Response(403, json=[]), AuthenticationError, id="403 JSON array"
+        ),
         pytest.param(error(429, "TooManyRequests"), ThrottledError, id="429"),
         pytest.param(
             error(400, "ErrorSendAsDenied"), RejectedError, id="400 qualified"
@@ -1145,6 +1230,18 @@ def test_a_reply_maps_to_its_row(
     assert type(caught.value) is expected
     assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
+
+
+def test_the_transport_raises_its_error_with_backend_unset(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[SEND_MAIL] = [error(500, "InternalServerError")]
+    transport = backend(secret)._open()
+
+    with pytest.raises(ProviderError) as caught:
+        transport.submit(submission(message()))
+
+    assert caught.value.backend is None
 
 
 def test_a_429_carries_its_retry_after(

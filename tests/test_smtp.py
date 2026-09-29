@@ -9,8 +9,10 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from smtplib import (
+    SMTP,
     SMTPAuthenticationError,
     SMTPConnectError,
     SMTPDataError,
@@ -31,7 +33,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from epistole import Message, Refusal, SMTPBackend, gmail, graph, smtp
+from epistole import Message, Refusal, SMTPBackend, Submission, gmail, graph, smtp
 from epistole.exceptions import (
     AuthenticationError,
     EpistoleError,
@@ -58,7 +60,7 @@ type Reply = str | bytes | None
 class Server:
     """A scripted SMTP server on 127.0.0.1 that records each command and message it receives.
 
-    `replies` maps a verb, `RCPT` plus an addr-spec, `greeting`, or `.` for the end of the data, to a reply that replaces the default. A `None` reply closes the socket unanswered, and a `421` reply closes it after replying. `tls` answers `STARTTLS`, or with `implicit` starts TLS on connect.
+    `replies` maps a verb, `RCPT` plus an addr-spec, `greeting`, or `.` for the end of the data, to a reply that replaces the default. A `None` reply closes the socket unanswered, and a `421` reply closes it after replying. `tls` answers `STARTTLS`, or with `implicit` starts TLS on connect. `upgraded` replaces the extensions offered once `STARTTLS` has started TLS.
     """
 
     def __init__(
@@ -66,11 +68,13 @@ class Server:
         replies: dict[str, Reply] | None = None,
         *,
         extensions: tuple[str, ...] = EXTENSIONS,
+        upgraded: tuple[str, ...] | None = None,
         tls: ssl.SSLContext | None = None,
         implicit: bool = False,
     ) -> None:
         self.replies = replies or {}
         self.extensions = extensions
+        self.upgraded = upgraded
         self.tls = tls
         self.implicit = implicit
         self.commands: list[str] = []
@@ -119,8 +123,10 @@ class Server:
                         sock = self.tls.wrap_socket(sock, server_side=True)
                         reader = sock.makefile("rb")
                         # RFC 3207: a server offers no STARTTLS once TLS is up.
-                        extensions = tuple(
-                            one for one in extensions if one != "STARTTLS"
+                        extensions = (
+                            tuple(one for one in extensions if one != "STARTTLS")
+                            if self.upgraded is None
+                            else self.upgraded
                         )
                     elif verb == "DATA" and reply.startswith(b"354"):
                         data = b""
@@ -234,6 +240,16 @@ def message(*recipients: str) -> Message:
     return built.to(*recipients) if recipients else built.to("ada@example.com")
 
 
+def submission(message: Message) -> Submission:
+    """Wrap `message` as `Connection.send` would, with a fixed id and date."""
+    return Submission(
+        message=message,
+        from_address="reports@example.com",
+        message_id="<179021486392.66219.11904006491029159968@example.com>",
+        date=datetime(2026, 9, 23, 21, 54, 23, tzinfo=UTC),
+    )
+
+
 class AccessToken(NamedTuple):
     """The shape `azure.core.credentials.AccessToken` defines."""
 
@@ -261,6 +277,7 @@ class Issuer:
     def __init__(self) -> None:
         self.requests: list[httpx2.Request] = []
         self.clients: list[httpx2.Client] = []
+        self.options: list[dict[str, Any]] = []
         self.failure: httpx2.Response | Exception | None = None
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
@@ -298,6 +315,7 @@ def issuer(monkeypatch: pytest.MonkeyPatch) -> Issuer:
     build = httpx2.Client
 
     def client(**options: Any) -> httpx2.Client:
+        fake.options.append(options)
         fake.clients.append(build(transport=httpx2.MockTransport(fake), **options))
         return fake.clients[-1]
 
@@ -401,6 +419,30 @@ def test_a_sender_header_does_not_change_the_envelope(serve: Callable[..., Serve
     backend(server).send(message().headers({"Sender": "eve@example.com"}))
 
     assert server.commands[1].startswith("mail from:<reports@example.com>")
+
+
+def test_mail_from_carries_the_size_when_the_server_offers_it(
+    serve: Callable[..., Server],
+):
+    server = serve()
+
+    backend(server).send(message())
+
+    assert " size=" in server.commands[server.verbs().index("MAIL")]
+
+
+@pytest.mark.parametrize("security", ["none", "tls"])
+def test_every_socket_operation_times_out_after_60_seconds(
+    serve: Callable[..., Server], tls: ssl.SSLContext, trusted: None, security: str
+):
+    server = serve(tls=tls, implicit=security == "tls")
+    transport = backend(server, security=security)._open()
+    assert isinstance(transport, smtp._SMTPTransport)
+
+    sock = transport._smtp.sock
+    assert sock is not None
+    assert sock.gettimeout() == 60
+    transport.close()
 
 
 # --- Pre-checks --------------------------------------------------------------
@@ -571,6 +613,39 @@ def test_oauth_over_an_authorized_user_requests_the_gmail_smtp_scope(
 
     [token] = issuer.requests
     assert parse_qs(token.content.decode())["scope"] == [GMAIL]
+
+
+@pytest.mark.parametrize("fixture", ["secret", "service_account"])
+def test_the_token_request_times_out_after_60_seconds(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    request: pytest.FixtureRequest,
+    fixture: str,
+):
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
+
+    backend(serve(), credential=oauth).connect().close()
+
+    assert [one.timeout for one in issuer.clients] == [httpx2.Timeout(60)]
+
+
+@pytest.mark.parametrize("fixture", ["secret", "service_account"])
+def test_the_token_client_takes_proxy_and_ca_settings_from_the_environment(
+    serve: Callable[..., Server],
+    issuer: Issuer,
+    request: pytest.FixtureRequest,
+    fixture: str,
+):
+    # httpx2 reads both by default. MockTransport ignores verify=, so this checks that the client takes no other argument.
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
+
+    backend(serve(), credential=oauth).connect().close()
+
+    assert issuer.options == [{"timeout": 60}]
 
 
 @pytest.mark.parametrize(
@@ -765,6 +840,23 @@ def test_starttls_upgrades_before_it_authenticates(
     ]
 
 
+def test_oauth_reads_the_mechanisms_offered_after_starttls(
+    serve: Callable[..., Server], tls: ssl.SSLContext, trusted: None
+):
+    # Office 365 offers AUTH only once TLS is up.
+    server = serve(
+        extensions=("8BITMIME", "STARTTLS"),
+        upgraded=("8BITMIME", "AUTH XOAUTH2"),
+        tls=tls,
+    )
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=Credential(), scope=OUTLOOK
+    )
+
+    with backend(server, security="starttls", credential=oauth).connect():
+        assert server.commands[-1] == XOAUTH2
+
+
 def test_starttls_raises_when_the_server_does_not_offer_it(
     serve: Callable[..., Server],
 ):
@@ -946,6 +1038,13 @@ CLOSING = "421 4.3.2 closing"
             id="another code at MAIL FROM",
         ),
         pytest.param(
+            {"replies": {"MAIL": "451 4.7.1 try again later"}},
+            {},
+            SMTPSenderRefused,
+            SenderRefusedError,
+            id="4yz at MAIL FROM",
+        ),
+        pytest.param(
             {"replies": {"AUTH": "535 5.7.8 rejected"}},
             {"credential": PASSWORD},
             SMTPAuthenticationError,
@@ -1042,6 +1141,49 @@ def test_a_native_failure_maps_to_its_row(
     assert caught.value.backend is configured
 
 
+def test_a_421_at_rcpt_after_an_earlier_refusal_is_a_transport_error(
+    serve: Callable[..., Server],
+):
+    server = serve(
+        {
+            "RCPT ada@example.com": "550 5.1.1 No such user",
+            "RCPT bob@example.com": CLOSING,
+        }
+    )
+
+    with pytest.raises(TransportError, match="421") as caught:
+        backend(server).send(message("ada@example.com", "bob@example.com"))
+
+    assert type(caught.value.__cause__) is SMTPRecipientsRefused
+
+
+def test_a_bare_smtp_exception_from_send_message_is_a_provider_error(
+    serve: Callable[..., Server], monkeypatch: pytest.MonkeyPatch
+):
+    # smtplib raises a bare SMTPException only from login and auth, so this injects one.
+    def fail(*_: object, **__: object) -> None:
+        raise SMTPException
+
+    monkeypatch.setattr(SMTP, "send_message", fail)
+
+    with pytest.raises(ProviderError) as caught:
+        backend(serve()).send(message())
+
+    assert type(caught.value.__cause__) is SMTPException
+
+
+def test_the_transport_raises_its_error_with_backend_unset(
+    serve: Callable[..., Server],
+):
+    transport = backend(serve({".": "554 5.7.1 looks like spam"}))._open()
+
+    with pytest.raises(RejectedError) as caught:
+        transport.submit(submission(message()))
+
+    assert caught.value.backend is None
+    transport.close()
+
+
 def test_a_server_that_is_not_listening_is_a_transport_error(
     serve: Callable[..., Server],
 ):
@@ -1078,6 +1220,19 @@ def test_a_non_ascii_address_puts_smtputf8_in_mail_from_once(
     assert mail.count("SMTPUTF8") == 1
     assert mail.count("BODY=8BITMIME") == 1
     assert NON_ASCII.encode() in server.messages[0]
+
+
+def test_a_non_ascii_body_under_ascii_headers_goes_out_in_7_bits(
+    serve: Callable[..., Server],
+):
+    server = serve()
+
+    backend(server).send(Message(text="Café au lait").to("ada@example.com"))
+
+    mail = server.commands[server.verbs().index("MAIL")]
+    assert "BODY=8BITMIME" not in mail
+    assert "SMTPUTF8" not in mail
+    assert server.messages[0].isascii()
 
 
 # smtplib checks a non-ASCII envelope itself, and Epistole checks the rest.
