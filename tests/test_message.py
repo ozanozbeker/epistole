@@ -5,6 +5,7 @@ import mimetypes
 import re
 import sys
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote_from_bytes
 
 import pytest
@@ -37,6 +38,15 @@ CHART = data_uri(PNG)
 
 LINE_BREAKS = "\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029"
 """The line boundaries str.splitlines() documents, each of which EmailMessage raises on."""
+
+SURROGATES = (
+    chr(0xD800),
+    chr(0xDC80),
+    chr(0xDCFF),
+    chr(0xDFFF),
+    chr(0xD83D) + chr(0xDE00),
+)
+"""os.fsdecode writes U+DC80 to U+DCFF. SMTP and Gmail send that range as an unknown-8bit encoded-word instead of raising (ADR-0016). A pair fails like a lone surrogate."""
 
 GOOD = (
     "ada@example.com",
@@ -120,8 +130,30 @@ def test_text_renderer_returning_a_non_str_raises():
         Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: b"Rendered")  # pyrefly: ignore
 
 
+@pytest.mark.parametrize("surrogate", SURROGATES)
+def test_text_renderer_returning_a_surrogate_raises(surrogate: str):
+    with pytest.raises(ValueError, match="text_renderer= returned holds the surrogate"):
+        Message(html="<p>Weekly</p>", text_renderer=lambda _: f"Weekly{surrogate}")
+
+
 def test_text_renderer_may_return_empty_text():
     assert Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: "").text == ""
+
+
+@pytest.mark.parametrize("keyword", ["html", "markdown", "text"])
+@pytest.mark.parametrize("surrogate", SURROGATES)
+def test_content_holding_a_surrogate_raises_naming_its_keyword(
+    keyword: str, surrogate: str
+):
+    content: dict[str, Any] = {keyword: f"Weekly{surrogate}numbers"}
+
+    with pytest.raises(ValueError, match=rf"^{keyword}= holds the surrogate"):
+        Message(**content)
+
+
+def test_a_surrogate_in_a_data_image_raises_naming_html_not_the_payload():
+    with pytest.raises(ValueError, match=r"^html= holds the surrogate"):
+        Message(html=f'<img src="data:image/png,{chr(0xDCFF)}">')
 
 
 @pytest.mark.parametrize(
@@ -251,6 +283,18 @@ def test_subject_raises_on_a_line_break(boundary: str):
         Message(text="hi").subject(f"Weekly{boundary}numbers")
 
 
+@pytest.mark.parametrize("surrogate", SURROGATES)
+def test_subject_raises_on_a_surrogate(surrogate: str):
+    with pytest.raises(ValueError, match=r"subject .* surrogate"):
+        Message(text="hi").subject(f"Weekly{surrogate}numbers")
+
+
+def test_subject_takes_a_character_that_utf16_writes_as_a_surrogate_pair():
+    subject = f"Weekly numbers {chr(0x1F600)}"
+
+    assert Message(text="hi").subject(subject).subject_ == subject
+
+
 @pytest.mark.parametrize("method", ADDRESS_METHODS)
 def test_an_address_method_needs_at_least_one_address(method: str):
     with pytest.raises(TypeError):
@@ -265,6 +309,20 @@ def test_an_address_method_accepts_a_structurally_sound_address(
     message = getattr(Message(text="hi"), method)(address)
 
     assert getattr(message, f"{method}_") == (address,)
+
+
+@pytest.mark.parametrize("method", ADDRESS_METHODS)
+@pytest.mark.parametrize("surrogate", SURROGATES)
+@pytest.mark.parametrize("form", ["Ada{} <ada@example.com>", "ada{}@example.com"])
+def test_an_address_method_raises_on_a_surrogate_in_the_name_or_the_addr_spec(
+    method: str, surrogate: str, form: str
+):
+    address = form.format(surrogate)
+
+    with pytest.raises(
+        ValueError, match=f"{re.escape(repr(address))} holds the surrogate"
+    ):
+        getattr(Message(text="hi"), method)(address)
 
 
 @pytest.mark.parametrize("method", ADDRESS_METHODS)
@@ -663,6 +721,35 @@ def test_a_path_whose_name_holds_a_line_break_raises_before_it_is_read():
         Message(text="hi").attach(path)
 
 
+@pytest.mark.parametrize("method", ["attach", "embed"])
+@pytest.mark.parametrize("surrogate", SURROGATES)
+def test_a_filename_holding_a_surrogate_raises(method: str, surrogate: str):
+    filename = f"logo{surrogate}.png"
+
+    with pytest.raises(
+        ValueError, match=f"{re.escape(repr(filename))} holds the surrogate"
+    ):
+        getattr(Message(html=LOGO_HTML), method)(
+            PNG, filename=filename, content_type="image/png"
+        )
+
+
+def test_a_path_whose_name_holds_a_surrogate_raises_before_it_is_read():
+    path = Path(f"weekly{chr(0xDCFF)}.pdf")
+
+    with pytest.raises(
+        ValueError, match=f"{re.escape(repr(path.name))} holds the surrogate"
+    ):
+        Message(text="hi").attach(path)
+
+
+def test_embed_names_the_content_id_when_the_filename_defaults_to_one_holding_a_surrogate():
+    cid = f"logo{chr(0xDCFF)}.png"
+
+    with pytest.raises(ValueError, match=f"content id {re.escape(repr(cid))}"):
+        Message(html=LOGO_HTML).embed(PNG, cid=cid, content_type="image/png")
+
+
 def test_attach_and_embed_append_in_call_order_and_leave_the_receiver_unchanged():
     base = Message(html=LOGO_HTML)
 
@@ -918,6 +1005,12 @@ def test_headers_raises_on_an_illegal_name(name: str):
 def test_headers_raises_on_a_value_holding_a_line_break(value: str):
     with pytest.raises(ValueError, match="'X-Campaign-Id'"):
         Message(text="hi").headers({"X-Campaign-Id": value})
+
+
+@pytest.mark.parametrize("surrogate", SURROGATES)
+def test_headers_raises_on_a_value_holding_a_surrogate(surrogate: str):
+    with pytest.raises(ValueError, match="'X-Campaign-Id' holds the surrogate"):
+        Message(text="hi").headers({"X-Campaign-Id": f"autumn{surrogate}"})
 
 
 def test_headers_takes_a_non_ascii_value():

@@ -34,3 +34,15 @@ def test_a_non_ascii_address_raises_with_the_encode_error_as_cause():
         Address("Ada", "用户@例子.广告")
 
     assert isinstance(caught.value.__cause__, UnicodeEncodeError)
+
+
+@pytest.mark.parametrize("surrogate", [chr(0xD800), chr(0xDCFF)])
+@pytest.mark.parametrize(
+    ("name", "email", "argument"),
+    [("Ada{}", "ada@example.com", "name"), ("Ada", "ada{}@example.com", "email")],
+)
+def test_a_surrogate_raises_naming_the_argument_that_holds_it(
+    surrogate: str, name: str, email: str, argument: str
+):
+    with pytest.raises(ValueError, match=rf"^{argument}=.* holds the surrogate"):
+        Address(name.format(surrogate), email.format(surrogate))

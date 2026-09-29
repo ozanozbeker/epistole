@@ -94,7 +94,13 @@ class FakeBackend(Backend):
 
 
 @pytest.mark.parametrize(
-    "address", ["garbage", '"Reports\nBcc: eve@example.com" <reports@example.com>']
+    "address",
+    [
+        "garbage",
+        '"Reports\nBcc: eve@example.com" <reports@example.com>',
+        f"reports{chr(0xD800)}@example.com",
+        f"reports{chr(0xDCFF)}@example.com",
+    ],
 )
 def test_a_backend_checks_its_from_address(address: str):
     with pytest.raises(ValueError, match=re.escape(repr(address))):
@@ -420,9 +426,13 @@ def test_refuse_reaches_a_cc_and_a_bcc():
     assert result.refused == {"bob@example.com": REFUSED}
 
 
-def test_refuse_checks_the_addresses_it_was_given():
-    with pytest.raises(ValueError, match="garbage"):
-        MemoryBackend(refuse={"garbage": REFUSED})
+@pytest.mark.parametrize(
+    "address",
+    ["garbage", f"ada{chr(0xD800)}@example.com", f"ada{chr(0xDCFF)}@example.com"],
+)
+def test_refuse_checks_the_addresses_it_was_given(address: str):
+    with pytest.raises(ValueError, match=re.escape(repr(address))):
+        MemoryBackend(refuse={address: REFUSED})
 
 
 # --- ConsoleBackend ----------------------------------------------------------

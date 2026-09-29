@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, override
 from urllib.parse import unquote, unquote_to_bytes
 
-from epistole._address import LINE_BREAK, check_address
+from epistole._address import LINE_BREAK, check_address, check_encodable
 from epistole._text import Parser, html_to_text
 
 if TYPE_CHECKING:
@@ -95,7 +95,7 @@ class Message:
     TypeError
         When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`.
     ValueError
-        When `text_renderer` returns something other than a `str`, or when the payload of a `data:` image does not decode. See ADR-0003 and ADR-0008.
+        When `html`, `markdown`, or `text` holds a surrogate. When `text_renderer` returns something other than a `str`, or text that holds a surrogate. When the payload of a `data:` image does not decode. See ADR-0003 and ADR-0008.
     ImportError
         When `markdown` is supplied and `epistole[markdown]` is not installed.
     """
@@ -149,6 +149,11 @@ class Message:
             msg = "text_renderer= applies to html= alone, so pass it without text= or markdown="
             raise TypeError(msg)
 
+        # Runs before the data: rewrite, whose decoder raises its own error on a surrogate.
+        check_encodable(html, "html=")
+        check_encodable(markdown, "markdown=")
+        check_encodable(text, "text=")
+
         if markdown is not None:
             try:
                 from markdown_it import MarkdownIt  # noqa: PLC0415
@@ -173,6 +178,7 @@ class Message:
                 msg = f"text_renderer= returned {type(rendered).__name__}, not str"
                 raise ValueError(msg)
 
+            check_encodable(rendered, "the text that text_renderer= returned")
             text = rendered
 
         _write(
@@ -215,11 +221,13 @@ class Message:
         Raises
         ------
         ValueError
-            When `subject` holds a line break. See ADR-0016.
+            When `subject` holds a line break or a surrogate. See ADR-0016.
         """
         if LINE_BREAK.search(subject):
             msg = f"{subject!r} holds a line break, such as \\r or \\n. A subject is one line."
             raise ValueError(msg)
+
+        check_encodable(subject, f"the subject {subject!r}")
 
         return self._copy(subject_=subject)
 
@@ -231,7 +239,7 @@ class Message:
         Raises
         ------
         ValueError
-            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII, or is a name Epistole writes. When a value is not a `str`, or holds a line break.
+            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII, or is a name Epistole writes. When a value is not a `str`, or holds a line break or a surrogate.
         """
         pairs: tuple[tuple[str, str], ...] = _checked_headers(mapping)
         return self._copy(_header_pairs=pairs, headers_=MappingProxyType(dict(pairs)))
@@ -260,7 +268,7 @@ class Message:
         TypeError
             When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. See ADR-0018.
         ValueError
-            When the filename holds a line break, or when `content_type` is not a bare `type/subtype`, such as one with parameters. When `content_type` is a `message/*` or `multipart/*` type. See ADR-0018.
+            When the filename holds a line break or a surrogate, or when `content_type` is not a bare `type/subtype`, such as one with parameters. When `content_type` is a `message/*` or `multipart/*` type. See ADR-0018.
         """
         name: str = _filename(source, filename)
         kind: str = _content_type(name, content_type)
@@ -301,12 +309,14 @@ class Message:
         TypeError
             As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
         ValueError
-            When the filename or the content id holds a line break, when the content id is not ASCII, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. See ADR-0018.
+            When the filename or the content id holds a line break, when the content id is not ASCII, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. When the filename or the content id holds a surrogate. See ADR-0018.
         """
-        # Runs before _filename, so a line break in cid raises the content id error, not the filename one.
+        # Runs before _filename, so a line break or a surrogate in cid raises the content id error, not the filename one.
         if cid is not None and LINE_BREAK.search(cid):
             msg = f"the content id {cid!r} holds a line break, such as \\r or \\n. Pass cid= without one."
             raise ValueError(msg)
+
+        check_encodable(cid, f"the content id {cid!r}")
 
         name: str = _filename(source, filename, cid)
         kind: str = _content_type(name, content_type)
@@ -462,13 +472,15 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
             msg = f"the value of custom header {name!r} must be a str with no line break, such as \\r or \\n"
             raise ValueError(msg)
 
+        check_encodable(value, f"the value of custom header {name!r}")
+
     return pairs
 
 
 def _filename(
     source: Path | bytes | BinaryIO, filename: str | None, cid: str | None = None
 ) -> str:
-    """Check the type of `source`, then return `filename`, or else a `Path` source's own name, or else `cid`, once checked for a line break."""
+    """Check the type of `source`, then return `filename`, or else a `Path` source's own name, or else `cid`, once checked for a line break and a surrogate."""
     if isinstance(source, str):
         msg = "Epistole never reads a str as a path. Wrap it in Path()."
         raise TypeError(msg)
@@ -491,6 +503,7 @@ def _filename(
         msg = f"the filename {name!r} holds a line break, such as \\r or \\n. Pass filename= to name it without one."
         raise ValueError(msg)
 
+    check_encodable(name, f"the filename {name!r}")
     return name
 
 

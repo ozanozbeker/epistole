@@ -1,4 +1,4 @@
-"""`Address` writes an address with its display name. `check_address`, `addr_spec` and `name_and_addr_spec` check and parse an address string. `LINE_BREAK` matches what no header value may hold."""
+"""`Address` writes an address with its display name. `check_address` checks an address string. `_message.py` imports `LINE_BREAK` and `check_encodable` from here, because other text a caller passes takes the same checks as an address."""
 
 import re
 from email.policy import default
@@ -7,6 +7,9 @@ from typing import Self
 
 LINE_BREAK = re.compile(r"[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 """str.splitlines() splits on each of these, and EmailMessage raises on a value it splits."""
+
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+"""UTF-8 cannot encode a code point in this range, so no backend sends one intact (ADR-0016)."""
 
 
 class Address(str):
@@ -24,7 +27,7 @@ class Address(str):
     Raises
     ------
     ValueError
-        When `email` is not ASCII, with the `UnicodeEncodeError` as `__cause__`.
+        When `name` or `email` holds a surrogate. When `email` is not ASCII, with the `UnicodeEncodeError` as `__cause__`.
 
     Examples
     --------
@@ -40,6 +43,9 @@ class Address(str):
 
     def __new__(cls, name: str, email: str) -> Self:
         """Return the formatted address."""
+        # formataddr raises the same UnicodeEncodeError for a surrogate in either argument, so only a check before it can name which.
+        check_encodable(name, f"name={name!r}")
+        check_encodable(email, f"email={email!r}")
         try:
             formatted: str = formataddr((name, email))
         except UnicodeEncodeError as error:
@@ -50,13 +56,15 @@ class Address(str):
 
 
 def check_address(address: str) -> None:
-    """Raise `ValueError` unless `address` holds exactly one address on one line, with something on both sides of its last `@`.
+    """Raise `ValueError` unless `address` holds exactly one address on one line and no surrogate, with something on both sides of its last `@`.
 
     See ADR-0014 for why the check looks no further.
     """
     if LINE_BREAK.search(address):
         msg = f"{address!r} holds a line break, such as \\r or \\n. An address is one line."
         raise ValueError(msg)
+
+    check_encodable(address, repr(address))
 
     pairs: list[tuple[str, str]] = getaddresses([address])
     if len(pairs) != 1:
@@ -68,6 +76,16 @@ def check_address(address: str) -> None:
     local, _, domain = pairs[0][1].rpartition("@")
     if not local or not domain:
         msg = f"{address!r} is not an address: it needs something on both sides of its last @"
+        raise ValueError(msg)
+
+
+def check_encodable(text: str | None, label: str) -> None:
+    """Raise `ValueError` naming `label` when `text` holds a surrogate, the one kind of code point UTF-8 cannot encode.
+
+    See ADR-0016 for why every text a caller passes takes the check.
+    """
+    if text is not None and (match := _SURROGATE.search(text)):
+        msg = f"{label} holds the surrogate U+{ord(match[0]):04X} at index {match.start()}. UTF-8 cannot encode one. os.fsdecode writes one for each byte it cannot decode, so decode those bytes in their real encoding instead."
         raise ValueError(msg)
 
 
