@@ -75,7 +75,7 @@ class SMTPBackend(Backend):
 
     A server may refuse some recipients and accept the rest. The send then returns normally with the refusals in `SendResult.refused`, so a caller who ignores the send result loses them. See ADR-0004.
 
-    Before writing, a send raises `RejectedError` for a custom `Resent-Bcc` header, which `smtplib` would otherwise delete. There is no size pre-check. `smtplib` sends the message size to a server that advertises `SIZE`, and the server's `552` raises `RejectedError`. See ADR-0016 and ADR-0019.
+    There is no size pre-check. `smtplib` sends the message size to a server that advertises `SIZE`, and the server's `552` raises `RejectedError`. See ADR-0019.
 
     Parameters
     ----------
@@ -269,11 +269,6 @@ class _SMTPTransport:
 
     def submit(self, submission: Submission, /) -> Mapping[str, Refusal]:
         """Write the RFC 5322 message to the server, and return the refusals keyed by addr-spec."""
-        for name in submission.message.headers_:
-            if name.lower() == "resent-bcc":
-                msg = f"SMTP cannot send a {name!r} header, because smtplib deletes it before it writes the message."
-                raise RejectedError(msg)
-
         mime: EmailMessage = build(submission)
         mail_from: str = addr_spec(submission.from_address)
         # smtplib counts the refusals against this list's length, so each addr-spec appears once.

@@ -239,7 +239,7 @@ class Message:
         Raises
         ------
         ValueError
-            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII, or is a name Epistole writes. When a value is not a `str`, or holds a line break or a surrogate.
+            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII. When a name is `Resent-Bcc` or a name Epistole writes. When a value is not a `str`, or holds a line break or a surrogate.
         """
         pairs: tuple[tuple[str, str], ...] = _checked_headers(mapping)
         return self._copy(_header_pairs=pairs, headers_=MappingProxyType(dict(pairs)))
@@ -458,6 +458,11 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
         lowered: str = name.lower()
         if lowered in _OWNED_NAMES:
             msg = f"Epistole writes the {name!r} header itself, so it cannot be a custom header"
+            raise ValueError(msg)
+
+        # Epistole does not write Resent-Bcc, so the _OWNED_NAMES error would be false for it (ADR-0016).
+        if lowered == "resent-bcc":
+            msg = f"no backend sends a {name!r} header intact, so it cannot be a custom header. Pass the addresses to .bcc() instead."
             raise ValueError(msg)
 
         # A dict holds both spellings of one name, and a backend would write a line for each.

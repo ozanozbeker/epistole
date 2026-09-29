@@ -225,6 +225,19 @@ def test_raw_uses_the_url_safe_alphabet(
     assert "+" not in encoded
 
 
+def test_resent_to_and_resent_from_headers_are_written(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    backend(service_account).send(
+        message().headers(
+            {"Resent-To": "eve@example.com", "Resent-From": "ada@example.com"}
+        )
+    )
+
+    assert b"Resent-To: eve@example.com" in raw(google.sent()[0])
+    assert b"Resent-From: ada@example.com" in raw(google.sent()[0])
+
+
 # --- Pre-checks --------------------------------------------------------------
 
 

@@ -1084,6 +1084,20 @@ def test_headers_matches_the_names_epistole_writes_exactly():
     assert message.headers_ == {"In-Reply-To": "<1@example.com>"}
 
 
+@pytest.mark.parametrize("name", ["Resent-Bcc", "resent-bcc", "RESENT-BCC"])
+def test_headers_raises_on_resent_bcc(name: str):
+    with pytest.raises(ValueError, match=re.escape(repr(name))) as caught:
+        Message(text="hi").headers({name: "eve@example.com"})
+
+    assert ".bcc()" in str(caught.value)
+
+
+def test_headers_matches_resent_bcc_exactly():
+    message = Message(text="hi").headers({"X-Resent-Bcc": "eve@example.com"})
+
+    assert message.headers_ == {"X-Resent-Bcc": "eve@example.com"}
+
+
 def test_headers_needs_at_least_one_custom_header():
     with pytest.raises(ValueError, match="at least one"):
         Message(text="hi").headers({})
