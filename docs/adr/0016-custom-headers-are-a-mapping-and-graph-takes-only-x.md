@@ -14,6 +14,7 @@ Amended on [#40](https://github.com/ozanozbeker/epistole/issues/40): two names t
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): `.subject()` raises `ValueError` on a line break, by the rule a custom header value follows.
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write an ASCII value as the caller wrote it, on one line. The RFC 5322 message holds `Bcc`, and SMTP deletes it before writing.
 Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP raises `RejectedError` on a custom `Resent-Bcc`, because `smtplib` deletes that header before it writes.
+Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail write a message that holds a non-ASCII value with UTF-8 headers, so they write every value as the caller wrote it.
 
 ## Why
 
@@ -126,8 +127,6 @@ ADR-0010 bans that silent drop.
   A check on `\r` and `\n` alone would pass `\u2028`, and SMTP and Gmail would then raise at send time instead of at `.headers()`.
   Anything else is a `ValueError`.
   The character set is not otherwise checked, matching ADR-0014.
-  The stdlib RFC 2047-encodes a non-ASCII value on the SMTP and Gmail paths, unless a non-ASCII address makes the message UTF-8 (ADR-0014).
-  Graph sends it as UTF-8 in JSON.
 - **A subject takes the same line-break check, in `.subject()`.**
   `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
   Checking in `Message` raises at the line that set the subject, on every backend.
@@ -139,13 +138,24 @@ ADR-0010 bans that silent drop.
   A `dict` holds both, and RFC 5322 names are case-insensitive.
 - **Every `ValueError` check runs in `Message`**, so it fails at the line that named the header, on every backend (ADR-0002).
 - **SMTP and Gmail write custom headers after the ones Epistole writes**, in the caller's order.
-- **SMTP and Gmail write an ASCII value as the caller wrote it, on one line.**
+- **SMTP and Gmail write a value as the caller wrote it, on one line.**
   `EmailMessage` cannot fold a word longer than 77 characters, so it writes the word as RFC 2047 encoded-words.
   It did so on 3.13.12 and on 3.14.7.
   A `List-Unsubscribe` URL that long would be sent that way.
   RFC 2047 allows no encoded-word in a structured field such as `List-Unsubscribe`.
   `email.parser` decodes an encoded-word and raises no error, so only the bytes show it.
   A value longer than RFC 5322's 998-character line limit is sent as written, and the service accepts or rejects it.
+- **SMTP and Gmail write a message that holds a non-ASCII value with UTF-8 headers**, as they do for a non-ASCII addr-spec (ADR-0014).
+  Without them, `EmailMessage` refolds the value through the stdlib's header registry, and what it writes depends on the name.
+  It writes encoded-words inside the addr-spec of `Sender` and of each `Resent-*` address.
+  It raises `UnicodeEncodeError` on a non-ASCII `In-Reply-To` or `References`.
+  It writes any other value as encoded-words.
+  `EmailMessage` did all three on 3.13.12 and on 3.14.7.
+  RFC 2047 allows an encoded-word in unstructured text such as `X-Note: Café`, and forbids one in place of a URL or an address.
+  Epistole checks the whole value and parses none of it, because it keeps no table of which names are unstructured.
+  For unstructured text, a caller who needs 7 bits passes an encoded-word they built, such as `email.header.Header("Café", "utf-8").encode()`.
+  It is ASCII, so SMTP and Gmail write it as the caller wrote it.
+  Graph sends every value as UTF-8 in JSON.
 - **`GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
   The check runs before it writes, on both the `sendMail` path and the draft path (ADR-0004, ADR-0012).
   The error names the offending header.
@@ -205,6 +215,14 @@ ADR-0010 bans that silent drop.
   SMTP would then carry every custom header.
   Rejected because every recipient would read the `Resent-Bcc` addresses.
   RFC 5322 section 3.6.6 says `Resent-Bcc` functions as `Bcc` does, and section 3.6.3 says a `Bcc` address is not revealed to other recipients.
+- **Write UTF-8 headers only for a non-ASCII value under an address name, such as `Sender` or `Resent-To`.**
+  It keeps unstructured text such as `X-Note: Café` in 7 bits.
+  Rejected because it fixes only the first of the three failures under Rules.
+  A send would still raise on `In-Reply-To` and `References`, and SMTP and Gmail would still write `List-Unsubscribe` as encoded-words.
+  It also needs a table of names, which Epistole would extend for each new header that holds an address.
+- **Write UTF-8 headers only for a non-ASCII value under a name the stdlib's header registry lists.**
+  The registry already holds a parser for `Sender`, the `Resent-*` names, `In-Reply-To`, and `References`, so Epistole would keep no table.
+  Rejected because SMTP and Gmail would still write encoded-words in a header the registry does not list, such as `List-Unsubscribe` or `Disposition-Notification-To`.
 
 ## Consequences
 
@@ -221,6 +239,9 @@ ADR-0010 bans that silent drop.
   Each is a pre-check, so it makes no network call and the message is unchanged.
   [#64](https://github.com/ozanozbeker/epistole/issues/64) asks whether Gmail keeps a custom `Resent-Bcc` in the copy recipients receive.
   If it does, recipients read the addresses on Gmail too, and the owned-name option under Considered options is worth reopening.
+- SMTP and Gmail now write UTF-8 headers for a message whose only non-ASCII header text is unstructured text in a custom header, such as `X-Campaign-Name: Café d'automne`.
+  Before #58, they wrote it in 7 bits with a legal encoded-word.
+  Now SMTP asks the server for `SMTPUTF8`, and raises `RejectedError` when the server does not advertise it (ADR-0014).
 - A caller who wants the degraded send strips the header first, as ADR-0010 requires.
   There is no flag and no warning.
 - `Message` gets one new field and the checks above, and no backend gets new configuration.

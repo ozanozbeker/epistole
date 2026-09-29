@@ -8,6 +8,7 @@ The mail service, never Epistole, checks whether that address exists, accepts ma
 Decided on [#26](https://github.com/ozanozbeker/epistole/issues/26).
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): an address that holds a line break is a `ValueError`.
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers.
+Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail also write a message that holds a non-ASCII custom header value with UTF-8 headers (ADR-0016).
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -124,8 +125,9 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   Without UTF-8 headers, `EmailMessage` writes an RFC 2047 encoded-word into the addr-spec, where RFC 2047 forbids one.
   It did so on 3.13.12 and on 3.14.7.
   `email.parser` decodes that encoded-word and raises no error, so only the bytes show it.
+  SMTP and Gmail do the same for a non-ASCII custom header value (ADR-0016).
   `smtplib.send_message` asks the server for `SMTPUTF8` only when the envelope is not ASCII.
-  When the only non-ASCII address is in `Reply-To`, SMTP must ask for it too.
+  When the envelope is ASCII but `Reply-To` or a custom header value needs UTF-8 headers, SMTP must ask for it too.
   Otherwise a server without `SMTPUTF8` receives UTF-8 headers, and the caller gets no error.
 - **`Connection.send` adds no check.**
   Its completeness checks stay as ADR-0006 and `CONTEXT.md` *Complete message* define them.

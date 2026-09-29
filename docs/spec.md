@@ -254,6 +254,7 @@ class Attachment:
   Epistole inspects nothing else: no character set, no DNS, no punycode.
 - `recipients` is `to_ + cc_ + bcc_` in that order, duplicates kept (ADR-0007).
 - SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers, because RFC 2047 allows no encoded-word in an addr-spec (ADR-0014).
+  They do the same for a non-ASCII custom header value (ADR-0016).
 
 **Subject (ADR-0016).**
 
@@ -274,8 +275,11 @@ class Attachment:
   Anything else is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - Two names that differ only in case are a `ValueError`, because a `dict` holds both and RFC 5322 names are case-insensitive.
-- SMTP and Gmail write an ASCII value as the caller wrote it, on one line (ADR-0016).
+- SMTP and Gmail write a value as the caller wrote it, on one line (ADR-0016).
   `EmailMessage` would write a word longer than 77 characters, such as a `List-Unsubscribe` URL, as RFC 2047 encoded-words.
+- SMTP and Gmail write a message that holds a non-ASCII value with UTF-8 headers, as they do for a non-ASCII addr-spec (ADR-0014, ADR-0016).
+  RFC 2047 allows an encoded-word only in unstructured text, a phrase, or a comment.
+  Epistole keeps no table of which custom headers are unstructured.
 
 **Attributes (ADR-0007).**
 
@@ -557,7 +561,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - SMTP passes the envelope to `send_message`: the from address's addr-spec, and each distinct addr-spec in `recipients`, in order.
   `send_message` would otherwise read it from the headers, so a custom `Sender` header would override the from address (ADR-0001).
   A repeated addr-spec gets one `RCPT TO`, because `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients (ADR-0004).
-- SMTP asks the server for `SMTPUTF8` whenever the built message has UTF-8 headers, including when `Reply-To` holds the only non-ASCII address (ADR-0014).
+- SMTP asks the server for `SMTPUTF8` whenever the built message has UTF-8 headers, including when the envelope is ASCII but `Reply-To` or a custom header value needs them (ADR-0014, ADR-0016).
   For that case Epistole checks the extension itself and raises `RejectedError`, because `sendmail` drops every option on a server that answered `HELO`.
 - The timeout is 60 s, and no setting changes it.
 
