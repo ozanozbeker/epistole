@@ -402,8 +402,7 @@ Use **Gmail** when you are already authenticated against a Google account and wo
 Gmail and Graph also take any object with `get_token`, the `TokenCredential` shape `azure-identity` implements.
 SMTP takes one inside `OAuth`, with an explicit `scope=`.
 Epistole pre-checks only what a vendor documents: Gmail's 35 MiB request and 500 recipients, and Graph's 150 MB attachment, 500 recipients, and custom header names that start with `x-`.
-SMTP raises on a custom `Resent-Bcc` header, which `smtplib` deletes before it writes.
-It gets no size check, because `smtplib` already negotiates `SIZE` with the server.
+SMTP gets none, because `smtplib` already negotiates `SIZE` with the server.
 Everywhere else, Epistole maps the service's reply onto the same error a pre-check would have raised.
 
 The choice depends on four things.

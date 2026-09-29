@@ -44,9 +44,9 @@ _Avoid_: cid (the URL scheme, which `.embed(cid=)` names deliberately because th
 
 **Custom header**: A `Name: value` line the caller supplies and Epistole passes through unchanged, such as `List-Unsubscribe` or a private `X-` tag.
 It is never one of the headers Epistole writes itself, so setting a name Epistole owns raises rather than overriding it.
+It is never `Resent-Bcc` either, because no backend sends that header intact.
 A message holds at most one value per name.
 Graph accepts only names starting with `x-`.
-SMTP accepts every name but `Resent-Bcc`, which `smtplib` deletes.
 _Avoid_: header on its own (the addressing and MIME lines are headers too, so `.headers()` and `headers_` keep RFC 5322's word and hold only the caller's set), metadata, extra, field (RFC 5322's word for both kinds)
 
 **Backend**: The configuration for sending through one mail service.

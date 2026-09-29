@@ -280,6 +280,8 @@ class Attachment:
   It writes a surrogate from `os.fsdecode` as an `unknown-8bit` encoded-word instead (ADR-0016).
   Anything else is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
+- `Resent-Bcc` is a `ValueError`, matched case-insensitively on the exact name, because no backend sends it intact.
+  The error names the header and points to `.bcc()`.
 - Two names that differ only in case are a `ValueError`, because a `dict` holds both and RFC 5322 names are case-insensitive.
 - SMTP and Gmail write a value as the caller wrote it, on one line (ADR-0016).
   `EmailMessage` would write a word longer than 77 characters, such as a `List-Unsubscribe` URL, as RFC 2047 encoded-words.
@@ -557,9 +559,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `scope=` is required for a `TokenCredential`.
   Supplying it alongside a Graph or a Gmail value is a `TypeError`.
   A `graph.ManagedIdentity` inside an `OAuth` requests the resource `https://outlook.office365.com` rather than the scope, per the rule under Graph below.
-- A pre-check raises on a custom header named `Resent-Bcc` (case-insensitive), naming the header (ADR-0016).
-  `send_message` deletes that header before it writes.
-- SMTP has no size pre-check (ADR-0019).
+- SMTP has no pre-check (ADR-0019).
   `smtplib.sendmail` already appends `size=` when the server advertises the `SIZE` extension.
   The server's `552` maps to `RejectedError` (ADR-0004).
 - SMTP writes the RFC 5322 message Epistole built.
