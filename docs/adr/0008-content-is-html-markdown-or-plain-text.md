@@ -13,6 +13,7 @@ Decided on [#15](https://github.com/ozanozbeker/epistole/issues/15), based on `d
 Amended on [#28](https://github.com/ozanozbeker/epistole/issues/28): a test reads the plain text as `submissions[0].message.text`, because the doubles record a `Submission` rather than a message with those headers set (ADR-0015).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): derived plain text may be empty, so the non-empty rule holds for `text=` alone.
 Amended on [#36](https://github.com/ozanozbeker/epistole/issues/36): `text=""` is allowed, because some callers send the subject alone.
+Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): content that holds a surrogate is a `ValueError`, and so is a `text_renderer` return that holds one (ADR-0016).
 
 ## Why
 
@@ -81,6 +82,10 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Both is a `TypeError`.
   `text=` may accompany either, or stand alone.
   `Message()` with no content is a `TypeError`.
+- **Content that holds a surrogate is a `ValueError` at construction**, whether it came as `html=`, `markdown=`, or `text=` (ADR-0016).
+  SMTP, Gmail, and Graph raise `UnicodeEncodeError` on one at send, and `ConsoleBackend` raises on one in HTML.
+  The error names the keyword that held it.
+  Epistole's own derivation needs no check, because `html_to_text` and `markdown-it-py` both write a character reference to a surrogate as U+FFFD.
 - **`text=` takes precedence.**
   Supplied plain text ships verbatim.
   Epistole never checks it against the HTML, never merges, and never derives.
@@ -93,7 +98,7 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Passing it with `text=` or with `markdown=` is a `TypeError`, because it would be silently ignored otherwise.
   An exception it raises propagates unwrapped at the line that built the message.
   It is not an `EpistoleError` (ADR-0004).
-  A return that is not a `str` is a `ValueError`.
+  A return that is not a `str`, or that holds a surrogate, is a `ValueError`.
   A return of `""` is not.
   The renderer replaces `html_to_text`, and `html_to_text` returns `""` for HTML with no text.
 - **Plain text from Markdown is the source, verbatim.**

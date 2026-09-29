@@ -99,6 +99,7 @@ class Address(str):
 - Returns `email.utils.formataddr((name, email))`, so `Address("Ada Lovelace", "ada@example.com") == "Ada Lovelace <ada@example.com>"` (ADR-0014).
 - Raises `ValueError` with the `UnicodeEncodeError` as `__cause__` when `email` is not ASCII, because `formataddr` cannot format it (ADR-0014).
   The plain-string path accepts the same address.
+- Raises `ValueError` naming the argument when `name` or `email` holds a surrogate, a code point from U+D800 to U+DFFF (ADR-0014).
 
 ```python
 class Message:
@@ -178,6 +179,7 @@ class Attachment:
 
 - The constructor takes exactly one of `html=` or `markdown=`, or neither with `text=` alone.
   Both, or none of the three, is a `TypeError`.
+- `html=`, `markdown=`, or `text=` that holds a surrogate is a `ValueError` naming the keyword (ADR-0008).
 - `text=` may be passed with `html=` or `markdown=`, or alone.
   Epistole sends it verbatim and never merges it.
   It overrides anything Epistole would have derived.
@@ -186,7 +188,7 @@ class Attachment:
   The renderer runs once at construction, on the HTML after the `data:` rewrite.
   The message does not store it.
   Its exceptions propagate unwrapped.
-  A return value that is not a `str` is a `ValueError`.
+  A return value that is not a `str`, or that holds a surrogate, is a `ValueError`.
 - Derived text may be `""`, and that is not an error.
   An image with no alt text and a body whose only text is inside `<style>` both derive to nothing.
   So the invariant is that `text` is always a `str`, not that it always holds characters.
@@ -235,6 +237,8 @@ class Attachment:
   The content type must be `image/*` after inference or override, else `ValueError`.
 - A filename or a content id that holds a line break is a `ValueError`, including a `Path`'s own name.
   The check runs before the source is read.
+- A filename that holds a surrogate is a `ValueError`, including a `Path`'s own name (ADR-0018).
+  The check runs before the source is read.
 - A content id that is not ASCII is a `ValueError`, because SMTP and Gmail would write it as an RFC 2047 encoded-word.
   A filename may still be non-ASCII.
 - A content id the message already holds is a `ValueError` naming it, including one the `data:` rewrite generated at construction.
@@ -250,7 +254,7 @@ class Attachment:
 
 - An address is checked where it is supplied: in the four address methods and in `from_address`.
   A failed check is a `ValueError`.
-  A string passes when it holds no line break, `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
+  A string passes when it holds no line break and no surrogate, `email.utils.getaddresses` returns exactly one pair, the addr-spec is non-empty, and both halves of its last `@` are non-empty.
   Epistole inspects nothing else: no character set, no DNS, no punycode.
 - `recipients` is `to_ + cc_ + bcc_` in that order, duplicates kept (ADR-0007).
 - SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers, because RFC 2047 allows no encoded-word in an addr-spec (ADR-0014).
@@ -258,7 +262,7 @@ class Attachment:
 
 **Subject (ADR-0016).**
 
-- A subject that holds a line break is a `ValueError`, checked in `.subject()`.
+- A subject that holds a line break or a surrogate is a `ValueError`, checked in `.subject()`.
   The rule is the one a custom header value follows.
 
 **Custom headers (ADR-0016).**
@@ -271,7 +275,9 @@ class Attachment:
   `headers_ == {"X-Campaign-Id": "autumn"}` holds, so a test reads it as a dict.
 - A legal name is one or more characters in printable ASCII 33 to 126 excluding `:`.
   A legal value is a `str` with no character that `str.splitlines()` splits on, such as `\r`, `\n`, or `\u2028`.
-  `EmailMessage` raises on a value that `str.splitlines()` splits, so the check covers every value it raises on.
+  It also holds no surrogate.
+  `EmailMessage` raises on a value that `str.splitlines()` splits, and on most surrogates.
+  It writes a surrogate from `os.fsdecode` as an `unknown-8bit` encoded-word instead (ADR-0016).
   Anything else is a `ValueError`, checked in `Message`.
 - A name Epistole owns is a `ValueError`, matched case-insensitively on the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - Two names that differ only in case are a `ValueError`, because a `dict` holds both and RFC 5322 names are case-insensitive.

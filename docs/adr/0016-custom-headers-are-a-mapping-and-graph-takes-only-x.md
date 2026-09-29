@@ -15,6 +15,7 @@ Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): `.subject()
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write an ASCII value as the caller wrote it, on one line. The RFC 5322 message holds `Bcc`, and SMTP deletes it before writing.
 Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP raises `RejectedError` on a custom `Resent-Bcc`, because `smtplib` deletes that header before it writes.
 Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail write a message that holds a non-ASCII value with UTF-8 headers, so they write every value as the caller wrote it.
+Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): a subject or a value that holds a surrogate is a `ValueError`, because no backend sends one intact. ADR-0008, ADR-0014 and ADR-0018 apply the same rule to content, addresses and filenames.
 
 ## Why
 
@@ -121,14 +122,23 @@ ADR-0010 bans that silent drop.
 - **A legal name is one or more characters from printable ASCII 33 to 126, excluding colon.**
   This is RFC 5322 `ftext`.
   Anything else is a `ValueError`, including an empty name.
-- **A legal value is a `str` holding no line break.**
+- **A legal value is a `str` holding no line break and no surrogate.**
   A line break is any character `str.splitlines()` splits on: `\r`, `\n`, `\v`, `\f`, `\x1c`, `\x1d`, `\x1e`, `\x85`, `\u2028`, and `\u2029`.
   `EmailMessage` raises on a value that `str.splitlines()` splits, tested on 3.13.12.
   A check on `\r` and `\n` alone would pass `\u2028`, and SMTP and Gmail would then raise at send time instead of at `.headers()`.
+  A surrogate is a code point from U+D800 to U+DFFF.
+  UTF-8 cannot encode one, so Graph raises `UnicodeEncodeError` on it while encoding its JSON.
+  SMTP and Gmail raise it too, except on U+DC80 to U+DCFF.
+  `os.fsdecode` and the `surrogateescape` error handler write that range, one code point for each byte they cannot decode.
+  SMTP and Gmail raise nothing on that range.
+  They write it as an `unknown-8bit` encoded-word, such as `=?unknown-8bit?q?=FF?=`.
+  They did both on 3.13.12 and on 3.14.7.
+  `unknown-8bit` names no charset, so a client can only guess what the byte meant.
   Anything else is a `ValueError`.
   The character set is not otherwise checked, matching ADR-0014.
-- **A subject takes the same line-break check, in `.subject()`.**
-  `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+- **A subject takes the same line-break and surrogate checks, in `.subject()`.**
+  `EmailMessage` raises on a line break at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
+  A surrogate fails for the reasons a value does.
   Checking in `Message` raises at the line that set the subject, on every backend.
 - **A name Epistole owns is a `ValueError`**, matched case-insensitively against the exact name: `From`, `To`, `Cc`, `Bcc`, `Reply-To`, `Subject`, `Message-ID`, `Date`, `MIME-Version`, `Content-Type`, `Content-Transfer-Encoding`, `Content-ID`, `Content-Disposition`.
 - **The RFC 5322 message Epistole builds holds `Bcc`.**
@@ -223,6 +233,16 @@ ADR-0010 bans that silent drop.
 - **Write UTF-8 headers only for a non-ASCII value under a name the stdlib's header registry lists.**
   The registry already holds a parser for `Sender`, the `Resent-*` names, `In-Reply-To`, and `References`, so Epistole would keep no table.
   Rejected because SMTP and Gmail would still write encoded-words in a header the registry does not list, such as `List-Unsubscribe` or `Disposition-Notification-To`.
+- **Check only a subject and custom header values for a surrogate.**
+  The spec implied this scope, because it said the line-break check covered every value `EmailMessage` raises on.
+  Rejected because every text a caller passes fails on at least one backend.
+  A surrogate in a filename, `text=`, `html=`, or `markdown=` raises `UnicodeEncodeError` at send on SMTP, Gmail, and Graph.
+- **Replace a surrogate with U+FFFD, or write the byte it escapes.**
+  Graph already writes U+FFFD for one from `os.fsdecode` in a display name, because the stdlib's header parser replaces it.
+  Rejected because it changes what the caller wrote without telling them, which ADR-0013 and ADR-0014 rule out.
+- **Leave it to the send, because `UnicodeEncodeError` is a `ValueError`.**
+  Rejected because SMTP and Gmail raise nothing on the range `os.fsdecode` writes, and send an `unknown-8bit` encoded-word instead.
+  `MemoryBackend` accepts every surrogate, so a test against it passes for a message no real backend sends intact.
 
 ## Consequences
 

@@ -9,6 +9,7 @@ Decided on [#26](https://github.com/ozanozbeker/epistole/issues/26).
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): an address that holds a line break is a `ValueError`.
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers.
 Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gmail also write a message that holds a non-ASCII custom header value with UTF-8 headers (ADR-0016).
+Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): an address that holds a surrogate is a `ValueError` (ADR-0016), and `Address()` names the argument that holds one.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -105,11 +106,16 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   It raises `ValueError` when `formataddr` raises `UnicodeEncodeError` on a non-ASCII address, with the original as `__cause__`.
   The helper formats what `formataddr` can format.
   The plain-string path accepts the rest.
+  It checks `name` and `email` for a surrogate first, and its `ValueError` names the argument that holds one.
+  `formataddr` raises the same `UnicodeEncodeError` for a surrogate in either argument, so only a check before it can name the right one.
 - **Epistole checks structure where the caller supplies the address**, in `.to()` and the other address methods and in a backend's constructor.
   A failure raises `ValueError` per ADR-0004.
-  A string passes when it holds no line break, `getaddresses` returns exactly one pair, its addr-spec is non-empty, and both halves of the addr-spec's last `@` are non-empty.
+  A string passes when it holds no line break and no surrogate, `getaddresses` returns exactly one pair, its addr-spec is non-empty, and both halves of the addr-spec's last `@` are non-empty.
   A line break fails anywhere in the string, because `EmailMessage` raises on it at send time on SMTP and Gmail, and `ConsoleBackend` would write the rest as a separate line.
-  Apart from line breaks, the check inspects nothing inside either half: no dot in the domain, no TLD list, no length limit, no DNS or MX lookup.
+  A surrogate fails anywhere in the string, for the reasons ADR-0016 gives for a header value.
+  In an addr-spec, Gmail wrote a surrogate from `os.fsdecode` as an `unknown-8bit` encoded-word, which RFC 2047 forbids there.
+  When a recipient held one, SMTP wrote `MAIL FROM` and each recipient before it, then raised and left the transaction open.
+  Apart from line breaks and surrogates, the check inspects nothing inside either half: no dot in the domain, no TLD list, no length limit, no DNS or MX lookup.
 - **Validity belongs to the mail service.**
   When the service refuses a structurally sound address, the caller gets `RecipientsRefusedError` or `result.refused` on SMTP.
   On Gmail and Graph, the caller gets a whole-message rejection, per ADR-0004.
@@ -120,6 +126,7 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   It passes non-ASCII local parts and IDN domains through as written.
   It does not punycode a domain, because that is a silent rewrite of the caller's address.
   ADR-0013 already rejected silent rewrites of caller input.
+  The surrogate check narrows no character set, because Unicode reserves the surrogate code points for UTF-16 and assigns them no character.
 - **SMTP and Gmail write a message that holds a non-ASCII addr-spec with UTF-8 headers**, as RFC 6532 defines.
   The addr-spec may be in `From`, `To`, `Cc`, `Bcc`, or `Reply-To`.
   Without UTF-8 headers, `EmailMessage` writes an RFC 2047 encoded-word into the addr-spec, where RFC 2047 forbids one.
