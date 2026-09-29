@@ -29,6 +29,8 @@ class GmailBackend(Backend):
 
     Gmail accepts or refuses the whole message, so `SendResult.refused` is always empty.
 
+    Gmail replaces the `Message-ID` Epistole sets with its own. When `from_address` is neither the account nor one of its verified aliases, Gmail sends from the account's own address and raises nothing. `docs/research/live-send-findings.md` records both.
+
     Parameters
     ----------
     credential

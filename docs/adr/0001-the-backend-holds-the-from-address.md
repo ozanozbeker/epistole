@@ -8,6 +8,8 @@ The message has no From field at all.
 A send cannot override it.
 Decided on [#8](https://github.com/ozanozbeker/epistole/issues/8).
 The from address became a required field on [#9](https://github.com/ozanozbeker/epistole/issues/9).
+Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): Gmail does not refuse a from address that is neither the account nor a verified alias.
+It sends the message with the account's own address in `From`, and nothing raises.
 
 ## Why
 
@@ -37,6 +39,6 @@ The alternative is a call site that returns `403` on Graph and succeeds with no 
 - The caller must still give an anonymous SMTP relay its from address, because RFC 5322 requires the header and nothing else supplies it.
 - The mail service accepts or refuses the address.
   Epistole writes it and reports the refusal: `SMTPSenderRefused` on SMTP and `403 ErrorSendAsDenied` on Graph.
-  The docs do not state Gmail's behavior, and a live test must settle it.
+  Gmail, over its API or its SMTP server, refuses nothing and sends from the account's own address instead.
 - Epistole never derives the field from `username`.
   A default that works on one credential shape and not another is the per-backend exception the unified field exists to remove.

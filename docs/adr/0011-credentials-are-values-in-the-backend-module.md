@@ -21,6 +21,7 @@ Amended on [#43](https://github.com/ozanozbeker/epistole/issues/43): no secret a
 Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `ManagedIdentity` does not work on Service Fabric, because `msal` 1.38 requires a real `requests.Session` there.
 Amended on [#47](https://github.com/ozanozbeker/epistole/issues/47): `connect()` sends a token only to a server that offers `AUTH XOAUTH2`.
 Amended on [#53](https://github.com/ozanozbeker/epistole/issues/53): `connect()` ignores an access token saved in an `AuthorizedUser` file.
+Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): `messages.send` replaces a client-supplied `Message-ID` with its own.
 
 ## Why
 
@@ -181,8 +182,7 @@ No backend would change.
 - Epistole maintains the input formats of two vendor constructors.
 - The glossary's *Credential* entry now covers a password and none at all.
   The glossary adds *Token credential* for what `connect()` builds.
-- Two Gmail facts need a real send, so implementation settles them.
-  The first is whether `me` resolves to the delegated subject on the `send` endpoint.
-  The second is whether `messages.send` preserves a client-supplied `Message-ID`.
-  Neither changes a rule here.
-  `SendResult.message_id` is the id Epistole set either way (ADR-0004), so the answer to the second sets one docstring sentence about what a recipient sees.
+- One Gmail fact needs a real send through a service account: whether `me` resolves to the delegated subject on the `send` endpoint.
+- `messages.send` does not preserve a client-supplied `Message-ID`, and writes its own ([#68](https://github.com/ozanozbeker/epistole/issues/68)).
+  That changes no rule here, because `SendResult.message_id` is the id Epistole set (ADR-0004).
+  Its docstring says a Gmail recipient sees a different one.

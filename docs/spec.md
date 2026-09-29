@@ -902,15 +902,16 @@ def html_to_text(html: str, /) -> str: ...
 
 These are facts the ADRs took from documentation or set conservatively.
 The decision on [#23](https://github.com/ozanozbeker/epistole/issues/23) left them out of the written spec.
-The build made no live send, so it settled none of them, and every item below is still open on #23.
+Live sends on [#68](https://github.com/ozanozbeker/epistole/issues/68) settled facts 1 and 2, and every other item below is still open on #23.
 
 **Facts.**
 None changes a signature above.
 Each changes a docstring, a private constant, or a mapping row.
 
 1. Gmail: does `messages.send` keep the `Message-ID` Epistole set in the sent message (ADR-0004, ADR-0011).
+   Settled: no, Gmail writes its own.
 2. Gmail: what happens when `From` names neither the account nor a verified alias, and which class it maps to.
-   Until a reason string is observed, it maps to `AuthenticationError` through the catch-all `403` (ADR-0001, ADR-0004).
+   Settled: Gmail sends from the account's own address, and nothing raises (ADR-0001, ADR-0004).
 3. Gmail: does `users/me` resolve to `ServiceAccount.subject` on the send endpoint (ADR-0011).
 4. Graph: does `/users/{addr-spec}` accept a delegated `TokenCredential` accessing its own mailbox, as the app-only path does (ADR-0012).
 5. Graph: is `internetMessageId` kept in the sent message on both paths (ADR-0012).

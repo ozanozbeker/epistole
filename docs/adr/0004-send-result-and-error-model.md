@@ -24,6 +24,8 @@ Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a text argu
 ADR-0008, ADR-0014, ADR-0016 and ADR-0018 apply the rule to content, addresses, custom headers and attachments.
 The SMTP mapping loses its `SMTPUTF8` row, because SMTP checks the extension itself before `send_message` (ADR-0014).
 A reason in any entry of Gmail's `errors[]` qualifies a row, and the throttle reasons are read first.
+Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): Gmail replaces the `Message-ID` Epistole wrote, and sends from the account's own address when `From` names neither the account nor a verified alias.
+Neither raises, so the send result and the mapping stay as they are.
 
 ## Why
 
@@ -34,7 +36,8 @@ Gmail returns a mailbox-local id that is not an RFC 5322 `Message-ID`.
 The only identifier that exists on all three is the `Message-ID` that `send` sets on each submission (ADR-0002).
 So the send result carries that and nothing provider-specific.
 It is never `None`, because Epistole wrote it.
-Whether Gmail and Graph keep it in the sent message is still a live-test question, open on [#23](https://github.com/ozanozbeker/epistole/issues/23).
+Gmail replaces it with its own `Message-ID` in the message it sends ([#68](https://github.com/ozanozbeker/epistole/issues/68)).
+Whether Graph keeps it is still a live-test question, open on [#23](https://github.com/ozanozbeker/epistole/issues/23).
 The answer does not change the send result: the id names the submission Epistole made either way.
 The prototype's `accepted`, `backend`, and `retry_after` fields are gone.
 A returned send result means accepted.
@@ -252,7 +255,6 @@ Epistole never sleeps and never retries.
   The contract here is only that it is the transport's own exception.
 - [#17](https://github.com/ozanozbeker/epistole/issues/17) can add an unsupported-feature class.
   The hierarchy is flat, so nothing here prevents it.
-- Only a real send shows what Gmail does when the `From` header names neither the account nor a verified alias.
-  So its mapping is unknown until implementation.
-  Rewrite, reject, and send-as-given each map to a different class above.
-  ADR-0001 records the same open question for the from address.
+- Gmail sends a message whose `From` header names neither the account nor a verified alias, with the account's own address in `From` ([#68](https://github.com/ozanozbeker/epistole/issues/68)).
+  Nothing raises, so no class above applies.
+  ADR-0001 records the same answer for the from address.

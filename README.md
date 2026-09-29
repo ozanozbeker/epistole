@@ -395,7 +395,7 @@ Use **Gmail** when you are already authenticated against a Google account and wo
 | Largest attachment | shares the message limit | shares the message limit | 150 MB, via upload session |
 | Per-recipient refusals | visible | not expressible | not expressible |
 | Retry hint | none | none documented | `Retry-After` |
-| MIME you send | unchanged | unchanged | rebuilt by Exchange |
+| MIME you send | unchanged | unchanged, except the `Message-ID` | rebuilt by Exchange |
 | Recipients per message | server policy | 500 | 500 |
 | Credentials | anonymous, `Password`, or `OAuth` | `ServiceAccount` or `AuthorizedUser` | `ClientSecret`, `Certificate`, or `ManagedIdentity` |
 
@@ -421,7 +421,8 @@ Graph works under all of these settings.
 The per-mailbox SMTP AUTH setting overrides the organization setting, so one enabled mailbox is the documented workaround.
 
 **Weigh fidelity against features.**
-SMTP and Gmail take the complete RFC 5322 message Epistole builds, so the recipient receives exactly what you send.
+SMTP and Gmail take the complete RFC 5322 message Epistole builds, so the recipient receives the MIME structure you send.
+The Gmail API does replace its `Message-ID` with one of its own.
 Graph takes a flat JSON array, and Exchange serializes the MIME later.
 So Epistole can guarantee that your `cid:` references resolve, but not the MIME structure around them.
 In exchange, Graph is the only backend that returns how long to wait when it throttles you.
@@ -451,26 +452,30 @@ Fuller working is in `docs/research/send-boundary-semantics.md` and `docs/resear
 
 ## Tested mail services
 
-A row here means a real send through that mail service passed the `tests/test_live_*.py` checks, and the service kept the `Message-ID` that Epistole set.
+A row here means a real send through that mail service passed the `tests/test_live_*.py` checks.
 `docs/research/live-send-findings.md` records each reply.
 
 | Mail service | Backend | Credential | Security | Tested on |
 | --- | --- | --- | --- | --- |
 | iCloud Mail, including an iCloud+ custom domain | `SMTPBackend` on `smtp.mail.me.com` | `smtp.Password` with the full iCloud address and an app-specific password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
 | Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.Password` with the Gmail address and an app password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
+| Gmail | `GmailBackend` | `gmail.AuthorizedUser` with a consent saved from your own Google Cloud OAuth client | HTTPS | 2026-09-29 |
 
 A Gmail app password needs 2-Step Verification.
 Create one under App passwords on your Google Account's [security page](https://myaccount.google.com/security).
+`GmailBackend` needs your own OAuth client instead, and issue [#68](https://github.com/ozanozbeker/epistole/issues/68) lists the steps.
 
-The two services differ on two mistakes:
+The rows differ in three ways:
 
+- iCloud and Gmail over SMTP keep the `Message-ID` that Epistole sets.
+  The Gmail API replaces it, so a recipient sees a different one than `SendResult.message_id`.
 - A from address the account does not own raises `SenderRefusedError` on iCloud.
-  Gmail sends the message anyway, with the account's own address in `From`.
+  Gmail, over SMTP and over its API, sends the message anyway, with the account's own address in `From`.
 - A wrong password raises `AuthenticationError` on iCloud.
-  On Gmail it can raise `TransportError`, because Gmail sometimes closes the connection after a failed login.
+  On Gmail over SMTP it can raise `TransportError`, because Gmail sometimes closes the connection after a failed login.
   Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
-No mail service has passed a real send through SMTP `OAuth`, `GmailBackend`, or `GraphBackend` yet.
+No mail service has passed a real send through SMTP `OAuth` or `GraphBackend` yet.
 Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
 
 ## Credit

@@ -37,7 +37,7 @@ class SendResult:
     Attributes
     ----------
     message_id
-        The `Message-ID` the send set, with its angle brackets.
+        The `Message-ID` the send set, with its angle brackets. The Gmail API replaces it with its own, so a recipient of a `GmailBackend` send sees a different one.
     date
         The `Date` the send set, timezone-aware in the sending machine's offset.
     refused
