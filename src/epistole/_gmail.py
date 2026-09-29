@@ -176,18 +176,18 @@ def _mapping() -> Generator[None]:
 
 
 def _mapped(response: httpx2.Response) -> EpistoleError:
-    """Return the Epistole error for a status outside 2xx, preferring a row qualified by `errors[].reason` (ADR-0004)."""
+    """Return the Epistole error for a status outside 2xx, preferring a row qualified by a reason in any entry of `errors[]` (ADR-0004)."""
     status: int = response.status_code
-    reason, detail = _envelope(response)
-    label: str = f"{status} {reason}" if reason else str(status)
+    reasons, detail = _envelope(response)
+    label: str = " ".join([str(status), *reasons])
     msg = f"Gmail replied {label}: {detail}"
     if status == HTTPStatus.TOO_MANY_REQUESTS or (
-        status == HTTPStatus.FORBIDDEN and reason in _THROTTLED
+        status == HTTPStatus.FORBIDDEN and not _THROTTLED.isdisjoint(reasons)
     ):
         return ThrottledError(msg, retry_after=_http.retry_after(response))
 
     if status in {HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND} or (
-        status == HTTPStatus.FORBIDDEN and reason == "domainPolicy"
+        status == HTTPStatus.FORBIDDEN and "domainPolicy" in reasons
     ):
         return RejectedError(msg)
 
@@ -220,18 +220,23 @@ def _oauth_error(response: httpx2.Response) -> tuple[str, str]:
         return str(body.get("error", "")), str(
             body.get("error_description", response.reason_phrase)
         )
-    except (ValueError, TypeError, AttributeError):
+    except _http.REPLY_ERRORS:
         return "", response.reason_phrase
 
 
-def _envelope(response: httpx2.Response) -> tuple[str, str]:
-    """Return the first `errors[].reason` and the `message` of Google's error envelope."""
+def _envelope(response: httpx2.Response) -> tuple[list[str], str]:
+    """Return the reason of each entry in `errors[]` that has one, and the `message` of Google's error envelope."""
     try:
         error: dict[str, Any] = response.json()["error"]
-        errors: list[dict[str, Any]] = error.get("errors") or [{}]
-        return str(errors[0].get("reason", "")), str(error.get("message", ""))
-    except (ValueError, LookupError, TypeError, AttributeError):
-        return "", response.reason_phrase
+        errors: list[dict[str, Any]] = error.get("errors") or []
+        reasons = [
+            str(one["reason"])
+            for one in errors
+            if isinstance(one, dict) and one.get("reason")
+        ]
+        return reasons, str(error.get("message", ""))
+    except _http.REPLY_ERRORS:
+        return [], response.reason_phrase
 
 
 class _GoogleTokens:

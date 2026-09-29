@@ -10,6 +10,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from email import message_from_bytes
+from email.policy import default
 from pathlib import Path
 from smtplib import (
     SMTP,
@@ -24,7 +26,6 @@ from smtplib import (
     SMTPSenderRefused,
     SMTPServerDisconnected,
 )
-from types import NoneType
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs
 
@@ -268,6 +269,16 @@ class Credential:
         return AccessToken("token-1", int(time.time()) + 3600)
 
 
+class Broken:
+    """A `TokenCredential` whose `get_token` raises `error`."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def get_token(self, *_: str) -> AccessToken:
+        raise self.error
+
+
 class Issuer:
     """A fake of the token endpoints of Microsoft and Google, which issues `token-1` and records each request.
 
@@ -394,6 +405,22 @@ def test_an_anonymous_send_submits_the_message_and_quits(serve: Callable[..., Se
     assert server.commands[1].startswith("mail from:<reports@example.com>")
     assert server.commands[2] == "rcpt to:<ada@example.com>"
     assert f"Message-ID: {result.message_id}".encode() in server.messages[0]
+
+
+def test_each_line_break_goes_out_as_crlf_and_each_part_ends_with_one(
+    serve: Callable[..., Server],
+):
+    server = serve()
+
+    backend(server).send(
+        Message(html="<p>Weekly</p>", text="Weekly\rnumbers").to("ada@example.com")
+    )
+
+    parts = message_from_bytes(server.messages[0], policy=default).iter_parts()
+    assert [part.get_payload(decode=True) for part in parts] == [
+        b"Weekly\r\nnumbers\r\n",
+        b"<p>Weekly</p>\r\n",
+    ]
 
 
 def test_the_envelope_names_to_cc_and_bcc_in_order_and_the_message_hides_bcc(
@@ -702,6 +729,18 @@ def test_a_missing_key_file_stays_a_file_not_found_error(
     assert all(one.is_closed for one in issuer.clients)
 
 
+def test_an_error_from_get_token_stays_unmapped(serve: Callable[..., Server]):
+    error = TypeError("get_token failed")
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=Broken(error), scope=OUTLOOK
+    )
+
+    with pytest.raises(TypeError) as caught:
+        backend(serve(), credential=oauth).connect()
+
+    assert caught.value is error
+
+
 @pytest.mark.parametrize("fixture", ["secret", "authorized_user"])
 def test_a_network_failure_getting_the_token_is_a_transport_error(
     serve: Callable[..., Server],
@@ -916,6 +955,11 @@ def test_a_credential_of_another_type_raises():
 def test_an_unknown_security_raises():
     with pytest.raises(ValueError, match="'ssl'"):
         SMTPBackend("127.0.0.1", security="ssl", from_address="reports@example.com")  # pyrefly: ignore
+
+
+def test_a_security_that_is_not_a_str_raises_value_error():
+    with pytest.raises(ValueError, match=r"\['tls'\]"):
+        SMTPBackend("127.0.0.1", security=["tls"], from_address="reports@example.com")  # pyrefly: ignore
 
 
 # --- Refusals ----------------------------------------------------------------
@@ -1228,36 +1272,24 @@ def test_a_non_ascii_body_under_ascii_headers_goes_out_in_7_bits(
     assert server.messages[0].isascii()
 
 
-# smtplib checks a non-ASCII envelope itself, and Epistole checks the rest.
 @pytest.mark.parametrize(
-    ("sent", "cause", "reason"),
+    "sent",
     [
-        pytest.param(message(NON_ASCII), SMTPNotSupportedError, "SMTPUTF8", id="to"),
-        pytest.param(
-            message().reply_to(NON_ASCII), NoneType, "Reply-To", id="reply_to"
-        ),
-        pytest.param(
-            message().headers({"Sender": NON_ASCII}),
-            NoneType,
-            "custom header",
-            id="custom header",
-        ),
+        pytest.param(message(NON_ASCII), id="to"),
+        pytest.param(message().reply_to(NON_ASCII), id="reply_to"),
+        pytest.param(message().headers({"Sender": NON_ASCII}), id="custom header"),
     ],
 )
 @pytest.mark.parametrize(
     "replies", [{}, {"EHLO": "502 5.5.1 no"}], ids=["EHLO", "HELO"]
 )
 def test_a_non_ascii_address_without_smtputf8_is_rejected_before_mail_from(
-    serve: Callable[..., Server],
-    sent: Message,
-    cause: type[BaseException | None],
-    reason: str,
-    replies: dict[str, Reply],
+    serve: Callable[..., Server], sent: Message, replies: dict[str, Reply]
 ):
     server = serve(replies, extensions=("8BITMIME",))
 
-    with pytest.raises(RejectedError, match=reason) as caught:
+    with pytest.raises(RejectedError, match="SMTPUTF8") as caught:
         backend(server).send(sent)
 
-    assert type(caught.value.__cause__) is cause
+    assert caught.value.__cause__ is None
     assert "MAIL" not in server.verbs()

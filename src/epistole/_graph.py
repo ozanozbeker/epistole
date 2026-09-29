@@ -299,7 +299,7 @@ def _envelope(response: httpx2.Response) -> tuple[str, str]:
     try:
         error: dict[str, Any] = response.json()["error"]
         return str(error.get("code", "")), str(error.get("message", ""))
-    except (ValueError, LookupError, TypeError, AttributeError):
+    except _http.REPLY_ERRORS:
         return "", response.reason_phrase
 
 
@@ -307,7 +307,7 @@ def _read(response: httpx2.Response, name: str) -> str:
     """Return the field `name` of a Graph reply, raising `ProviderError` unless it is a non-empty string."""
     try:
         value: object = response.json()[name]
-    except (ValueError, LookupError, TypeError) as error:
+    except _http.REPLY_ERRORS as error:
         msg = f"Graph's reply holds no {name}."
         raise ProviderError(msg) from error
 

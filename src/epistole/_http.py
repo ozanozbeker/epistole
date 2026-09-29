@@ -18,8 +18,15 @@ if TYPE_CHECKING:
 _TIMEOUT = 60
 """Seconds for connect, read, write and pool, on token and mail endpoint requests alike. No setting changes it (ADR-0009)."""
 
-REPLY_ERRORS = (AttributeError, LookupError, OverflowError, TypeError, ValueError)
-"""The classes `google-auth` and `msal` raise reading a token reply they cannot parse, such as one that is not a JSON object (ADR-0009)."""
+REPLY_ERRORS = (
+    AttributeError,
+    LookupError,
+    OverflowError,
+    RecursionError,
+    TypeError,
+    ValueError,
+)
+"""The classes `json`, `google-auth` and `msal` raise reading a reply they cannot parse, such as one that is not a JSON object or is nested too deeply (ADR-0009)."""
 
 
 class Tokens(Protocol):

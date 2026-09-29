@@ -118,17 +118,26 @@ def india_standard_time() -> Iterator[None]:
 
 # --- Backend -----------------------------------------------------------------
 
-
-@pytest.mark.parametrize(
+BACKENDS = pytest.mark.parametrize(
     "build",
     [
         MemoryBackend,
+        ConsoleBackend,
         partial(SMTPBackend, "smtp.example.com"),
         partial(GmailBackend, credential=SERVICE_ACCOUNT),
         partial(GraphBackend, credential=SECRET),
     ],
-    ids=["MemoryBackend", "SMTPBackend", "GmailBackend", "GraphBackend"],
+    ids=[
+        "MemoryBackend",
+        "ConsoleBackend",
+        "SMTPBackend",
+        "GmailBackend",
+        "GraphBackend",
+    ],
 )
+
+
+@BACKENDS
 @pytest.mark.parametrize(
     "address",
     [
@@ -141,6 +150,15 @@ def india_standard_time() -> Iterator[None]:
 def test_a_backend_checks_its_from_address(build: Callable[..., Backend], address: str):
     with pytest.raises(ValueError, match=re.escape(repr(address))):
         build(from_address=address)
+
+
+@BACKENDS
+@pytest.mark.parametrize("value", [5, b"x"], ids=["int", "bytes"])
+def test_a_from_address_that_is_not_a_str_raises_type_error_naming_it(
+    build: Callable[..., Backend], value: object
+):
+    with pytest.raises(TypeError, match="from_address="):
+        build(from_address=value)
 
 
 @pytest.mark.parametrize("backend", [SMTPBackend, GmailBackend, GraphBackend])
@@ -174,6 +192,16 @@ def test_from_address_is_keyword_only(backend: type[Backend]):
 def test_a_credential_is_frozen(credential: object, field: str):
     with pytest.raises(dataclasses.FrozenInstanceError):
         setattr(credential, field, None)
+
+
+@BACKENDS
+def test_from_address_cannot_be_assigned(build: Callable[..., Backend]):
+    backend = build(from_address="reports@example.com")
+
+    with pytest.raises(AttributeError):
+        backend.from_address = "garbage"  # pyrefly: ignore
+
+    assert backend.from_address != "garbage"
 
 
 @pytest.mark.parametrize("double", [MemoryBackend, ConsoleBackend])
@@ -329,6 +357,8 @@ def test_a_message_with_no_recipient_never_reaches_the_transport():
     [
         '<p>Weekly numbers</p><img src="cid:chart.png">',
         '<IMG SRC=" CID:chart.png ">',
+        '<img src=" \tcid:chart.png">',
+        '<!--><img src="cid:chart.png"><!-- -->',
         '<img src="cid:logo.png"><img src="cid:chart.png">',
     ],
 )
@@ -354,8 +384,16 @@ def test_send_needs_an_inline_image_for_every_cid_an_img_names(html: str):
         ),
         Message(html='<!-- <img src="cid:logo.png"> -->'),
         Message(html='<td style="background: url(cid:logo.png)">'),
+        # A URL parser strips only U+0000 to U+0020, so this src is a relative URL.
+        Message(html='<img src="\u00a0cid:logo.png">'),
     ],
-    ids=["embedded", "percent-encoded", "in a comment", "outside an img"],
+    ids=[
+        "embedded",
+        "percent-encoded",
+        "in a comment",
+        "outside an img",
+        "after a no-break space",
+    ],
 )
 def test_a_cid_that_resolves_or_that_no_img_names_sends(built: Message):
     backend = MemoryBackend()
@@ -456,6 +494,24 @@ def test_submissions_is_the_same_list_throughout():
     assert backend.submissions is submissions
 
 
+def test_submissions_cannot_be_assigned():
+    backend = MemoryBackend()
+
+    with pytest.raises(AttributeError):
+        backend.submissions = []  # pyrefly: ignore
+
+
+def test_clear_empties_the_list_an_open_connection_appends_to():
+    backend = MemoryBackend()
+
+    with backend.connect() as connection:
+        connection.send(message())
+        backend.submissions.clear()
+        connection.send(message())
+
+    assert len(backend.submissions) == 1
+
+
 def test_a_refusal_does_not_stop_the_recipients_that_were_accepted():
     backend = MemoryBackend(refuse={"ada@example.com": REFUSED})
 
@@ -514,6 +570,12 @@ def test_refuse_reaches_a_cc_and_a_bcc():
 def test_refuse_checks_the_addresses_it_was_given(address: str):
     with pytest.raises(ValueError, match=re.escape(repr(address))):
         MemoryBackend(refuse={address: REFUSED})
+
+
+@pytest.mark.parametrize("key", [5, b"x"], ids=["int", "bytes"])
+def test_a_refuse_key_that_is_not_a_str_raises_type_error_naming_refuse(key: object):
+    with pytest.raises(TypeError, match="refuse="):
+        MemoryBackend(refuse={key: REFUSED})  # pyrefly: ignore
 
 
 # --- ConsoleBackend ----------------------------------------------------------
@@ -754,3 +816,24 @@ def test_a_domain_the_codec_cannot_encode_raises(domain: str):
 
     with pytest.raises(ValueError, match="Message-ID"):
         backend.send(message())
+
+
+# The IDNA codec reads U+3002 as a dot, so the last domain ends with an empty label too.
+@pytest.mark.parametrize(
+    "domain",
+    ["example..com", ".example.com", "example.com.", "例子.广告.", "例子。广告。"],
+)
+def test_a_domain_with_an_empty_label_raises_at_send(domain: str):
+    backend = MemoryBackend(from_address=f"ada@{domain}")
+
+    with pytest.raises(ValueError, match="Message-ID"):
+        backend.send(message())
+
+    assert backend.submissions == []
+
+
+def test_an_ascii_label_of_64_characters_sends():
+    domain = f"{'a' * 64}.example.com"
+    backend = MemoryBackend(from_address=f"ada@{domain}")
+
+    assert backend.send(message()).message_id.endswith(f"@{domain}>")

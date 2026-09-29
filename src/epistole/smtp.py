@@ -15,7 +15,6 @@ from smtplib import (
     SMTPConnectError,
     SMTPException,
     SMTPHeloError,
-    SMTPNotSupportedError,
     SMTPRecipientsRefused,
     SMTPResponseException,
     SMTPSenderRefused,
@@ -109,7 +108,7 @@ class SMTPBackend(Backend):
     ) -> None:
         super().__init__(from_address=from_address)
         # A typo would otherwise fall through to plaintext and send the password in the clear.
-        if security not in {"starttls", "tls", "none"}:
+        if not isinstance(security, str) or security not in {"starttls", "tls", "none"}:
             msg = f"security={security!r} is not one of 'starttls', 'tls' or 'none'."
             raise ValueError(msg)
 
@@ -276,15 +275,15 @@ class _SMTPTransport:
             dict.fromkeys(addr_spec(one) for one in submission.message.recipients)
         )
         options: tuple[str, ...] = ()
-        if cast("EmailPolicy", mime.policy).utf8 and all(
-            one.isascii() for one in (mail_from, *rcpt_to)
-        ):
-            # send_message adds SMTPUTF8 for a non-ASCII envelope alone, and sendmail drops every option after HELO (ADR-0014).
+        if cast("EmailPolicy", mime.policy).utf8:
+            # send_message checks a non-ASCII envelope alone, and its error would become the cause (ADR-0014).
             if not self._smtp.has_extn("smtputf8"):
-                msg = "The message needs SMTPUTF8, because Reply-To holds a non-ASCII address or a custom header holds a non-ASCII value. The server does not advertise SMTPUTF8."
+                msg = "The message needs SMTPUTF8 for its non-ASCII headers, and the server does not advertise SMTPUTF8."
                 raise RejectedError(msg)
 
-            options = ("SMTPUTF8", "BODY=8BITMIME")
+            # send_message adds these for a non-ASCII envelope alone.
+            if all(one.isascii() for one in (mail_from, *rcpt_to)):
+                options = ("SMTPUTF8", "BODY=8BITMIME")
 
         try:
             refused: dict[str, tuple[int, bytes]] = self._smtp.send_message(
@@ -315,7 +314,7 @@ class _SMTPTransport:
 def _mapped(error: OSError, /, *, sending: bool) -> EpistoleError:
     """Return the Epistole error for a native `smtplib` failure, by the SMTP mapping in ADR-0004.
 
-    `sending` is whether `send_message` raised it rather than a step of `connect()`, because `SMTPNotSupportedError` and a bare `SMTPException` map to a different class in each.
+    `sending` is whether `send_message` raised it rather than a step of `connect()`, because an `SMTPException` that no other row matches maps to a different class in each.
     """
     code: int = getattr(error, "smtp_code", 0)
     reply: bytes | str = getattr(error, "smtp_error", str(error))
@@ -332,9 +331,6 @@ def _mapped(error: OSError, /, *, sending: bool) -> EpistoleError:
         kind = RejectedError if code == _TOO_BIG else SenderRefusedError
     elif isinstance(error, SMTPAuthenticationError):
         kind = AuthenticationError
-    elif isinstance(error, SMTPNotSupportedError):
-        # send_message raises it for a missing SMTPUTF8, and login for a missing AUTH.
-        kind = RejectedError if sending else AuthenticationError
     elif isinstance(
         error, (SMTPConnectError, SMTPHeloError, SMTPServerDisconnected)
     ) or not isinstance(error, SMTPException):
@@ -342,7 +338,7 @@ def _mapped(error: OSError, /, *, sending: bool) -> EpistoleError:
     elif isinstance(error, SMTPResponseException):
         kind = RejectedError if code // 100 == _PERMANENT else ProviderError
     else:
-        # login raises a bare SMTPException when smtplib supports none of the server's mechanisms, and no retry fixes that.
+        # login raises SMTPNotSupportedError for a server without AUTH, and a bare SMTPException when smtplib supports none of its mechanisms. No retry fixes either.
         kind = ProviderError if sending else AuthenticationError
 
     return kind(msg)

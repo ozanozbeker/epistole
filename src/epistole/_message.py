@@ -12,15 +12,20 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, override
 from urllib.parse import unquote, unquote_to_bytes
 
-from epistole._address import LINE_BREAK, check_address, check_encodable
+from epistole._address import LINE_BREAK, check_address, check_text
 from epistole._text import Parser, html_to_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from typing import BinaryIO
 
-_MEDIA_TYPE = re.compile(r"[A-Za-z0-9][\w!#$&^.+-]*/[A-Za-z0-9][\w!#$&^.+-]*", re.ASCII)
-"""The type and the subtype each match RFC 6838's restricted-name."""
+_MEDIA_TYPE = re.compile(
+    r"[A-Za-z0-9][\w!#$&^.+-]{0,126}/[A-Za-z0-9][\w!#$&^.+-]{0,126}", re.ASCII
+)
+"""The type and the subtype each match RFC 6838's restricted-name, which is at most 127 characters."""
+
+_C0_CONTROL_OR_SPACE = "".join(map(chr, range(0x21)))
+"""The WHATWG URL parser strips these, U+0000 to U+0020, from both ends of a URL and nothing else. `str.strip()` would also strip U+00A0 (ADR-0003)."""
 
 _COMPOSITE_PREFIXES = ("message/", "multipart/")
 """RFC 2045 calls these the composite types and forbids base64 on them. The RFC 5322 builder writes every attachment as base64 (ADR-0018)."""
@@ -93,9 +98,9 @@ class Message:
     Raises
     ------
     TypeError
-        When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`.
+        When both `html` and `markdown` are supplied, when no content is supplied, or when `text_renderer` accompanies `text` or `markdown`. When `html`, `markdown`, or `text` is not a `str`, or when `text_renderer` returns something other than a `str`.
     ValueError
-        When `html`, `markdown`, or `text` holds a surrogate. When `text_renderer` returns something other than a `str`, or text that holds a surrogate. When the payload of a `data:` image does not decode. See ADR-0003 and ADR-0008.
+        When `html`, `markdown`, or `text` holds a surrogate, or when `text_renderer` returns text that holds one. When the payload of a `data:` image does not decode. See ADR-0003 and ADR-0008.
     ImportError
         When `markdown` is supplied and `epistole[markdown]` is not installed.
     """
@@ -150,9 +155,7 @@ class Message:
             raise TypeError(msg)
 
         # Runs before the data: rewrite, whose decoder raises its own error on a surrogate.
-        check_encodable(html, "html=")
-        check_encodable(markdown, "markdown=")
-        check_encodable(text, "text=")
+        _check_content(html=html, markdown=markdown, text=text)
 
         if markdown is not None:
             try:
@@ -176,9 +179,9 @@ class Message:
             )(html)
             if not isinstance(rendered, str):
                 msg = f"text_renderer= returned {type(rendered).__name__}, not str"
-                raise ValueError(msg)
+                raise TypeError(msg)
 
-            check_encodable(rendered, "the text that text_renderer= returned")
+            check_text(rendered, "the text that text_renderer= returned")
             text = rendered
 
         _write(
@@ -220,14 +223,15 @@ class Message:
 
         Raises
         ------
+        TypeError
+            When `subject` is not a `str`.
         ValueError
             When `subject` holds a line break or a surrogate. See ADR-0016.
         """
+        check_text(subject, f"the subject {subject!r}")
         if LINE_BREAK.search(subject):
             msg = f"{subject!r} holds a line break, such as \\r or \\n. A subject is one line."
             raise ValueError(msg)
-
-        check_encodable(subject, f"the subject {subject!r}")
 
         return self._copy(subject_=subject)
 
@@ -238,8 +242,10 @@ class Message:
 
         Raises
         ------
+        TypeError
+            When a name or a value is not a `str`.
         ValueError
-            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII. When a name is `Resent-Bcc` or a name Epistole writes. When a value is not a `str`, or holds a line break or a surrogate.
+            When `mapping` is empty, or when two names differ only in case. When a name holds a space, a colon, or a character outside printable ASCII. When a name is `Resent-Bcc` or a name Epistole writes. When a value holds a line break or a surrogate.
         """
         pairs: tuple[tuple[str, str], ...] = _checked_headers(mapping)
         return self._copy(_header_pairs=pairs, headers_=MappingProxyType(dict(pairs)))
@@ -266,9 +272,9 @@ class Message:
         Raises
         ------
         TypeError
-            When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. See ADR-0018.
+            When `source` is a `str`, a `bytearray`, a `memoryview`, or a text-mode file, or when the caller passes a source other than a `Path` without `filename`. When `filename` or `content_type` is not a `str`. See ADR-0018.
         ValueError
-            When the filename holds a line break or a surrogate, or when `content_type` is not a bare `type/subtype`, such as one with parameters. When `content_type` is a `message/*` or `multipart/*` type. See ADR-0018.
+            When the filename holds a line break or a surrogate, or when `content_type` is not a bare `type/subtype`, such as one with parameters or a name over 127 characters. When `content_type` is a `message/*` or `multipart/*` type. See ADR-0018.
         """
         name: str = _filename(source, filename)
         kind: str = _content_type(name, content_type)
@@ -307,16 +313,16 @@ class Message:
         Raises
         ------
         TypeError
-            As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`.
+            As for `.attach()`, or when the caller passes a source other than a `Path` with neither `filename` nor `cid`. When `cid` is not a `str`.
         ValueError
             When the filename or the content id holds a line break, when the content id is not ASCII, when the content type is not `image/*`, or when the message already holds an inline image under the same content id, including one the `data:` rewrite made. When the filename or the content id holds a surrogate. See ADR-0018.
         """
         # Runs before _filename, so a line break or a surrogate in cid raises the content id error, not the filename one.
-        if cid is not None and LINE_BREAK.search(cid):
-            msg = f"the content id {cid!r} holds a line break, such as \\r or \\n. Pass cid= without one."
-            raise ValueError(msg)
-
-        check_encodable(cid, f"the content id {cid!r}")
+        if cid is not None:
+            check_text(cid, f"the content id {cid!r}")
+            if LINE_BREAK.search(cid):
+                msg = f"the content id {cid!r} holds a line break, such as \\r or \\n. Pass cid= without one."
+                raise ValueError(msg)
 
         name: str = _filename(source, filename, cid)
         kind: str = _content_type(name, content_type)
@@ -433,11 +439,18 @@ def _write(message: Message, fields: Mapping[str, object]) -> None:
         object.__setattr__(message, name, value)
 
 
+def _check_content(**contents: str | None) -> None:
+    """Check each content keyword the caller passed, skipping one left as `None`."""
+    for keyword, content in contents.items():
+        if content is not None:
+            check_text(content, f"{keyword}=")
+
+
 def _checked(address: str, more: tuple[str, ...]) -> tuple[str, ...]:
     """Check each address where the caller supplies it, and return all of them as a tuple."""
     addresses: tuple[str, *tuple[str, ...]] = (address, *more)
     for one in addresses:
-        check_address(one)
+        check_address(one, f"the address {one!r}")
 
     return addresses
 
@@ -451,7 +464,8 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
 
     seen: set[str] = set()
     for name, value in pairs:
-        if not isinstance(name, str) or _FIELD_NAME.fullmatch(name) is None:
+        check_text(name, f"the custom header name {name!r}")
+        if _FIELD_NAME.fullmatch(name) is None:
             msg = f"{name!r} is not a header name. A name is a str of one or more printable ASCII characters, with no space and no colon."
             raise ValueError(msg)
 
@@ -472,12 +486,11 @@ def _checked_headers(mapping: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
 
         seen.add(lowered)
 
+        check_text(value, f"the value of custom header {name!r}")
         # Graph sends JSON, so no stdlib check raises on a line break there (ADR-0016).
-        if not isinstance(value, str) or LINE_BREAK.search(value):
-            msg = f"the value of custom header {name!r} must be a str with no line break, such as \\r or \\n"
+        if LINE_BREAK.search(value):
+            msg = f"the value of custom header {name!r} holds a line break, such as \\r or \\n. A value is one line."
             raise ValueError(msg)
-
-        check_encodable(value, f"the value of custom header {name!r}")
 
     return pairs
 
@@ -504,11 +517,11 @@ def _filename(
         msg = f"a {type(source).__name__} source needs filename=, because only a Path supplies its own filename. .embed() takes cid= as well."
         raise TypeError(msg)
 
+    check_text(name, f"the filename {name!r}")
     if LINE_BREAK.search(name):
         msg = f"the filename {name!r} holds a line break, such as \\r or \\n. Pass filename= to name it without one."
         raise ValueError(msg)
 
-    check_encodable(name, f"the filename {name!r}")
     return name
 
 
@@ -522,6 +535,7 @@ def _content_type(filename: str, content_type: str | None) -> str:
 
         return guessed
 
+    check_text(content_type, f"content_type={content_type!r}")
     if _MEDIA_TYPE.fullmatch(content_type) is None:
         msg = f"content_type={content_type!r} is not a media type without parameters, such as 'application/pdf'"
         raise ValueError(msg)
@@ -590,14 +604,18 @@ class _ImageFinder(Parser):
         if src is None:
             return
 
-        scheme, _, cid = src.strip().partition(":")
-        if scheme.lower() == "cid":
-            self.cids.append(cid)
+        scheme, _, rest = src.strip(_C0_CONTROL_OR_SPACE).partition(":")
+        scheme = scheme.lower()
+        if scheme == "cid":
+            self.cids.append(rest)
+            return
+
+        if scheme != "data":
             return
 
         line, column = self.getpos()
         try:
-            image: Attachment | None = _inline_image(src)
+            image: Attachment | None = _inline_image(rest)
         except ValueError as error:
             msg = f"the <img> at line {line}, column {column + 1} holds a data: URI whose payload does not decode ({error}). Fix the payload, or reference the image as cid: and add it with .embed()."
             raise ValueError(msg) from error
@@ -621,15 +639,13 @@ def _src_span(start_tag: str) -> tuple[int, int] | None:
     return None
 
 
-def _inline_image(uri: str) -> Attachment | None:
-    """Return the inline image decoded from `uri` when it is a `data:` URI with an `image/*` media type, else `None`."""
-    scheme, _, rest = uri.strip().partition(":")
-    header, comma, payload = rest.partition(",")
+def _inline_image(after_scheme: str) -> Attachment | None:
+    """Return the inline image that the text after `data:` in a URI encodes, or `None` when its media type is not `image/*`."""
+    header, comma, payload = after_scheme.partition(",")
     # RFC 2045 makes a media type case-insensitive, so lowercasing it lets two spellings share one inline image.
     media_type, *parameters = (part.strip().lower() for part in header.split(";"))
     if (
-        scheme.lower() != "data"
-        or not comma
+        not comma
         or not media_type.startswith("image/")
         or _MEDIA_TYPE.fullmatch(media_type) is None
     ):

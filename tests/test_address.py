@@ -46,3 +46,14 @@ def test_a_surrogate_raises_naming_the_argument_that_holds_it(
 ):
     with pytest.raises(ValueError, match=rf"^{argument}=.* holds the surrogate"):
         Address(name.format(surrogate), email.format(surrogate))
+
+
+@pytest.mark.parametrize("value", [5, b"x", None], ids=["int", "bytes", "None"])
+@pytest.mark.parametrize("argument", ["name", "email"])
+def test_an_argument_that_is_not_a_str_raises_type_error_naming_it(
+    argument: str, value: object
+):
+    arguments: dict[str, object] = {"name": "Ada", "email": "ada@example.com"}
+
+    with pytest.raises(TypeError, match=rf"^{argument}="):
+        Address(**arguments | {argument: value})  # pyrefly: ignore

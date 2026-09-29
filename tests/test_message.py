@@ -4,6 +4,7 @@ import io
 import mimetypes
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote_from_bytes
@@ -73,6 +74,53 @@ BAD = (
 """getaddresses drops the address literals although RFC 5321 allows them, so they fail too (ADR-0014)."""
 
 
+TEXT_ARGUMENTS: dict[str, tuple[Callable[[Any], object], str]] = {
+    "html": (lambda value: Message(html=value), "html="),
+    "markdown": (lambda value: Message(markdown=value), "markdown="),
+    "text": (lambda value: Message(text=value), "text="),
+    "text_renderer return": (
+        lambda value: Message(html="<p>hi</p>", text_renderer=lambda _: value),
+        "text_renderer=",
+    ),
+    "subject": (lambda value: Message(text="hi").subject(value), "subject"),
+    "to": (lambda value: Message(text="hi").to("ada@example.com", value), "address"),
+    "cc": (lambda value: Message(text="hi").cc("ada@example.com", value), "address"),
+    "bcc": (lambda value: Message(text="hi").bcc("ada@example.com", value), "address"),
+    "reply_to": (
+        lambda value: Message(text="hi").reply_to("ada@example.com", value),
+        "address",
+    ),
+    "attach filename": (
+        lambda value: Message(text="hi").attach(PDF, filename=value),
+        "filename",
+    ),
+    "attach content_type": (
+        lambda value: Message(text="hi").attach(
+            PDF, filename="weekly.pdf", content_type=value
+        ),
+        "content_type=",
+    ),
+    "embed filename": (
+        lambda value: Message(text="hi").embed(PNG, filename=value, cid="logo.png"),
+        "filename",
+    ),
+    "embed cid": (lambda value: Message(text="hi").embed(PNG, cid=value), "content id"),
+    "embed content_type": (
+        lambda value: Message(text="hi").embed(PNG, cid="logo.png", content_type=value),
+        "content_type=",
+    ),
+    "header name": (
+        lambda value: Message(text="hi").headers({value: "autumn"}),
+        "header name",
+    ),
+    "header value": (
+        lambda value: Message(text="hi").headers({"X-Campaign-Id": value}),
+        "custom header 'X-Campaign-Id'",
+    ),
+}
+"""Each call passes `value` as one text argument, and the string beside it is the name the `TypeError` gives that argument (ADR-0004)."""
+
+
 def test_a_message_carries_the_text_it_was_built_with():
     assert Message(text="Weekly numbers").text == "Weekly numbers"
 
@@ -125,11 +173,6 @@ def test_an_error_from_text_renderer_propagates_unchanged():
     assert raised.value is error
 
 
-def test_text_renderer_returning_a_non_str_raises():
-    with pytest.raises(ValueError, match="bytes"):
-        Message(html="<p>Weekly numbers</p>", text_renderer=lambda _: b"Rendered")  # pyrefly: ignore
-
-
 @pytest.mark.parametrize("surrogate", SURROGATES)
 def test_text_renderer_returning_a_surrogate_raises(surrogate: str):
     with pytest.raises(ValueError, match="text_renderer= returned holds the surrogate"):
@@ -149,6 +192,17 @@ def test_content_holding_a_surrogate_raises_naming_its_keyword(
 
     with pytest.raises(ValueError, match=rf"^{keyword}= holds the surrogate"):
         Message(**content)
+
+
+@pytest.mark.parametrize("value", [5, b"x"], ids=["int", "bytes"])
+@pytest.mark.parametrize(
+    ("build", "argument"), TEXT_ARGUMENTS.values(), ids=TEXT_ARGUMENTS.keys()
+)
+def test_a_text_argument_that_is_not_a_str_raises_type_error_naming_it(
+    build: Callable[[object], object], argument: str, value: object
+):
+    with pytest.raises(TypeError, match=re.escape(argument)):
+        build(value)
 
 
 def test_a_surrogate_in_a_data_image_raises_naming_html_not_the_payload():
@@ -565,6 +619,26 @@ def test_content_type_must_be_a_media_type_without_parameters(content_type: str)
 
 @pytest.mark.parametrize(
     "content_type",
+    [f"application/{'a' * 128}", f"{'a' * 128}/pdf"],
+    ids=["subtype", "type"],
+)
+def test_a_content_type_name_over_127_characters_raises(content_type: str):
+    with pytest.raises(ValueError, match=re.escape(repr(content_type))):
+        Message(text="hi").attach(PDF, filename="weekly.pdf", content_type=content_type)
+
+
+def test_a_content_type_name_of_127_characters_is_taken():
+    content_type = f"{'a' * 127}/{'b' * 127}"
+
+    message = Message(text="hi").attach(
+        PDF, filename="weekly.pdf", content_type=content_type
+    )
+
+    assert message.attachments[0].content_type == content_type
+
+
+@pytest.mark.parametrize(
+    "content_type",
     [
         "message/rfc822",
         "message/global",
@@ -859,9 +933,38 @@ def test_the_rewrite_changes_nothing_but_the_src_values():
         f'<img data-src="{CHART}">',
         '<img src="data:text/plain;base64,aGk=">',
         '<img src="data:image/;base64,aGk=">',
+        pytest.param(
+            f'<img src="data:image/{"a" * 128};base64,aGk=">',
+            id="a subtype over 127 characters",
+        ),
+        pytest.param(f'<img src="\u00a0{CHART}">', id="after a no-break space"),
     ],
 )
 def test_a_data_uri_that_is_not_an_img_src_image_stays_as_written(html: str):
+    message = Message(html=html)
+
+    assert message.html == html
+    assert message.inline_images == ()
+
+
+# html.parser ends <!--> at once on 3.14.7 but not on 3.13.12, and --!> not on 3.13.3.
+@pytest.mark.parametrize(
+    "html",
+    [
+        f'<!--><img src="{CHART}"><!-- -->',
+        f'<!---><img src="{CHART}"><!-- -->',
+        f'<!-- a --!><img src="{CHART}"><!-- -->',
+    ],
+    ids=["<!-->", "<!--->", "--!>"],
+)
+def test_a_comment_ends_where_html5_ends_it(html: str):
+    assert Message(html=html).html == html.replace(CHART, f"cid:{content_id_of(PNG)}")
+
+
+# 3.13.3 reads an unclosed comment as text up to its first >, and parses the <img> after it.
+def test_an_unclosed_comment_runs_to_the_end_of_the_html():
+    html = f'<!-- a > <img src="{CHART}">'
+
     message = Message(html=html)
 
     assert message.html == html
@@ -1041,17 +1144,6 @@ def test_headers_takes_a_non_ascii_value():
     message = Message(text="hi").headers({"X-Campaign-Id": "automne café"})
 
     assert message.headers_ == {"X-Campaign-Id": "automne café"}
-
-
-@pytest.mark.parametrize(
-    ("mapping", "match"),
-    [({5: "autumn"}, "5"), ({"X-Campaign-Id": 5}, "'X-Campaign-Id'")],
-)
-def test_headers_raises_on_a_name_or_value_that_is_not_a_str(
-    mapping: dict[object, object], match: str
-):
-    with pytest.raises(ValueError, match=match):
-        Message(text="hi").headers(mapping)  # pyrefly: ignore
 
 
 # ADR-0016 lists these names, and the casing varies because RFC 5322 names are case-insensitive.

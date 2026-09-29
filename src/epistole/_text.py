@@ -1,10 +1,17 @@
 """`html_to_text` derives plain text from HTML on the stdlib `html.parser`, with no dependency. `Message` uses it unless the caller supplies `text=` or `text_renderer=`. Both `html_to_text` and the `data:` rewrite in `_message.py` parse with a subclass of `Parser`, so both skip the same comments."""
 
+import re
 from html.parser import HTMLParser
 from typing import override
 
+_COMMENT_END = re.compile(r"--!?>")
+"""HTML5 ends a comment at the first of these."""
+
+_EMPTY_COMMENT_END = re.compile(r"-?>")
+"""HTML5 ends a comment written as `<!-->` or `<!--->` at once."""
+
 _SKIPPED = frozenset({"script", "style", "title"})
-"""A <head> holds text only in these, so skipping them drops the head even when it is never closed."""
+"""A client displays no text in these. HTML5 moves other text in a `<head>` into the body, such as a `<noscript>` when scripting is off. So `html_to_text` keeps that text. It also keeps text in `<noframes>` and `<template>`, which no client displays."""
 
 _LINES = frozenset({"div", "li", "tr"})
 """Each of these block elements ends the line."""
@@ -32,7 +39,7 @@ _PARAGRAPHS = frozenset(
 def html_to_text(html: str, /) -> str:
     """Derive plain text from `html`.
 
-    It writes a link as `label <url>`, or as the label alone when the label is already the URL or the `mailto:` address, or when the URL is a fragment such as `#top`. It keeps the line breaks and indentation of a `<pre>` block, such as a code block or a log. It starts a list item with `- `. It writes a table row on one line with ` | ` between its cells. It writes empty cells too, so it never shifts a value into the wrong column. It writes an image as its alt text in brackets. It drops `<head>`, `<style>`, `<script>`, `<title>`, and comments. It decodes entities. It returns `""` for HTML that holds no text, such as a lone image with no alt text.
+    It writes a link as `label <url>`, or as the label alone when the label is already the URL or the `mailto:` address, or when the URL is a fragment such as `#top`. It keeps the line breaks and indentation of a `<pre>` block, such as a code block or a log. It starts a list item with `- `. It writes a table row on one line with ` | ` between its cells when the cells hold only inline content. A block or a `<br>` inside a cell starts a new line, so the paragraphs of a layout table stay apart. It writes empty cells too, so it never shifts a value into the wrong column. It writes an image as its alt text in brackets. It drops `<style>`, `<script>`, `<title>`, and comments. It decodes entities. It returns `""` for HTML that holds no text, such as a lone image with no alt text.
 
     It never raises on malformed HTML. The output is best effort and not a contract, so it may change in a minor version. Pass `text=` to `Message` when the exact text matters. See ADR-0008.
 
@@ -52,7 +59,40 @@ def html_to_text(html: str, /) -> str:
 
 
 class Parser(HTMLParser):
-    """A parser reads every `<![` as a comment that ends at the next `>`, as HTML5 does outside SVG and MathML."""
+    """A parser reads comments as HTML5 does, on every supported Python.
+
+    It ends a comment at the first `-->` or `--!>`, or at once when written `<!-->` or `<!--->`. A comment that nothing ends runs to the end of the input. It reads every `<![` as a comment that ends at the next `>`, as HTML5 does outside SVG and MathML. See ADR-0003.
+
+    It departs from HTML5 in three places. It ends a `<![CDATA[` inside `<svg>` at the first `>`. It does not read `<image>` as `<img>`. It reads an `<img>` inside `<template>`, which a client never renders.
+    """
+
+    _closing = False
+    """Whether `close()` is parsing the rest of the input, so a comment that nothing ends runs to its end."""
+
+    @override
+    def close(self) -> None:
+        self._closing = True
+        super().close()
+
+    @override
+    def parse_comment(self, i: int, report: bool = True) -> int:
+        # html.parser ends a comment this way on 3.14.7, but not on 3.13.12 or 3.13.3.
+        start: int = i + len("<!--")
+        match = _EMPTY_COMMENT_END.match(self.rawdata, start) or _COMMENT_END.search(
+            self.rawdata, start
+        )
+        if match is not None:
+            stop, end = match.start(), match.end()
+        elif self._closing:
+            # 3.13.3 reads an unclosed comment as text up to its first >.
+            stop = end = len(self.rawdata)
+        else:
+            return -1
+
+        if report:
+            self.handle_comment(self.rawdata[start:stop])
+
+        return end
 
     @override
     def parse_html_declaration(self, i: int) -> int:

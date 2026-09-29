@@ -57,8 +57,6 @@ class MemoryBackend(Backend):
     ```
     """
 
-    submissions: list[Submission]
-
     def __init__(
         self,
         *,
@@ -66,12 +64,17 @@ class MemoryBackend(Backend):
         refuse: Mapping[str, Refusal] | None = None,
     ) -> None:
         super().__init__(from_address=from_address)
-        self.submissions = []
+        self._submissions: list[Submission] = []
         self._refuse: dict[str, Refusal] = _by_addr_spec(refuse or {})
+
+    @property
+    def submissions(self) -> list[Submission]:
+        """Return the list every connection appends to, which has no setter because an open connection would keep appending to the old one (ADR-0005)."""
+        return self._submissions
 
     @override
     def _open(self) -> Transport:
-        return _MemoryTransport(self.submissions, self._refuse)
+        return _MemoryTransport(self._submissions, self._refuse)
 
 
 class _MemoryTransport:
@@ -211,6 +214,6 @@ def _render(submission: Submission) -> str:
 def _by_addr_spec(refuse: Mapping[str, Refusal]) -> dict[str, Refusal]:
     """Check each key of `refuse`, and key the refusals by addr-spec so a key with a display name still matches."""
     for address in refuse:
-        check_address(address)
+        check_address(address, f"the refuse= key {address!r}")
 
     return {addr_spec(address): refusal for address, refusal in refuse.items()}

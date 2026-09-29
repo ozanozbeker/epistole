@@ -35,11 +35,14 @@ class Backend(ABC):
         The mailbox every submission is sent from, checked at construction. No send can override it. See ADR-0001.
     """
 
-    from_address: str
-
     def __init__(self, *, from_address: str) -> None:
-        check_address(from_address)
-        self.from_address = from_address
+        check_address(from_address, f"from_address={from_address!r}")
+        self._from_address = from_address
+
+    @property
+    def from_address(self) -> str:
+        """Return the from address, which has no setter because assigning one would skip the check (ADR-0005)."""
+        return self._from_address
 
     def send(self, message: Message, /) -> SendResult:
         """Send one message over a connection opened and closed for it.
@@ -107,7 +110,7 @@ class Connection:
         Raises
         ------
         ValueError
-            When the connection is closed, when the message names no recipient, or when an `<img src>` names a `cid:` that no inline image holds.
+            When the connection is closed, when the message names no recipient, or when an `<img src>` names a `cid:` that no inline image holds. When a `Message-ID` cannot hold the from address's domain, such as a domain with an empty label. See ADR-0015.
         RecipientsRefusedError
             When the service refused every recipient.
         EpistoleError
@@ -266,17 +269,21 @@ class AccessToken(Protocol):
 def _domain(from_address: str) -> str:
     """Return the from address's domain for a `Message-ID`, IDNA-encoded when it is not ASCII.
 
-    The codec raises on an empty label, or on a label longer than 63 characters once encoded. See ADR-0015 for the rationale.
+    The empty-label check reads the encoded domain, because the codec reads U+3002 and two other characters as a dot. See ADR-0015.
     """
     domain: str = addr_spec(from_address).rpartition("@")[2]
-    if domain.isascii():
-        return domain
+    if not domain.isascii():
+        try:
+            domain = domain.encode("idna").decode("ascii")
+        except UnicodeError as error:
+            msg = f"{from_address!r} has a domain that cannot be written into a Message-ID: {error}"
+            raise ValueError(msg) from error
 
-    try:
-        return domain.encode("idna").decode("ascii")
-    except UnicodeError as error:
-        msg = f"{from_address!r} has a domain that cannot be written into a Message-ID: {error}"
-        raise ValueError(msg) from error
+    if "" in domain.split("."):
+        msg = f"{from_address!r} has a domain with an empty label, which a Message-ID cannot hold"
+        raise ValueError(msg)
+
+    return domain
 
 
 def _rekey(

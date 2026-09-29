@@ -112,6 +112,20 @@ def test_empty_cells_are_kept_so_columns_line_up():
     assert html_to_text(html) == "| Signups | Change\nPaid | | -3%"
 
 
+def test_a_layout_table_keeps_the_paragraphs_in_its_cells_apart():
+    html = "<table><tr><td><p>Weekly numbers</p></td><td><p>Data team</p></td></tr></table>"
+
+    assert html_to_text(html) == "Weekly numbers\n\nData team"
+
+
+def test_an_empty_comment_ends_at_once():
+    assert html_to_text("<!-->Weekly numbers<!-- -->") == "Weekly numbers"
+
+
+def test_an_unclosed_comment_runs_to_the_end_of_the_html():
+    assert html_to_text("<p>Weekly numbers</p><!-- a > Data team") == "Weekly numbers"
+
+
 def test_only_the_title_of_an_unclosed_head_is_dropped():
     assert (
         html_to_text("<head><title>Weekly numbers</title><p>Hi Ada,</p>") == "Hi Ada,"

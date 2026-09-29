@@ -51,6 +51,9 @@ UPLOAD = "https://outlook.office.com/api/v2.0/Users('reports@example.com')/Messa
 AUDIENCE = "https://graph.microsoft.com"
 SCOPE = "https://graph.microsoft.com/.default"
 
+DEEP = b"[" * 100_000 + b"]" * 100_000
+"""JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 parses 10,000 levels, where 3.13.12 raises."""
+
 type Reply = httpx2.Response | Exception
 
 
@@ -282,6 +285,29 @@ def test_a_send_posts_one_sendmail_request_to_the_from_mailbox(
         }
     }
     assert result.refused == {}
+
+
+@pytest.mark.parametrize(
+    ("built", "body"),
+    [
+        pytest.param(
+            Message(text="Weekly\rnumbers"),
+            {"contentType": "text", "content": "Weekly\rnumbers"},
+            id="text",
+        ),
+        pytest.param(
+            Message(html="<p>Weekly\rnumbers</p>"),
+            {"contentType": "html", "content": "<p>Weekly\rnumbers</p>"},
+            id="html",
+        ),
+    ],
+)
+def test_the_body_goes_out_with_its_line_breaks_as_written(
+    microsoft: Microsoft, secret: graph.ClientSecret, built: Message, body: object
+):
+    backend(secret).send(built.to("ada@example.com"))
+
+    assert json.loads(microsoft.sent()[0].content)["message"]["body"] == body
 
 
 def test_every_request_with_a_body_to_graph_is_json(
@@ -700,6 +726,22 @@ def test_a_reply_without_the_draft_id_or_upload_url_is_a_provider_error(
 
 
 @pytest.mark.parametrize(
+    "where",
+    [DRAFTS, f"{DRAFT}/attachments/createUploadSession"],
+    ids=["draft", "upload session"],
+)
+def test_a_draft_or_upload_session_reply_nested_too_deeply_is_a_provider_error(
+    microsoft: Microsoft, secret: graph.ClientSecret, where: str
+):
+    microsoft.replies[where] = [httpx2.Response(201, content=DEEP)]
+
+    with pytest.raises(ProviderError, match="Graph's reply") as caught:
+        backend(secret).send(message().attach(bytes(4_000_000), filename="big.bin"))
+
+    assert isinstance(caught.value.__cause__, RecursionError)
+
+
+@pytest.mark.parametrize(
     "value",
     [
         pytest.param(None, id="null"),
@@ -992,6 +1034,7 @@ def test_a_5xx_from_the_identity_platform_is_a_provider_error(
             OverflowError,
             id="expires_in infinite",
         ),
+        pytest.param(DEEP, RecursionError, id="nested too deeply"),
     ],
 )
 def test_a_token_reply_msal_cannot_read_is_a_provider_error(
@@ -1027,10 +1070,11 @@ def test_a_token_reply_whose_id_token_is_not_a_jwt_is_a_provider_error(
     assert type(caught.value.__cause__) is IndexError
 
 
+@pytest.mark.parametrize("body", [b"[]", DEEP], ids=["an array", "nested too deeply"])
 def test_a_rejection_msal_cannot_read_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret
+    microsoft: Microsoft, secret: graph.ClientSecret, body: bytes
 ):
-    microsoft.replies[TOKEN_URI] = [httpx2.Response(400, content=b"[]")]
+    microsoft.replies[TOKEN_URI] = [httpx2.Response(400, content=body)]
 
     with pytest.raises(ProviderError):
         backend(secret).connect()
@@ -1213,6 +1257,11 @@ def test_a_failed_token_request_after_a_401_maps_as_it_does_on_connect(
         pytest.param(error(504, "GatewayTimeout"), ProviderError, id="504"),
         pytest.param(error(509, "BandwidthLimitExceeded"), ProviderError, id="509"),
         pytest.param(error(418), ProviderError, id="a status no row matches"),
+        pytest.param(
+            httpx2.Response(403, content=DEEP),
+            AuthenticationError,
+            id="403 nested too deeply to read",
+        ),
     ],
 )
 def test_a_reply_maps_to_its_row(

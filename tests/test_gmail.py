@@ -3,6 +3,8 @@ import json
 import sys
 import time
 from datetime import UTC, datetime, timedelta
+from email import message_from_bytes
+from email.policy import default
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -27,6 +29,9 @@ from epistole.exceptions import (
 TOKEN_URI = "https://oauth2.googleapis.com/token"  # noqa: S105
 SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+DEEP = b"[" * 100_000 + b"]" * 100_000
+"""JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 parses 10,000 levels, where 3.13.12 raises."""
 
 type Reply = httpx2.Response | Exception
 
@@ -189,10 +194,10 @@ def raw(request: httpx2.Request) -> bytes:
 
 
 def error(
-    status: int, reason: str | None = None, *, headers: dict[str, str] | None = None
+    status: int, *reasons: str, headers: dict[str, str] | None = None
 ) -> httpx2.Response:
-    """Build a Gmail error reply in Google's envelope, with `reason` as its one `errors[].reason`."""
-    errors = [{"domain": "global", "reason": reason}] if reason else []
+    """Build a Gmail error reply in Google's envelope, with one `errors[]` entry per reason."""
+    errors = [{"domain": "global", "reason": reason} for reason in reasons]
     body = {"error": {"code": status, "message": "Refused.", "errors": errors}}
     return httpx2.Response(status, json=body, headers=headers)
 
@@ -212,6 +217,20 @@ def test_a_send_posts_the_message_as_base64url_raw(
     assert f"Message-ID: {result.message_id}".encode() in raw(request)
     assert b"Bcc: cleo@example.com" in raw(request)
     assert result.refused == {}
+
+
+def test_each_line_break_goes_out_as_crlf_and_each_part_ends_with_one(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    backend(service_account).send(
+        Message(html="<p>Weekly</p>", text="Weekly\rnumbers").to("ada@example.com")
+    )
+
+    parts = message_from_bytes(raw(google.sent()[0]), policy=default).iter_parts()
+    assert [part.get_payload(decode=True) for part in parts] == [
+        b"Weekly\r\nnumbers\r\n",
+        b"<p>Weekly</p>\r\n",
+    ]
 
 
 def test_raw_uses_the_url_safe_alphabet(
@@ -520,11 +539,38 @@ def test_each_request_gets_its_own_401_retry(
         ),
         pytest.param(error(429), ThrottledError, id="429"),
         pytest.param(
+            error(403, "authError", "rateLimitExceeded"),
+            ThrottledError,
+            id="403 throttled in a later entry",
+        ),
+        pytest.param(
+            error(403, "authError", "domainPolicy"),
+            RejectedError,
+            id="403 domainPolicy in a later entry",
+        ),
+        pytest.param(
+            error(403, "domainPolicy", "rateLimitExceeded"),
+            ThrottledError,
+            id="403 throttled read before domainPolicy",
+        ),
+        pytest.param(
+            httpx2.Response(
+                403, json={"error": {"errors": [{"reason": "rateLimitExceeded"}, 5]}}
+            ),
+            ThrottledError,
+            id="403 beside an entry that is not an object",
+        ),
+        pytest.param(
             error(400, "rateLimitExceeded"), RejectedError, id="400 qualified"
         ),
         pytest.param(error(500, "backendError"), ProviderError, id="500"),
         pytest.param(error(503), ProviderError, id="503"),
         pytest.param(error(413), ProviderError, id="a status no row matches"),
+        pytest.param(
+            httpx2.Response(403, content=DEEP),
+            AuthenticationError,
+            id="403 nested too deeply to read",
+        ),
     ],
 )
 def test_a_reply_maps_to_its_row(
@@ -669,6 +715,7 @@ def test_a_token_reply_other_than_200_is_one_request_mapped_by_its_status(
             OverflowError,
             id="expires_in out of range",
         ),
+        pytest.param(DEEP, RecursionError, id="nested too deeply"),
     ],
 )
 def test_a_200_token_reply_google_auth_cannot_read_is_a_provider_error(
@@ -687,6 +734,17 @@ def test_a_200_token_reply_google_auth_cannot_read_is_a_provider_error(
     assert type(caught.value.__cause__) is cause
     assert caught.value.backend is configured
     assert google.clients[0].is_closed
+
+
+def test_a_token_error_nested_too_deeply_to_read_maps_by_its_status(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    google.replies[TOKEN_URI] = [httpx2.Response(400, content=DEEP)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        backend(service_account).connect()
+
+    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
 
 
 @pytest.mark.parametrize("scope", [None, [SCOPE]], ids=["null", "an array"])
