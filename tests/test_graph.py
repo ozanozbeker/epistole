@@ -13,7 +13,6 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
-from msal.exceptions import MsalServiceError
 
 from epistole import (
     Address,
@@ -50,6 +49,11 @@ DRAFT = f"{DRAFTS}/draft-1"
 UPLOAD = "https://outlook.office.com/api/v2.0/Users('reports@example.com')/Messages('draft-1')/AttachmentSessions('session-1')"
 AUDIENCE = "https://graph.microsoft.com"
 SCOPE = "https://graph.microsoft.com/.default"
+
+UNAVAILABLE = {
+    "error": "temporarily_unavailable",
+    "error_description": "Try again later.",
+}
 
 DEEP = b"[" * 100_000 + b"]" * 100_000
 """JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 parses 10,000 levels, where 3.13.12 raises."""
@@ -954,21 +958,31 @@ def test_the_client_takes_proxy_and_ca_settings_from_the_environment(
     assert microsoft.options == [{"timeout": 60}]
 
 
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (400, "invalid_client"),
+        (401, "invalid_client"),
+        (403, "invalid_client"),
+        (400, "temporarily_unavailable"),
+    ],
+    ids=["400", "401", "403", "400 temporarily_unavailable"],
+)
 def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
-    microsoft: Microsoft, secret: graph.ClientSecret
+    microsoft: Microsoft, secret: graph.ClientSecret, status: int, code: str
 ):
     microsoft.replies[TOKEN_URI] = [
         httpx2.Response(
-            401,
+            status,
             json={
-                "error": "invalid_client",
+                "error": code,
                 "error_description": "AADSTS7000215: Invalid client secret provided.",
             },
         )
     ]
     configured = backend(secret)
 
-    with pytest.raises(AuthenticationError, match="AADSTS7000215") as caught:
+    with pytest.raises(AuthenticationError, match=f"{code}: AADSTS7000215") as caught:
         configured.connect()
 
     # msal returns its error as a dict and raises nothing, so there is no cause.
@@ -992,17 +1006,71 @@ def test_a_network_failure_on_connect_is_a_transport_error(
     assert microsoft.clients[0].is_closed
 
 
-@pytest.mark.parametrize("where", [DISCOVERY, TOKEN_URI], ids=["discovery", "token"])
-def test_a_5xx_from_the_identity_platform_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, where: str
+@pytest.mark.parametrize("kind", ["client secret", "certificate", "managed identity"])
+@pytest.mark.parametrize("body", [UNAVAILABLE, None], ids=["JSON", "empty"])
+def test_a_429_from_the_identity_platform_is_one_token_request_and_a_provider_error(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    pfx: Path,
+    kind: str,
+    body: dict[str, str] | None,
 ):
-    microsoft.replies[where] = [httpx2.Response(503)]
+    where, credential = {
+        "client secret": (TOKEN_URI, secret),
+        "certificate": (
+            TOKEN_URI,
+            graph.Certificate(TENANT, "epistole", pfx=pfx, passphrase="hunter2"),  # noqa: S106
+        ),
+        "managed identity": (IMDS, graph.ManagedIdentity()),
+    }[kind]
+    microsoft.replies[where] = [
+        httpx2.Response(429, headers={"Retry-After": "30"}, json=body)
+    ]
 
-    with pytest.raises(ProviderError) as caught:
-        backend(secret).connect()
+    with pytest.raises(ProviderError, match="429") as caught:
+        backend(credential).connect()
 
-    assert isinstance(caught.value.__cause__, MsalServiceError)
+    cause = caught.value.__cause__
+    assert isinstance(cause, httpx2.HTTPStatusError)
+    assert cause.response.status_code == 429
+    assert cause.response.headers["Retry-After"] == "30"
+    assert [url(one) for one in microsoft.requests].count(where) == 1
     assert microsoft.clients[0].is_closed
+
+
+@pytest.mark.parametrize(
+    ("where", "status"),
+    [
+        pytest.param(TOKEN_URI, 500, id="token 500"),
+        pytest.param(TOKEN_URI, 502, id="token 502"),
+        pytest.param(TOKEN_URI, 503, id="token 503"),
+        pytest.param(TOKEN_URI, 504, id="token 504"),
+        pytest.param(DISCOVERY, 429, id="discovery 429"),
+        pytest.param(DISCOVERY, 503, id="discovery 503"),
+        pytest.param(IMDS, 404, id="IMDS 404"),
+        pytest.param(IMDS, 410, id="IMDS 410"),
+        pytest.param(IMDS, 500, id="IMDS 500"),
+        pytest.param(IMDS, 503, id="IMDS 503"),
+    ],
+)
+def test_a_token_status_outside_2xx_but_400_401_or_403_is_a_provider_error(
+    microsoft: Microsoft, secret: graph.ClientSecret, where: str, status: int
+):
+    credential = graph.ManagedIdentity() if where == IMDS else secret
+    microsoft.replies[where] = [
+        httpx2.Response(status, headers={"Retry-After": "30"}, json=UNAVAILABLE)
+    ]
+
+    with pytest.raises(
+        ProviderError, match=f"{status} temporarily_unavailable.*Try again later"
+    ) as caught:
+        backend(credential).connect()
+
+    cause = caught.value.__cause__
+    assert isinstance(cause, httpx2.HTTPStatusError)
+    assert cause.response.status_code == status
+    assert cause.response.headers["Retry-After"] == "30"
+    assert [url(one) for one in microsoft.requests].count(where) == 1
 
 
 @pytest.mark.parametrize("kind", ["client secret", "managed identity"])
@@ -1206,6 +1274,55 @@ def test_a_failed_token_request_after_a_401_maps_as_it_does_on_connect(
 
         # Only a TransportError closes the connection (ADR-0005).
         assert microsoft.clients[0].is_closed is (expected is TransportError)
+
+
+def test_the_send_after_a_throttled_refresh_requests_a_new_token(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    with backend(secret).connect() as connection:
+        microsoft.replies[SEND_MAIL] = [httpx2.Response(401)]
+        microsoft.replies[TOKEN_URI] = [
+            httpx2.Response(429, headers={"Retry-After": "30"}, json=UNAVAILABLE)
+        ]
+        with pytest.raises(ProviderError):
+            connection.send(message())
+
+        assert not microsoft.clients[0].is_closed
+        connection.send(message())
+
+    assert [url(one) for one in microsoft.requests].count(TOKEN_URI) == 3
+    assert [one.headers["Authorization"] for one in microsoft.sent()] == [
+        "Bearer token-1",
+        "Bearer token-2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kind", "headers"),
+    [("client secret", {}), ("managed identity", {"Retry-After": "30"})],
+    ids=["client secret", "managed identity"],
+)
+def test_msal_sends_every_token_request_rather_than_reuse_a_reply(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    kind: str,
+    headers: dict[str, str],
+):
+    where, credential = (
+        (TOKEN_URI, secret)
+        if kind == "client secret"
+        else (IMDS, graph.ManagedIdentity())
+    )
+    with backend(credential).connect() as connection:
+        microsoft.replies[SEND_MAIL] = [httpx2.Response(401)]
+        microsoft.replies[where] = [
+            httpx2.Response(400, headers=headers, content=b"[]") for _ in range(2)
+        ]
+        for _ in range(2):
+            with pytest.raises(ProviderError):
+                connection.send(message())
+
+    assert [url(one) for one in microsoft.requests].count(where) == 3
 
 
 # --- Mapping -----------------------------------------------------------------

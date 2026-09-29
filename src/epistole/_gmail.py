@@ -200,28 +200,13 @@ def _mapped(response: httpx2.Response) -> EpistoleError:
 def _token_mapped(response: httpx2.Response) -> EpistoleError:
     """Return the Epistole error for a token reply other than `200`, by its status alone (ADR-0009)."""
     status: int = response.status_code
-    error, description = _oauth_error(response)
+    error, description = _http.oauth_error(response)
     label: str = f"{status} {error}" if error else str(status)
     msg = f"Google's token endpoint replied {label}: {description}"
-    if status in {
-        HTTPStatus.BAD_REQUEST,
-        HTTPStatus.UNAUTHORIZED,
-        HTTPStatus.FORBIDDEN,
-    }:
+    if status in _http.CREDENTIAL_REJECTED:
         return AuthenticationError(msg)
 
     return ProviderError(msg)
-
-
-def _oauth_error(response: httpx2.Response) -> tuple[str, str]:
-    """Return the `error` and `error_description` of an RFC 6749 error reply."""
-    try:
-        body: dict[str, Any] = response.json()
-        return str(body.get("error", "")), str(
-            body.get("error_description", response.reason_phrase)
-        )
-    except _http.REPLY_ERRORS:
-        return "", response.reason_phrase
 
 
 def _envelope(response: httpx2.Response) -> tuple[list[str], str]:

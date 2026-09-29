@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx2
 
@@ -27,6 +27,11 @@ REPLY_ERRORS = (
     ValueError,
 )
 """The classes `json`, `google-auth` and `msal` raise reading a reply they cannot parse, such as one that is not a JSON object or is nested too deeply (ADR-0009)."""
+
+CREDENTIAL_REJECTED = frozenset(
+    {HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}
+)
+"""The token reply statuses that reject the credential on both HTTP backends (ADR-0009). Gmail maps each to `AuthenticationError`. Graph's auth adapter returns each to `msal` for its error dict."""
 
 
 class Tokens(Protocol):
@@ -87,6 +92,17 @@ def request(
         response = client.request(method, url, headers=headers, content=content)
 
     return response.raise_for_status()
+
+
+def oauth_error(response: httpx2.Response) -> tuple[str, str]:
+    """Return the `error` and `error_description` of an RFC 6749 error reply."""
+    try:
+        body: dict[str, Any] = response.json()
+        return str(body.get("error", "")), str(
+            body.get("error_description", response.reason_phrase)
+        )
+    except REPLY_ERRORS:
+        return "", response.reason_phrase
 
 
 def retry_after(response: httpx2.Response) -> float | None:

@@ -761,19 +761,26 @@ def test_a_network_failure_getting_the_token_is_a_transport_error(
     assert caught.value.backend is configured
 
 
-def test_a_503_from_googles_token_endpoint_is_one_request_and_a_provider_error(
+@pytest.mark.parametrize(
+    ("fixture", "status"), [("service_account", 503), ("secret", 429)]
+)
+def test_a_429_or_5xx_from_the_token_endpoint_is_one_request_and_a_provider_error(
     serve: Callable[..., Server],
     issuer: Issuer,
-    service_account: gmail.ServiceAccount,
+    request: pytest.FixtureRequest,
+    fixture: str,
+    status: int,
 ):
-    issuer.failure = httpx2.Response(503)
-    oauth = smtp.OAuth(username="reports@example.com", credential=service_account)
+    issuer.failure = httpx2.Response(status)
+    oauth = smtp.OAuth(
+        username="reports@example.com", credential=request.getfixturevalue(fixture)
+    )
     configured = backend(serve(), credential=oauth)
 
     with pytest.raises(ProviderError) as caught:
         configured.connect()
 
-    assert len(issuer.requests) == 1
+    assert len([one for one in issuer.requests if one.url.path.endswith("/token")]) == 1
     assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
 

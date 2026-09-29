@@ -10,12 +10,11 @@ import json
 from contextlib import ExitStack, contextmanager, suppress
 from functools import partial
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from urllib.parse import quote
 
 import httpx2
 import msal
-from msal.exceptions import MsalServiceError
 
 from epistole import _http
 from epistole._address import addr_spec, name_and_addr_spec
@@ -104,7 +103,10 @@ def _tokens(
                 else msal.UserAssignedManagedIdentity(client_id=client_id)
             )
             managed = msal.ManagedIdentityClient(
-                identity, http_client=http_client, token_cache=cache
+                identity,
+                http_client=http_client,
+                token_cache=cache,
+                http_cache=_NoCache(),
             )
             return _MsalTokens(
                 partial(managed.acquire_token_for_client, resource=audience),
@@ -118,6 +120,7 @@ def _tokens(
                 authority=f"https://login.microsoftonline.com/{credential.tenant_id}",
                 http_client=http_client,
                 token_cache=cache,
+                http_cache=_NoCache(),
                 # Otherwise msal fetches the host's aliases after a rejection, to find a refresh token a client credential never has.
                 instance_discovery=False,
             )
@@ -254,6 +257,8 @@ def _mapping() -> Generator[None]:
     """Raise the Epistole error for a native failure, by the Graph mapping in ADR-0004."""
     try:
         yield
+    except _TokenStatusError as error:
+        raise _token_mapped(error.response) from error
     except httpx2.HTTPStatusError as error:
         raise _mapped(error.response) from error
     except httpx2.TransportError as error:
@@ -261,10 +266,6 @@ def _mapping() -> Generator[None]:
         raise TransportError(msg) from error
     except httpx2.HTTPError as error:
         msg = f"Microsoft's reply could not be read: {error}"
-        raise ProviderError(msg) from error
-    except MsalServiceError as error:
-        # msal raises this for a 5xx from Entra, where it returns a dict for a rejected credential.
-        msg = f"Entra failed: {error}"
         raise ProviderError(msg) from error
 
 
@@ -291,6 +292,15 @@ def _mapped(response: httpx2.Response) -> EpistoleError:
     if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
         return AuthenticationError(msg)
 
+    return ProviderError(msg)
+
+
+def _token_mapped(response: httpx2.Response) -> ProviderError:
+    """Return the `ProviderError` for a token reply `msal` never read, naming its status and its RFC 6749 error (ADR-0009)."""
+    status: int = response.status_code
+    error, description = _http.oauth_error(response)
+    label: str = f"{status} {error}" if error else str(status)
+    msg = f"Microsoft replied {label} to a token request: {description}"
     return ProviderError(msg)
 
 
@@ -450,11 +460,7 @@ class _HttpClient:
         **_: object,
     ) -> httpx2.Response:
         """Ignore `timeout` and any other keyword, because the client's 60 seconds covers token requests too (ADR-0009)."""
-        response: httpx2.Response = self._client.get(
-            url, params=params, headers=headers
-        )
-        self.replies += 1
-        return response
+        return self._to_msal(self._client.get(url, params=params, headers=headers))
 
     def post(
         self,
@@ -465,8 +471,30 @@ class _HttpClient:
         **_: object,
     ) -> httpx2.Response:
         """Ignore any other keyword, as `get` does."""
-        response: httpx2.Response = self._client.post(
-            url, params=params, data=data, headers=headers
+        return self._to_msal(
+            self._client.post(url, params=params, data=data, headers=headers)
         )
+
+    def _to_msal(self, response: httpx2.Response) -> httpx2.Response:
+        """Count `response` and return it to `msal`, or raise `_TokenStatusError` for a status outside 2xx that does not reject the credential (ADR-0009)."""
+        if (
+            not response.is_success
+            and response.status_code not in _http.CREDENTIAL_REJECTED
+        ):
+            msg = f"Microsoft replied {response.status_code} to a token request"
+            raise _TokenStatusError(msg, request=response.request, response=response)
+
         self.replies += 1
         return response
+
+
+class _TokenStatusError(httpx2.HTTPStatusError):
+    """`_HttpClient` raises this for a token reply, so `_mapping` maps it by the token table and never by the mail endpoint's (ADR-0009)."""
+
+
+class _NoCache(dict[str, object]):
+    """An `http_cache` for `msal` that keeps nothing, so `msal` sends every token request (ADR-0009)."""
+
+    @override
+    def __setitem__(self, key: str, value: object, /) -> None:
+        pass
