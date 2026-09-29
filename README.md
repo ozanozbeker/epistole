@@ -449,6 +449,20 @@ Re-check one before relying on it.
 The sources are [Graph request limits](https://learn.microsoft.com/en-us/graph/use-the-api), [Graph large attachments](https://learn.microsoft.com/en-us/graph/outlook-large-attachments), [Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits), [Gmail sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace), [Exchange rebuilds MIME](https://learn.microsoft.com/en-us/graph/outlook-things-to-know-about-send-mail), [SMTP `SIZE`, RFC 1870](https://datatracker.ietf.org/doc/html/rfc1870), and [SMTP AUTH on Exchange Online](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission).
 Fuller working is in `docs/research/send-boundary-semantics.md` and `docs/research/attachment-and-inline-rules.md`.
 
+## Tested mail services
+
+A row here means a real send through that mail service passed the `tests/test_live_*.py` checks.
+The service kept the `Message-ID` and the `From` that Epistole set.
+A wrong password raised `AuthenticationError`, and a from address the account does not own raised `SenderRefusedError`.
+`docs/research/live-send-findings.md` records each reply.
+
+| Mail service | Backend | Credential | Security | Tested on |
+| --- | --- | --- | --- | --- |
+| iCloud Mail, including an iCloud+ custom domain | `SMTPBackend` on `smtp.mail.me.com` | `smtp.Password` with the full iCloud address and an app-specific password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
+
+No mail service has passed a real send through SMTP `OAuth`, `GmailBackend`, or `GraphBackend` yet.
+Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
+
 ## Credit
 
 Epistole is inspired by [blastula](https://github.com/rstudio/blastula), an R package for composing and sending email.
