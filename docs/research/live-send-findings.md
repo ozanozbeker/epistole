@@ -2,7 +2,7 @@
 
 This file records what real sends returned, for [#23](https://github.com/ozanozbeker/epistole/issues/23).
 `tests/test_live_smtp.py` makes the sends, so a rerun checks each answer again.
-None of the answers below changes an ADR, a docstring, or a private constant.
+Only one answer below changes Epistole: a wrong Gmail app password raises the wrong class, and [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
 ## SMTP with a password, on iCloud
 
@@ -29,6 +29,27 @@ For a send from `nobody@example.com`, iCloud replied `550 5.7.0 From address is 
 
 **A wrong app password raises `AuthenticationError`.**
 This confirms what the README says under its first example.
+
+## SMTP with an app password, on Gmail
+
+Checked on 2026-09-29.
+Every send logged in to `smtp.gmail.com` with the account's `@gmail.com` address and an app password, and addressed the message to that same account.
+IMAP on `imap.gmail.com` then read the message back from `[Gmail]/All Mail`.
+An app password needs 2-Step Verification on the Google Account, and the account's [security page](https://myaccount.google.com/security) creates one under App passwords.
+
+**Gmail keeps the `Message-ID` Epistole sets, over STARTTLS on port 587 and implicit TLS on port 465.**
+The message IMAP read back had the `Message-ID` that `SendResult.message_id` reported.
+
+**Gmail rewrites a from address the account does not own, and replies with no error.**
+A send from `nobody@example.com` returned a `SendResult`.
+The message IMAP read back had the account's own address in `From`.
+So on Gmail, `send()` succeeds while the recipient sees a different sender than `from_address`.
+
+**A wrong app password can raise `TransportError`, not `AuthenticationError`.**
+In two of three attempts, Gmail replied `535 5.7.8 Username and Password not accepted` to `AUTH PLAIN`, then closed the connection.
+`smtplib.SMTP.login` moved on to `AUTH LOGIN` on the closed socket and raised `SMTPServerDisconnected`, which Epistole maps to `TransportError`.
+In the third, Gmail kept the connection open, as iCloud did in every attempt, and `login` raised `SMTPAuthenticationError`.
+Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
 ## Anonymous SMTP, on localhost
 

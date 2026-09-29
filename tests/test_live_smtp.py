@@ -1,4 +1,4 @@
-"""Send real mail through iCloud, and through an SMTP server on localhost such as aiosmtpd, skipping each test whose account or server is absent.
+"""Send real mail through iCloud and Gmail with an app password, and through an SMTP server on localhost such as aiosmtpd, skipping each test whose account or server is absent.
 
 Run them with `uv run --env-file .env pytest tests/test_live_smtp.py --tb=short`. A long traceback prints each frame's arguments, and `smtplib.SMTP.login` takes the app password as one.
 """
@@ -11,22 +11,58 @@ from email import message_from_bytes
 from email.message import EmailMessage
 from email.policy import default
 from email.utils import parseaddr
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import pytest
 
 from epistole import Message, SendResult, SMTPBackend, smtp
-from epistole.exceptions import AuthenticationError, SenderRefusedError
+from epistole.exceptions import (
+    AuthenticationError,
+    SenderRefusedError,
+    TransportError,
+)
 
-ADDRESS = os.environ.get("ICLOUD_ADDRESS", "")
-PASSWORD = os.environ.get("ICLOUD_APP_PASSWORD", "")
+
+class Account(NamedTuple):
+    """An account that sends through `smtp_host` and reads its own mailboxes back through `imap_host`."""
+
+    address: str
+    password: str
+    smtp_host: str
+    imap_host: str
+    mailboxes: tuple[str, ...]
+
+
+def read_account(
+    prefix: str, smtp_host: str, imap_host: str, *mailboxes: str
+) -> Account:
+    """Read the address and app password under `prefix` from the environment."""
+    # Google shows an app password as four groups of four letters.
+    password = os.environ.get(f"{prefix}_APP_PASSWORD", "").replace(" ", "")
+    address = os.environ.get(f"{prefix}_ADDRESS", "")
+    return Account(address, password, smtp_host, imap_host, mailboxes)
+
+
+ICLOUD = read_account("ICLOUD", "smtp.mail.me.com", "imap.mail.me.com", "INBOX", "Junk")
+GMAIL = read_account(
+    "GMAIL", "smtp.gmail.com", "imap.gmail.com", "[Gmail]/All Mail", "[Gmail]/Spam"
+)
 CUSTOM_ADDRESS = os.environ.get("ICLOUD_CUSTOM_ADDRESS", "")
 ARRIVAL_SECONDS = 120
 LOCAL_PORT = 1025
 
 icloud = pytest.mark.skipif(
-    not (ADDRESS and PASSWORD), reason="set ICLOUD_ADDRESS and ICLOUD_APP_PASSWORD"
+    not (ICLOUD.address and ICLOUD.password),
+    reason="set ICLOUD_ADDRESS and ICLOUD_APP_PASSWORD",
 )
+gmail = pytest.mark.skipif(
+    not (GMAIL.address and GMAIL.password),
+    reason="set GMAIL_ADDRESS and GMAIL_APP_PASSWORD",
+)
+ACCOUNTS = [
+    pytest.param(ICLOUD, id="icloud", marks=icloud),
+    pytest.param(GMAIL, id="gmail", marks=gmail),
+]
 
 
 def listening(port: int) -> bool:
@@ -39,35 +75,38 @@ def listening(port: int) -> bool:
 
 
 def send(
+    account: Account,
     from_address: str,
-    password: str = PASSWORD,
+    password: str | None = None,
     *,
     port: int = 587,
     security: Literal["starttls", "tls"] = "starttls",
 ) -> SendResult:
-    """Send one message from `from_address` to the iCloud account's own inbox."""
+    """Send one message from `from_address` to the account's own inbox, with its app password unless `password` replaces it."""
     backend = SMTPBackend(
-        "smtp.mail.me.com",
+        account.smtp_host,
         port=port,
         security=security,
         from_address=from_address,
-        credential=smtp.Password(username=ADDRESS, password=password),
+        credential=smtp.Password(
+            username=account.address, password=password or account.password
+        ),
     )
     return backend.send(
         Message(text="Sent by tests/test_live_smtp.py.")
         .subject("epistole live test")
-        .to(ADDRESS)
+        .to(account.address)
     )
 
 
-def received(message_id: str) -> EmailMessage:
-    """Return the headers of the message with `message_id` once it reaches the inbox or the junk folder."""
-    with imaplib.IMAP4_SSL("imap.mail.me.com") as imap:
-        imap.login(ADDRESS, PASSWORD)
+def received(account: Account, message_id: str) -> EmailMessage:
+    """Return the headers of the message with `message_id` once one of the account's mailboxes holds it."""
+    with imaplib.IMAP4_SSL(account.imap_host) as imap:
+        imap.login(account.address, account.password)
         deadline = time.monotonic() + ARRIVAL_SECONDS
         while time.monotonic() < deadline:
-            for mailbox in ("INBOX", "Junk"):
-                imap.select(mailbox, readonly=True)
+            for mailbox in account.mailboxes:
+                imap.select(f'"{mailbox}"', readonly=True)
                 _, found = imap.search(None, "HEADER", "Message-ID", f'"{message_id}"')
                 # imaplib returns [None], not [b""], for a search that matches nothing.
                 if numbers := (found[0] or b"").split():
@@ -79,32 +118,58 @@ def received(message_id: str) -> EmailMessage:
     pytest.fail(f"{message_id} did not arrive within {ARRIVAL_SECONDS} seconds")
 
 
-@icloud
+@pytest.mark.parametrize("account", ACCOUNTS)
 @pytest.mark.parametrize(("port", "security"), [(587, "starttls"), (465, "tls")])
-def test_icloud_keeps_the_message_id(port: int, security: Literal["starttls", "tls"]):
-    result = send(ADDRESS, port=port, security=security)
+def test_the_service_keeps_the_message_id(
+    account: Account, port: int, security: Literal["starttls", "tls"]
+):
+    result = send(account, account.address, port=port, security=security)
 
-    assert received(result.message_id)["Message-ID"] == result.message_id
+    assert received(account, result.message_id)["Message-ID"] == result.message_id
+
+
+@pytest.mark.parametrize(
+    "account",
+    [
+        pytest.param(ICLOUD, id="icloud", marks=icloud),
+        pytest.param(
+            GMAIL,
+            id="gmail",
+            marks=[
+                gmail,
+                pytest.mark.xfail(
+                    raises=TransportError,
+                    reason="#71: Gmail sometimes closes the connection after a failed AUTH",
+                    strict=False,
+                ),
+            ],
+        ),
+    ],
+)
+def test_a_wrong_app_password_raises_authentication_error(account: Account):
+    with pytest.raises(AuthenticationError):
+        send(account, account.address, "not-the-app-password")
 
 
 @icloud
 @pytest.mark.skipif(not CUSTOM_ADDRESS, reason="set ICLOUD_CUSTOM_ADDRESS")
 def test_icloud_keeps_a_custom_domain_from_address():
-    result = send(CUSTOM_ADDRESS)
+    result = send(ICLOUD, CUSTOM_ADDRESS)
 
-    assert parseaddr(received(result.message_id)["From"])[1] == CUSTOM_ADDRESS
+    assert parseaddr(received(ICLOUD, result.message_id)["From"])[1] == CUSTOM_ADDRESS
 
 
 @icloud
 def test_icloud_refuses_a_from_address_the_account_does_not_own():
     with pytest.raises(SenderRefusedError):
-        send("nobody@example.com")
+        send(ICLOUD, "nobody@example.com")
 
 
-@icloud
-def test_a_wrong_app_password_raises_authentication_error():
-    with pytest.raises(AuthenticationError):
-        send(ADDRESS, "not-the-app-password")
+@gmail
+def test_gmail_rewrites_a_from_address_the_account_does_not_own():
+    result = send(GMAIL, "nobody@example.com")
+
+    assert parseaddr(received(GMAIL, result.message_id)["From"])[1] == GMAIL.address
 
 
 @pytest.mark.skipif(

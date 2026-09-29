@@ -451,14 +451,24 @@ Fuller working is in `docs/research/send-boundary-semantics.md` and `docs/resear
 
 ## Tested mail services
 
-A row here means a real send through that mail service passed the `tests/test_live_*.py` checks.
-The service kept the `Message-ID` and the `From` that Epistole set.
-A wrong password raised `AuthenticationError`, and a from address the account does not own raised `SenderRefusedError`.
+A row here means a real send through that mail service passed the `tests/test_live_*.py` checks, and the service kept the `Message-ID` that Epistole set.
 `docs/research/live-send-findings.md` records each reply.
 
 | Mail service | Backend | Credential | Security | Tested on |
 | --- | --- | --- | --- | --- |
 | iCloud Mail, including an iCloud+ custom domain | `SMTPBackend` on `smtp.mail.me.com` | `smtp.Password` with the full iCloud address and an app-specific password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
+| Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.Password` with the Gmail address and an app password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
+
+A Gmail app password needs 2-Step Verification.
+Create one under App passwords on your Google Account's [security page](https://myaccount.google.com/security).
+
+The two services differ on two mistakes:
+
+- A from address the account does not own raises `SenderRefusedError` on iCloud.
+  Gmail sends the message anyway, with the account's own address in `From`.
+- A wrong password raises `AuthenticationError` on iCloud.
+  On Gmail it can raise `TransportError`, because Gmail sometimes closes the connection after a failed login.
+  Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
 No mail service has passed a real send through SMTP `OAuth`, `GmailBackend`, or `GraphBackend` yet.
 Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
