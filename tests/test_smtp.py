@@ -403,6 +403,26 @@ def test_a_sender_header_does_not_change_the_envelope(serve: Callable[..., Serve
     assert server.commands[1].startswith("mail from:<reports@example.com>")
 
 
+# --- Pre-checks --------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["Resent-Bcc", "resent-bcc", "RESENT-BCC"])
+def test_a_resent_bcc_header_is_rejected_before_mail_from_naming_it(
+    serve: Callable[..., Server], name: str
+):
+    server = serve()
+
+    with backend(server).connect() as connection:
+        with pytest.raises(RejectedError, match=name) as caught:
+            connection.send(message().headers({name: "eve@example.com"}))
+
+        connection.send(message().headers({"Resent-To": "eve@example.com"}))
+
+    assert caught.value.__cause__ is None
+    assert server.verbs().count("MAIL") == 1
+    assert b"Resent-To: eve@example.com" in server.messages[0]
+
+
 # --- Credentials -------------------------------------------------------------
 
 
