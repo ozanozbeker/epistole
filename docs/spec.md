@@ -848,27 +848,33 @@ A reason in any entry of `errors[]` qualifies a row.
 The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx, the `httpx2.TransportError` subclass on a network failure, `msal.exceptions.MsalServiceError` on a `5xx` from Entra's discovery or token endpoint, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict.
 `__cause__` is also `None` when a draft or upload session reply holds an `id` or `uploadUrl` that is empty or not a string, because Epistole runs that check itself (ADR-0004).
 
 | Status and `error.code` | Epistole |
 | --- | --- |
 | `400` (including `ErrorMimeContentInvalidBase64String`), `404`, `413`, `415` | `RejectedError` |
-| `401`, any other `403` (including `403` on draft creation), msal error dict, second `401` | `AuthenticationError` |
+| `401`, any other `403` (including `403` on draft creation), msal error dict from a token `400`, `401` or `403`, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509`, a `5xx` from Entra's discovery or token endpoint, a token reply that `msal` cannot read, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, any other token status outside 2xx (including `429`), a token reply that `msal` cannot read, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
 | network failure | `TransportError` |
 
-`msal` returns an error dict when Entra rejects a credential.
-It returns one for a managed identity endpoint's error reply too, whatever its status.
-It raises `MsalServiceError` when Entra's discovery or token endpoint replies `5xx`, so that failure maps like any other `5xx` (ADR-0009).
+The auth adapter raises `httpx2.HTTPStatusError` for a token reply outside 2xx but `400`, `401` or `403`, before `msal` reads it (ADR-0009).
+That covers Entra's discovery and token endpoints and every managed identity endpoint Epistole supports.
+Epistole maps that error to `ProviderError` at every status, `429` included.
+The `ProviderError` message names the status, and the `error` and `error_description` of a body that is a JSON object.
+The adapter returns a `400`, `401` or `403` to `msal`.
+`msal` returns an error dict when Entra or a managed identity endpoint rejects a credential.
+The dict's `error` never sets the class.
 A token reply that `msal` cannot read is `ProviderError`, whatever its status.
 A body that is not a JSON object is one.
 Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `msal` raises reading it.
 `msal` raises the same classes for a caller's key before its token request, such as `TypeError` for an encrypted PEM.
 Those stay unmapped (ADR-0009).
-A tenant ID that does not exist in Entra raises `msal`'s own `ValueError` from `connect()`, unmapped.
+Epistole turns off `msal`'s HTTP cache, so `msal` sends every token request on the connection's client (ADR-0009).
+`connect()` raises `msal`'s own `ValueError`, unmapped, for a `400`, `401` or `403` from the discovery endpoint.
+The discovery endpoint replies `400` to a tenant ID that does not exist in Entra.
 `msal` raises the same `ValueError` for a pfx it cannot read, so Epistole cannot tell that service reply from a caller mistake (ADR-0009).
 
 ## `html_to_text`

@@ -21,6 +21,10 @@ Amended on [#55](https://github.com/ozanozbeker/epistole/issues/55): a token rep
 The same classes raised before the library's auth adapter returns a reply stay unmapped.
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a reply nested too deeply for `json` is unreadable too, so `RecursionError` joins the five classes, in the error envelope readers as well.
 An exception from a caller's `TokenCredential` propagates unchanged.
+Amended on [#63](https://github.com/ozanozbeker/epistole/issues/63): the Graph auth adapter raises for any token reply outside 2xx but `400`, `401` or `403`.
+Epistole maps that reply by its status, as it maps a Google token reply.
+So `msal` never reads a `5xx` and never raises `MsalServiceError`.
+Epistole also turns off `msal`'s HTTP cache, so `msal` sends every token request on the connection's client.
 
 ## Why
 
@@ -68,6 +72,33 @@ No public setting turns the retry off.
 The adapter already raises `google.auth.exceptions.TransportError` for a network failure, and `google-auth` passes that out of its loop without a retry.
 So the adapter raises the same class for any reply but `200`, and the loop ends before its first sleep.
 Epistole then picks the class from the status one level down, because `RefreshError` carries no status.
+
+**The Graph auth adapter raises for a token reply outside 2xx but `400`, `401` or `403`, because `msal`'s error dict carries no status.**
+`msal` raises `MsalServiceError` for a status of `500` or above from Entra's discovery or token endpoint, and never for a managed identity endpoint.
+Below `500`, it returns the parsed body.
+Measured on `msal` 1.38.0: `connect()` raised `AuthenticationError` for a `429` from Entra or IMDS with a JSON body.
+For a `429` with an empty body, it raised `ProviderError` with a `json.JSONDecodeError` as `__cause__`.
+No error carried the `Retry-After` value.
+`msal` also parses an IMDS reply as JSON at every status, so Epistole mapped an IMDS `404`, `410`, `500` or `503` with a JSON body to `AuthenticationError`.
+IMDS's documentation says to retry all four.
+The adapter raises before `msal` reads such a reply, so Epistole maps it by its status.
+A `429` is `ProviderError`, not `ThrottledError`, as #52 decided for Google.
+`smtp.OAuth` gets a Graph token on the same path, and the SMTP backend never raises `ThrottledError` (ADR-0004).
+The adapter still returns a `400`, `401` or `403` to `msal`, for two reasons.
+`msal`'s error dict carries `error` and `error_description`, and the `AADSTS` code in the description names the cause.
+`msal`'s Azure Arc flow also reads the `WWW-Authenticate` header of a `401`.
+
+**Epistole turns off `msal`'s HTTP cache, because `msal` returns a kept reply instead of sending a later token request.**
+`msal` wraps the auth adapter in its own HTTP cache.
+The cache keeps a `429`, a `5xx`, or any reply with `Retry-After` for `Retry-After` seconds: 5 s by default and 3600 s at most.
+A confidential client also keeps a `400` for 60 s.
+For a later token request on the same connection, `msal` returns the kept reply and sends no request.
+ADR-0004 makes `ProviderError` transient, so a caller retries it.
+`msal` then returns the kept reply again, and the endpoint receives no request.
+The adapter's reply count does not change either, so an error from reading a kept reply propagates unmapped.
+Measured on `msal` 1.38.0: after a refresh received a `400` with body `[]`, the next send raised a raw `AttributeError`.
+Both `msal` clients take `http_cache=`, a public parameter that accepts any dict-like object.
+Epistole passes a `dict` that keeps nothing, so it uses no private `msal` name.
 
 **A backend takes a credential, never a client.**
 Unwrapping a built SDK client reads the credential through private attributes: one on Google and three on Graph.
@@ -123,6 +154,21 @@ It is token freshness, not the backoff policy #2 rules out.
   Epistole maps the reply by its status: `400`, `401` and `403` are `AuthenticationError`, and any other status is `ProviderError`.
   A `429` is `ProviderError`, not `ThrottledError`.
   `smtp.OAuth` gets a Gmail token on the same path, and the SMTP backend never raises `ThrottledError` (ADR-0004).
+- **The Graph auth adapter raises `httpx2.HTTPStatusError` for any token reply outside 2xx but `400`, `401` or `403`.**
+  It raises before `msal` reads the reply, on its `GET` and its `POST` alike.
+  That covers Entra's discovery and token endpoints and every managed identity endpoint Epistole supports.
+  Epistole maps that error to `ProviderError` at every status, `429` included.
+  The `ProviderError` message names the status, and the `error` and `error_description` of a body that is a JSON object.
+  The adapter raises a private subclass, so the mapping tells a token reply from a mail endpoint reply.
+  A token `429` never maps to `ThrottledError`.
+- **The Graph auth adapter returns a `400`, `401` or `403` to `msal`.**
+  An error dict is `AuthenticationError`, and a body `msal` cannot read is `ProviderError`.
+  The dict's `error` never sets the class, so a `400` whose `error` is `temporarily_unavailable` is `AuthenticationError`.
+  A `400`, `401` or `403` from the discovery endpoint stays `msal`'s `ValueError`, unmapped.
+  So Graph's token table is Google's, except that a `400`, `401` or `403` body that `msal` cannot read is `ProviderError`.
+- **Epistole turns off `msal`'s HTTP cache.**
+  It passes both `msal` clients `http_cache=`, a `dict` that keeps nothing.
+  So `msal` sends every token request on the connection's client, and the adapter's `replies` counts every reply `msal` reads.
 - **A token reply that `google-auth` or `msal` cannot read is `ProviderError`.**
   A proxy login page served with status `200` is one such reply.
   A body that is not a JSON object is another.
@@ -152,8 +198,8 @@ It is token freshness, not the backoff policy #2 rules out.
   | Google's token endpoint replied with any status but `200` | `httpx2.HTTPStatusError`, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `AuthenticationError` on `400`, `401` or `403`; `ProviderError` otherwise |
   | Google refresh failed otherwise | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
-  | msal token call failed | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
-  | Entra's discovery or token endpoint replied `5xx` | `msal.exceptions.MsalServiceError`, which msal raises instead of returning a dict | `ProviderError` |
+  | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
+  | a Graph token reply's status was outside 2xx and not `400`, `401` or `403` | `httpx2.HTTPStatusError`, which the Graph auth adapter raises before msal reads the reply | `ProviderError` |
   | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |
@@ -208,6 +254,8 @@ It is token freshness, not the backoff policy #2 rules out.
   Each release exact-pins `httpcore2`.
 - The Google auth adapter rule depends on `google-auth` passing the adapter's `TransportError` out of its loop without a retry, as 2.57.1 does.
   A test that counts the token requests on a `503` fails on a release that changes this.
+- The no-cache rule depends on `msal` 1.38.0 writing to `http_cache` only by item assignment, which the `dict` subclass ignores.
+  A test that counts the token requests after a `400` with body `[]` fails on a release that changes this.
 - The unreadable-reply rule names the six classes measured on the replies above.
   A library release or an unmeasured reply can raise another class.
   That exception propagates unmapped.
