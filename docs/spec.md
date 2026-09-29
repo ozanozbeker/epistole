@@ -547,7 +547,9 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `scope=` is required for a `TokenCredential`.
   Supplying it alongside a Graph or a Gmail value is a `TypeError`.
   A `graph.ManagedIdentity` inside an `OAuth` requests the resource `https://outlook.office365.com` rather than the scope, per the rule under Graph below.
-- SMTP has no pre-check (ADR-0019).
+- A pre-check raises on a custom header named `Resent-Bcc` (case-insensitive), naming the header (ADR-0016).
+  `send_message` deletes that header before it writes.
+- SMTP has no size pre-check (ADR-0019).
   `smtplib.sendmail` already appends `size=` when the server advertises the `SIZE` extension.
   The server's `552` maps to `RejectedError` (ADR-0004).
 - SMTP writes the RFC 5322 message Epistole built.

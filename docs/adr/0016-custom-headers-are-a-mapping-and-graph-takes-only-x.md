@@ -4,7 +4,8 @@ A `Message` holds custom headers.
 `.headers(mapping)` replaces the whole set.
 `headers_` reads it back.
 A name Epistole already writes is a `ValueError`.
-SMTP and Gmail carry any legal header.
+Gmail carries any legal header.
+SMTP carries any legal header but `Resent-Bcc`.
 Graph carries only names starting with `x-`.
 Any other name fails a `RejectedError` pre-check at every size.
 `Importance` and read receipts get no v1 surface.
@@ -12,6 +13,7 @@ Decided on [#27](https://github.com/ozanozbeker/epistole/issues/27), which close
 Amended on [#40](https://github.com/ozanozbeker/epistole/issues/40): two names that differ only in case are a `ValueError`, as is a value holding any character `str.splitlines()` splits on.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): `.subject()` raises `ValueError` on a line break, by the rule a custom header value follows.
 Amended on [#41](https://github.com/ozanozbeker/epistole/issues/41): SMTP and Gmail write an ASCII value as the caller wrote it, on one line. The RFC 5322 message holds `Bcc`, and SMTP deletes it before writing.
+Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP raises `RejectedError` on a custom `Resent-Bcc`, because `smtplib` deletes that header before it writes.
 
 ## Why
 
@@ -97,6 +99,14 @@ Neither fixes the header a newsletter actually needs.
 `List-Unsubscribe` does not translate to any Graph property.
 So Graph raises either way on the case users most want this feature for.
 
+**`send_message` deletes `Resent-Bcc`, so SMTP raises rather than drop the header.**
+Python documents that `send_message` "does not transmit any Bcc or Resent-Bcc headers that may appear in msg" ([reference](https://docs.python.org/3/library/smtplib.html#smtplib.SMTP.send_message)).
+It deletes both from its copy of the message, matching each name case-insensitively.
+So the server received the message without a custom `Resent-Bcc`, and the send returned normally.
+Measured on 3.13.12.
+ADR-0010 bans that silent drop.
+`SMTPTransport` raises `RejectedError` before writing instead, as `GraphTransport` does for a name without `x-`.
+
 ## Rules
 
 - **`.headers(mapping, /)` replaces the whole set and returns a new message.**
@@ -127,8 +137,8 @@ So Graph raises either way on the case users most want this feature for.
   SMTP writes the message through `smtplib`'s `send_message`, which deletes `Bcc` before it writes.
 - **Two names that differ only in case are a `ValueError`.**
   A `dict` holds both, and RFC 5322 names are case-insensitive.
-- **Every check runs in `Message`**, so it fails at the line that named the header, on every backend (ADR-0002).
-- **SMTP and Gmail write every custom header**, after the ones Epistole writes, in the caller's order.
+- **Every `ValueError` check runs in `Message`**, so it fails at the line that named the header, on every backend (ADR-0002).
+- **SMTP and Gmail write custom headers after the ones Epistole writes**, in the caller's order.
 - **SMTP and Gmail write an ASCII value as the caller wrote it, on one line.**
   `EmailMessage` cannot fold a word longer than 77 characters, so it writes the word as RFC 2047 encoded-words.
   It did so on 3.13.12 and on 3.14.7.
@@ -139,6 +149,10 @@ So Graph raises either way on the case users most want this feature for.
 - **`GraphTransport` rejects a name that does not start with `x-`**, case-insensitive, with `RejectedError` and `__cause__` `None`.
   The check runs before it writes, on both the `sendMail` path and the draft path (ADR-0004, ADR-0012).
   The error names the offending header.
+- **`SMTPTransport` rejects a custom `Resent-Bcc`**, matched case-insensitively on the exact name, with `RejectedError` and `__cause__` `None`.
+  The check runs before it writes, and the error names the header.
+  Every other `Resent-*` name passes.
+  `send_message` reads them only to choose an envelope, and Epistole passes its own.
 - **Epistole caps neither the count nor the total size of custom headers.**
   Microsoft documents no limit on either.
   A rejection from the service maps under ADR-0004 like any other non-2xx.
@@ -182,6 +196,15 @@ So Graph raises either way on the case users most want this feature for.
   Rejected for v1 because it is undocumented for this use and verifying it needs a real tenant.
   [#23](https://github.com/ozanozbeker/epistole/issues/23) put that verification out of scope for a paper spec.
   It is the named reopener below.
+- **Make `Resent-Bcc` a name Epistole owns, so `.headers()` raises `ValueError`.**
+  It raises at the line that names the header, on every backend.
+  Rejected because the owned names are the headers Epistole writes, and Epistole does not write `Resent-Bcc`.
+  It would also apply SMTP's gap to Gmail, whose `raw` message holds the header.
+  Allowing only `x-` names is rejected above for the same reason.
+- **Write `Resent-Bcc` over SMTP, by flattening the message and calling `sendmail`.**
+  SMTP would then carry every custom header.
+  Rejected because every recipient would read the `Resent-Bcc` addresses.
+  RFC 5322 section 3.6.6 says `Resent-Bcc` functions as `Bcc` does, and section 3.6.3 says a `Bcc` address is not revealed to other recipients.
 
 ## Consequences
 
@@ -193,8 +216,11 @@ So Graph raises either way on the case users most want this feature for.
 - ADR-0012's pre-check "a custom header not starting with `x-`" now has the surface it lacked.
   Its inheritance note is closed.
 - The same message can succeed on SMTP and raise on Graph.
-  That is the one place in v1 where a backend swap changes the outcome for a legal message.
-  It is a pre-check, so it makes no network call and the message is unchanged.
+  A message that holds a custom `Resent-Bcc` can succeed on Gmail and raise on SMTP.
+  In both cases a backend swap changes the outcome for a legal message.
+  Each is a pre-check, so it makes no network call and the message is unchanged.
+  [#64](https://github.com/ozanozbeker/epistole/issues/64) asks whether Gmail keeps a custom `Resent-Bcc` in the copy recipients receive.
+  If it does, recipients read the addresses on Gmail too, and the owned-name option under Considered options is worth reopening.
 - A caller who wants the degraded send strips the header first, as ADR-0010 requires.
   There is no flag and no warning.
 - `Message` gets one new field and the checks above, and no backend gets new configuration.

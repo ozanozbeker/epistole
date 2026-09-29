@@ -3,10 +3,11 @@
 A backend rejects a message before writing only where a vendor documents the limit.
 Gmail checks two: an encoded message over 36,700,160 bytes, and more than 500 recipients.
 Graph checks the three ADR-0012 and ADR-0016 already decided.
-SMTP checks nothing, because `smtplib` already sends the size to the server and the server replies.
+SMTP checks no size, because `smtplib` already sends the size to the server and the server replies.
 Every size check reads the bytes the backend is about to send.
 None applies an expansion factor to a raw size.
 Decided on [#30](https://github.com/ozanozbeker/epistole/issues/30), which found the whole block in `docs/spec.md` citing no ADR at all.
+Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP checks one custom header name, `Resent-Bcc`, which `smtplib` deletes (ADR-0016).
 
 ## Why
 
@@ -53,7 +54,8 @@ The tenant message limit on Exchange Online is the standing example: ADR-0012 le
 - **Every pre-check raises `RejectedError` with `__cause__` `None` before writing** (ADR-0004).
 - **A size check measures the bytes the backend will send.**
   It applies no expansion factor and makes no estimate from a raw size.
-- **SMTP has no pre-check.**
+- **SMTP checks one**: a custom `Resent-Bcc` header (ADR-0016).
+  It has no size check.
   `smtplib` sends `size=` when the server advertises `SIZE`.
   `552` on MAIL FROM maps to `RejectedError` (ADR-0004).
 - **Gmail checks two**: an encoded message over `36_700_160` bytes, and more than 500 recipients.

@@ -11,6 +11,7 @@ A backend that cannot carry a feature raises `RejectedError` with `__cause__` `N
 Nothing downgrades that error to a warning.
 Decided on [#17](https://github.com/ozanozbeker/epistole/issues/17).
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the custom-header consequence is closed (ADR-0016).
+Amended on [#57](https://github.com/ozanozbeker/epistole/issues/57): SMTP adds a second gap, a custom `Resent-Bcc` that `smtplib` deletes (ADR-0016).
 
 ## Why
 
@@ -28,11 +29,12 @@ Graph accepts the same bytes as `text/plain`.
 This ADR first assumed Graph's `sendMail` path would use them.
 [ADR-0012](0012-graph-sends-json-on-two-paths-chosen-by-size.md) chose JSON on every Graph request instead, so the gap covers Graph at any size rather than its draft path alone.
 On Graph, custom headers must start with `x-`.
+On SMTP, `smtplib` deletes a custom `Resent-Bcc` before it writes.
 Exchange also replaces the caller's plain text next to HTML with its own.
 ADR-0012 treats that as degradation rather than rejection.
-The count is still three backends and one gap.
+The count is still three backends and two gaps.
 Anymail's mechanism covers fourteen providers and twelve optional message attributes.
-A method with one caller is a mechanism, not a design.
+A method with two callers is a mechanism, not a design.
 
 **The gap is a pre-check, not a new class.**
 Under ADR-0004, a limit Epistole can check before writing is `RejectedError` with `__cause__` `None`, because the same message succeeds on another backend.
@@ -43,7 +45,7 @@ An eighth class would split one meaning across two names.
 
 **Epistole adds no warning and no flag.**
 ADR-0004 already rejected warnings because they are invisible in production logs.
-An `ignore_unsupported` flag would be a setting that exists for one pre-check.
+An `ignore_unsupported` flag would be a setting that exists for two pre-checks.
 A caller who wants the degraded send strips the header first.
 
 **The message stays backend-agnostic.**
