@@ -246,6 +246,13 @@ It is token freshness, not the backoff policy #2 rules out.
 - **Check the reply's shape in the auth adapter.**
   The adapter can raise for a body that is not a JSON object.
   It cannot check the fields each library reads, such as `expires_in` and `scope`, without copying the libraries' parsing.
+- **Return the cached token when `msal`'s early refresh raises.**
+  `_MsalTokens.token()` could catch the adapter's error and return a cached token with more than five minutes left.
+  That copies `msal`'s fallback into Epistole for a token whose reply held `refresh_in`.
+  Declined on #63, because the send's `ProviderError` is transient and the case needs `refresh_in`.
+- **Pass `msal` the classes to fall back on, as `http_exceptions=`.**
+  `acquire_token_for_client` passes it through `**kwargs` to a private method, and its documentation does not list it.
+  Declined on #63, because Epistole uses no private `msal` name.
 
 ## Consequences
 
@@ -256,6 +263,15 @@ It is token freshness, not the backoff policy #2 rules out.
   A test that counts the token requests on a `503` fails on a release that changes this.
 - The no-cache rule depends on `msal` 1.38.0 writing to `http_cache` only by item assignment, which the `dict` subclass ignores.
   A test that counts the token requests after a `400` with body `[]` fails on a release that changes this.
+- A send raises `ProviderError` when `msal`'s early refresh on a confidential client receives a status the adapter raises for, though the cached token is still valid.
+  `msal` refreshes a token early once its `refresh_on` time passes.
+  It sets `refresh_on` only when Entra's reply holds `refresh_in`.
+  `msal` returns the cached token when the early refresh returns an error dict or raises a `requests` exception.
+  It raises any other exception.
+  Measured on `msal` 1.38.0: a `429` or `404` on the early refresh raised `ProviderError` from the send.
+  Before #63, the send used the cached token.
+  A `503` raised `ProviderError` before #63 too.
+  `msal`'s managed identity client returns the cached token for any exception, so a send on a managed identity uses the cached token.
 - The unreadable-reply rule names the six classes measured on the replies above.
   A library release or an unmeasured reply can raise another class.
   That exception propagates unmapped.
