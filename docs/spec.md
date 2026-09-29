@@ -212,6 +212,7 @@ class Attachment:
 - The HTML is byte-identical except the rewritten `src` values.
   `<img>` inside comments, `data:` in CSS `url()`, `srcset`, and non-image media types stay as written.
 - A comment ends where HTML5 ends one, on every supported Python: at the first `-->` or `--!>`, or at once when written `<!-->` or `<!--->` (ADR-0003).
+  A comment that nothing ends runs to the end of the HTML.
 - Epistole strips only the C0 controls and spaces at the ends of a `src` before it reads the scheme, as a URL parser does (ADR-0003).
   So `src=" data:..."` stays as written, and `src=" cid:logo.png"` names no `cid:`.
 - The rewrite makes one inline image per distinct (media type, bytes).
@@ -883,6 +884,7 @@ def html_to_text(html: str, /) -> str: ...
   A block or a `<br>` inside a cell starts a new line, which keeps the paragraphs of a layout table apart.
   It drops `<style>`, `<script>`, `<title>`, and comments.
   It keeps other text in a `<head>`, such as a `<noscript>`, because HTML5 moves it into the body when scripting is off.
+  It also keeps text in `<noframes>` and `<template>`, which no client displays.
   It prints image alt text in brackets and decodes entities.
   It never raises on malformed HTML (ADR-0008).
 - It returns `""` for HTML holding no text, such as an image with no alt text or a body whose only text is inside `<style>`.

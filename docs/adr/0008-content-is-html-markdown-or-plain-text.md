@@ -16,7 +16,7 @@ Amended on [#36](https://github.com/ozanozbeker/epistole/issues/36): `text=""` i
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): content that holds a surrogate is a `ValueError`, and so is a `text_renderer` return that holds one (ADR-0016).
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): content or a `text_renderer` return that is not a `str` is a `TypeError` (ADR-0004).
 SMTP and Gmail write each line break as CRLF.
-The extractor's rules for links, table rows and `<head>` text are written out in full.
+The extractor's rules for links, table rows and the text it keeps are written out in full.
 
 ## Why
 
@@ -132,6 +132,7 @@ It also keeps `html2text`'s licence with the caller who chose it.
   Email lays out most bodies in tables, and a cell there holds paragraphs, so the break keeps them apart.
   It drops `<style>`, `<script>`, `<title>`, and comments.
   It keeps other text in a `<head>`, such as a `<noscript>`, because HTML5 moves it into the body when scripting is off.
+  It also keeps text in `<noframes>` and `<template>`, which no client displays.
   It prints an image's alt text in brackets and decodes entities.
   It never raises on malformed HTML.
   The exact output is not a contract.

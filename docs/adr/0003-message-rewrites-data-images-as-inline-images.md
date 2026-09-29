@@ -10,6 +10,7 @@ Decided on [#11](https://github.com/ozanozbeker/epistole/issues/11), based on th
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): the digest covers the media type as well as the bytes, so the content id is unique per dedupe key by construction.
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a comment ends where HTML5 ends one, on every supported Python.
 Epistole strips only the C0 controls and spaces at the ends of a `src`, as a URL parser does.
+The parser's three departures from HTML5 are listed under Consequences.
 
 ## Why
 
@@ -61,6 +62,8 @@ No RFC records either bug.
   The rewrite skips an `<img>` inside an HTML comment, including Outlook `<!--[if mso]>` blocks.
   A comment ends at the first `-->` or `--!>`, or at once when written `<!-->` or `<!--->`, as HTML5 ends one.
   `html.parser` does not end `<!-->` at once on 3.13.12 and does on 3.14.7, so Epistole's parser ends a comment itself.
+  A comment that nothing ends runs to the end of the HTML.
+  `html.parser` on 3.13.3 reads one as text up to its first `>` instead, and parses the `<img>` after it.
   So the same HTML makes the same inline images on every supported Python.
 - **The rewrite makes one inline image per distinct (media type, bytes).**
   A logo in the header and the footer is sent once.
@@ -111,5 +114,9 @@ No RFC records either bug.
 - A caller who wants to send a `data:` image cannot.
 - A stdlib default is easy to miss: `add_related(..., filename=, cid=)` writes `Content-Disposition: attachment` unless the caller passes `disposition="inline"` explicitly.
   The MIME builder must pass it.
+- The parser departs from HTML5 in three places, which #62 kept.
+  It ends a `<![CDATA[` inside `<svg>` at the first `>`.
+  It does not read `<image>` as `<img>`.
+  It reads an `<img>` inside `<template>`, which a client never renders.
 - [#15](https://github.com/ozanozbeker/epistole/issues/15) takes the renderer order as given.
   [#21](https://github.com/ozanozbeker/epistole/issues/21) documents this for authors: no `data:` images, use `cid:` and `.embed()`, and an `<img>` in a comment is not rewritten.

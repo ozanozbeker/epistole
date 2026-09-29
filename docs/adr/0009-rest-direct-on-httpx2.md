@@ -129,7 +129,8 @@ It is token freshness, not the backoff policy #2 rules out.
   So is a field of the wrong type, such as `expires_in`, `scope` or `id_token`.
   Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError`.
   Measured on `google-auth` 2.57.1 and `msal` 1.38.0.
-  A reply nested 10,000 levels deep makes `json` raise `RecursionError`, measured on 3.13.12, and 1,000 levels parse.
+  A reply nested 10,000 levels deep makes `json` raise `RecursionError` on 3.13.12, and 1,000 levels parse.
+  3.14.7 parses 10,000 levels and raises at 100,000, so the tests nest 100,000.
   Each auth adapter counts the replies it returns, and Epistole maps those six classes only when the count increased during the library call.
   Before any reply, the same classes come from the caller's credential.
   `msal` raises `TypeError` for an encrypted PEM, and `AttributeError` for a public key passed as `private_key`.
