@@ -3,6 +3,7 @@
 parser: numpy
 dynamic: true
 
+display_name: Epistole
 site_url: https://ozanozbeker.com/epistole/
 
 authors:
@@ -10,7 +11,90 @@ authors:
     role: Maintainer
     email: github@ozanozbeker.com
 
+logo: assets/epistole-hex.svg
+# great-docs builds the favicons from one file. A PNG source gives the ICO, PNG and Apple sizes; an SVG source gives only the SVG without cairosvg.
+favicon: assets/epistole-favicon-512.png
+social_cards:
+  image: assets/epistole-social-card.png
+  twitter_card: summary_large_image
+# Without this, great-docs writes the `github.io` address into the canonical, `og:` and sitemap URLs.
+seo:
+  canonical:
+    base_url: https://ozanozbeker.com/epistole/
+
+# Quarto reads `_brand.yml` only from the build directory, which great-docs recreates on each build.
+pre_render: [scripts/copy-brand.py]
+
 user_guide:
   - section: Guide
     contents:
+      - sending.qmd
+      - writing-html-for-email.qmd
+      - choosing-a-backend.qmd
+      - mail-services.qmd
       - upgrading.qmd
+
+reference:
+  desc: "`ADR-NNNN` in a docstring names a file in [`docs/adr/`](https://github.com/ozanozbeker/epistole/tree/main/docs/adr), the decision records in the repo."
+  sections:
+    - title: Backends
+      desc: A backend holds the credential and the from address, and it sends or opens a connection.
+      contents:
+        - SMTPBackend
+        - GmailBackend
+        - GraphBackend
+        - ConsoleBackend
+        - MemoryBackend
+    - title: Credentials
+      desc: Each backend module exports its credentials.
+      contents:
+        - smtp.Password
+        - smtp.OAuth
+        - gmail.ServiceAccount
+        - gmail.AuthorizedUser
+        - graph.ClientSecret
+        - graph.Certificate
+        - graph.ManagedIdentity
+    - title: Message
+      desc: A message is an immutable value, and each builder method returns a copy.
+      contents:
+        - name: Message
+          members:
+            - to
+            - cc
+            - bcc
+            - reply_to
+            - subject
+            - headers
+            - attach
+            - embed
+    - title: Values
+      desc: What a send takes and returns.
+      contents:
+        - Address
+        - Attachment
+        - Refusal
+        - SendResult
+        - Submission
+    - title: Base classes and protocols
+      desc: What a third-party backend implements.
+      contents:
+        - Backend
+        - Connection
+        - Transport
+        - TokenCredential
+        - AccessToken
+    - title: Exceptions
+      desc: Every error Epistole raises for a failed send subclasses `EpistoleError`.
+      contents:
+        - exceptions.EpistoleError
+        - exceptions.RejectedError
+        - exceptions.SenderRefusedError
+        - exceptions.RecipientsRefusedError
+        - exceptions.AuthenticationError
+        - exceptions.ThrottledError
+        - exceptions.TransportError
+        - exceptions.ProviderError
+    - title: Functions
+      contents:
+        - html_to_text

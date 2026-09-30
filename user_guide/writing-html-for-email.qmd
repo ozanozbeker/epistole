@@ -1,0 +1,152 @@
+---
+title: Writing HTML for email
+---
+
+Epistole never composes HTML.
+You supply it finished.
+This page covers what you must handle as a result.
+Every constraint below is recipient-side.
+It applies to every message Epistole sends, over every backend.
+No choice of backend avoids it.
+Paste this page into the prompt when a model writes the HTML for you.
+
+## Choose how the content enters
+
+`html=` is for a rendered report: Quarto, Pandoc, or a self-contained page a model wrote.
+The rest of this page is about that case.
+
+`markdown=` is for a message you write by hand.
+Epistole renders it through `epistole[markdown]` on the CommonMark preset, so tables and footnotes are not available in v1.
+Render those yourself and pass `html=`.
+The Markdown source is the plain text, so a text client shows exactly what you wrote.
+
+`text=` alone is for alerts.
+The message has no HTML part.
+Nothing below applies.
+
+An HTML message carries plain text as well.
+Epistole derives it with its own extractor.
+`text=` replaces it outright.
+`text_renderer=` swaps the extractor.
+
+## Charts are static images or they are nothing
+
+No email client runs JavaScript.
+A plotly figure is an empty `<div>` that `Plotly.newPlot` fills on load.
+The recipient receives it empty, and nothing ever fills it.
+Anything else that JavaScript draws in the browser is empty too.
+
+Write the figure to a PNG and reference it from an `<img>`.
+`fig.write_image("chart.png")` does that for plotly and needs `kaleido`.
+For matplotlib, `savefig` already works this way.
+This is the constraint most often broken by a request for an interactive dashboard in a message.
+
+## Put every image in an `<img>` tag
+
+Gmail renders no `data:` URI image on any of its four clients: desktop webmail, mobile webmail, and the iOS and Android apps.
+The source is community testing, not a statement from Google.
+The desktop row was last retested in 2024-05.
+
+So `Message(html=...)` rewrites every `data:` image it finds in an `<img src>` into an inline image.
+The bytes become an attachment.
+The tag references them with `cid:`.
+Quarto's `embed-resources: true` produces exactly that construct.
+You do not have to do anything about it.
+
+The rewrite applies to `<img src>` and nothing else.
+A `data:` image inside a CSS `url()`, inside a `srcset`, or inside a conditional comment such as `<!--[if mso]>` stays as written.
+Gmail will not show it.
+There is nowhere to move those bytes to, because `cid:` inside CSS has no reliable client support.
+If an image has to render, give it an `<img>` tag rather than a `background-image`.
+
+For an image you already hold as a file, skip the round trip:
+
+```python
+Message(html=html).embed(Path("logo.png"))
+```
+
+The content id defaults to the filename, so the HTML refers to it as `<img src="cid:logo.png">`.
+Two embeds under one content id raise `ValueError`.
+Give each image a distinct filename, or pass `cid=`.
+
+## Style from a `<style>` block in `<head>`
+
+A `<head>` stylesheet works in more clients than the usual email advice says.
+Community testers record full or partial support in Apple Mail, Outlook.com, Outlook for macOS, Outlook for Windows 2007 through 2019, Yahoo, Thunderbird, ProtonMail and Gmail desktop webmail.
+Gmail mobile webmail is the one client with no support at all.
+Testers have recorded it that way since 2020-02.
+
+Two caveats apply.
+On Outlook for Windows a rule must be declared before the element it styles.
+Gmail desktop webmail keeps the first 16 KB of your `<style>` and drops the rest.
+That figure comes from community testing.
+Google publishes no limit at all.
+The 8192 figure repeated elsewhere is a superseded 2017 measurement.
+
+Treat `@media` and `:hover` as decoration.
+They fail in the same clients that ignore the stylesheet.
+Outlook for Windows supports neither.
+
+Lay out with tables.
+Microsoft's only first-party document on this covers Outlook 2007.
+It lists `position`, `float`, `max-width`, `min-width` and `overflow` as unsupported.
+Microsoft has published nothing equivalent since.
+
+## Watch the total size
+
+Gmail clips a message at roughly 102,400 bytes and hides the rest behind a "View entire message" link.
+
+Epistole never warns you about this.
+The number comes from vendor documentation, not from Google's.
+The issue [hteumeuleu/email-bugs#41](https://github.com/hteumeuleu/email-bugs/issues/41) holds reports of clipping below it.
+So there is no threshold Epistole could justify.
+Measure your own HTML with `len(html.encode("utf-8"))`.
+
+Clipping is recipient-side.
+Gmail clips the message for every recipient on Gmail, whichever backend sent it.
+A Workspace address does not end in `@gmail.com`.
+Backend size limits are a separate problem, covered in [Choosing a backend](choosing-a-backend.qmd).
+There, Graph's 4 MB is the limit that stops a send.
+
+## Making a large report fit
+
+A Quarto report rendered with `embed-resources: true` is about a megabyte before you add any figure.
+One measured report was 1,188,695 bytes.
+It held 993,049 characters of CSS and 155,053 of `<script>`.
+Its prose was under 400 characters.
+
+Two edits shrink it.
+The first matters more than the advice you usually hear.
+
+| What you send | Bytes |
+| --- | --- |
+| The report as Quarto rendered it | 1,188,695 |
+| Scripts stripped | 996,201 |
+| CSS rewritten onto elements | 195,706 |
+| Both | 3,212 |
+
+You strip the scripts yourself.
+That is safe, because none of that JavaScript was going to run.
+`css-inline`, a package Epistole does not depend on, rewrites the CSS onto elements:
+
+```python
+import css_inline
+
+Message(html=css_inline.inline(html))
+```
+
+Know two things before you run it.
+
+It raises `InlineError` on a Quarto `embed-resources` report.
+Pandoc leaves a stylesheet as `<link href="data:text/css,...">` whenever the CSS contains `</`.
+`css-inline` resolves that `href` as a filesystem path.
+Strip those `<link>` tags first.
+That removes their CSS too.
+In the measured report, the removal made no difference: the output was 195,706 bytes either way.
+
+It also drops every `:hover` rule, and by default every `@media` block.
+`keep_at_rules=True` saves the `@media` blocks and does not save the `:hover` rules.
+You lose a responsive layout without a warning.
+
+Epistole does none of this for you.
+The only edit `Message(html=...)` makes to your HTML is the `<img src>` rewrite above.

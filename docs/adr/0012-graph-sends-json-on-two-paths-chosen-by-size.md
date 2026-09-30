@@ -34,7 +34,7 @@ Neither path covers the other.
 An upload session for an attachment under 3 MB fails with `ErrorAttachmentSizeShouldNotBeLessThanMinimumSize`.
 The draft path needs `Mail.ReadWrite` on top of `Mail.Send`.
 Shipping the `sendMail` path alone would cap Graph attachments near 2 MB, below one PDF report.
-The README's [Choosing a backend](../../README.md#choosing-a-backend) section already documents 150 MB.
+The site's [Choosing a backend](https://ozanozbeker.com/epistole/user-guide/choosing-a-backend.html) page already documents 150 MB.
 
 **The `sendMail` path uses JSON too, not MIME.**
 `sendMail` and `POST /users/{addr-spec}/messages` both accept the whole RFC 5322 message base64-encoded under `Content-Type: text/plain`, the bytes the SMTP backend writes.
