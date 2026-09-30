@@ -221,3 +221,7 @@ __marimo__/
 great-docs/
 _great_docs_build/
 _freeze/
+
+# The Mail services page's consent script reads this Google OAuth client file, which holds the client secret. The second pattern covers Google's download name.
+gmail-oauth-client.json
+client_secret*.json

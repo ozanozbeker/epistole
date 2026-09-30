@@ -19,6 +19,7 @@ ROOT = Path(__file__).parents[1]
 PAGES = [ROOT / "README.md", *sorted((ROOT / "user_guide").glob("*.qmd"))]
 """The README and the user guide pages, whose Python blocks the test runs."""
 EXAMPLE = re.compile(r"^#+ ([^\n]+)$|^```python\n(.*?)^```$", re.MULTILINE | re.DOTALL)
+"""A heading, or a Python block. A block with a filename is a script the reader saves and runs, so it does not match."""
 RAISES = {"Kept a connection past its `with`": ValueError}
 """The guide shows the example under each of these headings raising."""
 
@@ -61,6 +62,12 @@ def test_every_example_runs(
     monkeypatch.chdir(tmp_path)
     for name, data in FILES.items():
         (tmp_path / name).write_bytes(data)
+
+    # The examples read their secrets under `.env.example`'s names, so any other name raises KeyError.
+    for line in (ROOT / ".env.example").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            name, _, value = line.partition("=")
+            monkeypatch.setenv(name, value.strip('"'))
 
     # The examples share one namespace, as cells in a notebook do, and assume these three names.
     namespace: dict[str, object] = {
