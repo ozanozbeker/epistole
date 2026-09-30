@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal, cast, override
 
 from epistole import gmail, graph
 from epistole._address import addr_spec
-from epistole._backend import Backend, TokenCredential
+from epistole._backend import Backend, TokenCredential, _domain
 from epistole._result import Refusal
 from epistole._rfc5322 import build
 from epistole.exceptions import (
@@ -144,10 +144,18 @@ class SMTPBackend(Backend):
         """Open the socket, start TLS unless `security` is `"none"`, and authenticate."""
         # smtplib's own default context checks no certificate.
         context: ssl.SSLContext = ssl.create_default_context()
+        # smtplib's default EHLO name is socket.getfqdn(), which sends the machine's hostname and can wait seconds on reverse DNS.
+        name: str = _domain(self.from_address)
         smtp: SMTP = (
-            SMTP_SSL(self._host, self._port, timeout=_TIMEOUT, context=context)
+            SMTP_SSL(
+                self._host,
+                self._port,
+                local_hostname=name,
+                timeout=_TIMEOUT,
+                context=context,
+            )
             if self._security == "tls"
-            else SMTP(self._host, self._port, timeout=_TIMEOUT)
+            else SMTP(self._host, self._port, local_hostname=name, timeout=_TIMEOUT)
         )
         with ExitStack() as on_failure:
             on_failure.callback(smtp.close)
