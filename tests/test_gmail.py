@@ -30,8 +30,8 @@ TOKEN_URI = "https://oauth2.googleapis.com/token"  # noqa: S105
 SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 SCOPE = "https://www.googleapis.com/auth/gmail.send"
 
-DEEP = b"[" * 100_000 + b"]" * 100_000
-"""JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 parses 10,000 levels, where 3.13.12 raises."""
+DEEP = b"[" * 1_000_000 + b"]" * 1_000_000
+"""JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 bounds the depth by the C stack, so it parses 100,000 levels on Linux x86-64 and raises on macOS arm64."""
 
 type Reply = httpx2.Response | Exception
 

@@ -436,6 +436,10 @@ def test_the_date_is_timezone_aware():
     assert MemoryBackend().send(message()).date.utcoffset() is not None
 
 
+@pytest.mark.skipif(
+    not hasattr(time, "tzset"),
+    reason="the fixture changes the local zone through time.tzset, which exists only on Unix",
+)
 def test_the_date_carries_the_sending_machines_offset(india_standard_time: None):
     # On a machine in UTC, datetime.now(UTC) gives the same offset, so the fixture sets another zone.
     date = MemoryBackend().send(message()).date
