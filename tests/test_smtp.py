@@ -426,6 +426,25 @@ def test_an_anonymous_send_submits_the_message_and_quits(serve: Callable[..., Se
     assert f"Message-ID: {result.message_id}".encode() in server.messages[0]
 
 
+@pytest.mark.parametrize(
+    ("from_address", "name"),
+    [
+        ("reports@example.com", "example.com"),
+        ("用户@例子.广告", "xn--fsqu00a.xn--4rr70v"),
+    ],
+    ids=["ascii", "idna"],
+)
+def test_ehlo_names_the_from_address_domain_not_the_machine(
+    serve: Callable[..., Server], from_address: str, name: str
+):
+    server = serve()
+
+    with backend(server, from_address=from_address).connect():
+        pass
+
+    assert server.commands[0] == f"ehlo {name}"
+
+
 def test_each_line_break_goes_out_as_crlf_and_each_part_ends_with_one(
     serve: Callable[..., Server],
 ):

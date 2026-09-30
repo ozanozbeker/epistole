@@ -11,6 +11,7 @@ Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): `Message-ID
 Amended on [#35](https://github.com/ozanozbeker/epistole/issues/35): a non-ASCII domain is IDNA-encoded before it is written into `message_id`.
 Amended on [#42](https://github.com/ozanozbeker/epistole/issues/42): the rendering includes the from address, which the submission holds and the message does not. `ConsoleBackend` flushes the stream after each rendering.
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): a domain with an empty label, ASCII or not, is a `ValueError` at send, because it would make an invalid `msg-id`.
+Amended on [#82](https://github.com/ozanozbeker/epistole/pull/82): SMTP's EHLO names the same domain, because smtplib's default EHLO name is also `socket.getfqdn()`.
 
 ## Why
 

@@ -563,6 +563,9 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `"none"` is plaintext.
   There is no opportunistic mode.
   Any other value is a `ValueError` at construction, because the transport would otherwise send in plaintext on a misspelled mode (ADR-0017).
+- EHLO names the from address's domain, IDNA-encoded like the `Message-ID` domain (ADR-0015).
+  The default in smtplib is `socket.getfqdn()`, which sends the machine's hostname and waits on a reverse DNS lookup at each connection.
+  On a GitHub macOS runner, each lookup took about 36 seconds (#75).
 - `credential=None` is anonymous submission.
   `Password` uses `smtplib.SMTP.auth` with one mechanism: the first of PLAIN, LOGIN and CRAM-MD5 that the server offers.
   It sends no second mechanism after a `535`, because the server may have closed its socket (ADR-0011).
