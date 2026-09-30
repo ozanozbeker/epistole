@@ -466,15 +466,12 @@ A Gmail app password needs 2-Step Verification.
 Create one under App passwords on your Google Account's [security page](https://myaccount.google.com/security).
 `GmailBackend` and `smtp.OAuth` over a Gmail credential need your own OAuth client instead, and issue [#68](https://github.com/ozanozbeker/epistole/issues/68) lists the steps.
 
-The rows differ in three ways:
+The rows differ in two ways:
 
 - iCloud and Gmail over SMTP keep the `Message-ID` that Epistole sets.
   The Gmail API replaces it, so a recipient sees a different one than `SendResult.message_id`.
 - A from address the account does not own raises `SenderRefusedError` on iCloud.
   Gmail, over SMTP and over its API, sends the message anyway, with the account's own address in `From`.
-- A wrong password raises `AuthenticationError` on iCloud.
-  On Gmail over SMTP it can raise `TransportError`, because Gmail sometimes closes the connection after a failed login.
-  Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
 No mail service has passed a real send through `GraphBackend`, or through SMTP `OAuth` over a Graph credential, yet.
 Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.

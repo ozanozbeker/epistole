@@ -3,7 +3,7 @@
 This file records what real sends returned, for [#23](https://github.com/ozanozbeker/epistole/issues/23).
 `tests/test_live_smtp.py` and `tests/test_live_gmail.py` make the sends, so a rerun checks each answer again.
 Three answers below changed the repo.
-A wrong Gmail app password can raise the wrong class, and [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
+A wrong Gmail app password raised the wrong class, and [#71](https://github.com/ozanozbeker/epistole/issues/71) fixed it.
 The Gmail API replaces the `Message-ID` and rewrites a from address the account does not own, and ADR-0001, ADR-0004, ADR-0011 and the docstrings now say so.
 
 ## SMTP with a password, on iCloud
@@ -47,11 +47,14 @@ A send from `nobody@example.com` returned a `SendResult`.
 The message IMAP read back had the account's own address in `From`.
 So on Gmail, `send()` succeeds while the recipient sees a different sender than `from_address`.
 
-**A wrong app password can raise `TransportError`, not `AuthenticationError`.**
-In two of three attempts, Gmail replied `535 5.7.8 Username and Password not accepted` to `AUTH PLAIN`, then closed the connection.
-`smtplib.SMTP.login` moved on to `AUTH LOGIN` on the closed socket and raised `SMTPServerDisconnected`, which Epistole maps to `TransportError`.
+**A wrong app password raises `AuthenticationError`, whether or not Gmail then closes the connection.**
+Before [#71](https://github.com/ozanozbeker/epistole/issues/71), `Password` authenticated through `smtplib.SMTP.login`, and a wrong app password raised `TransportError` in two of three attempts.
+In those two, Gmail replied `535 5.7.8 Username and Password not accepted` to `AUTH PLAIN`, then closed the connection.
+`login` moved on to `AUTH LOGIN` on the closed socket and raised `SMTPServerDisconnected`, which Epistole maps to `TransportError`.
 In the third, Gmail kept the connection open, as iCloud did in every attempt, and `login` raised `SMTPAuthenticationError`.
-Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
+`Password` now authenticates through `smtplib.SMTP.auth` with one mechanism, which is PLAIN on Gmail and on iCloud (ADR-0011).
+Checked again on 2026-09-29, in four attempts with a wrong password: `auth` raised `SMTPAuthenticationError` with `535` each time, and Gmail closed the connection after two of them.
+The live test then passed in four runs out of four.
 
 ## SMTP with OAuth, on Gmail
 

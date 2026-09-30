@@ -564,7 +564,9 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   There is no opportunistic mode.
   Any other value is a `ValueError` at construction, because the transport would otherwise send in plaintext on a misspelled mode (ADR-0017).
 - `credential=None` is anonymous submission.
-  `Password` uses `login`.
+  `Password` uses `smtplib.SMTP.auth` with one mechanism: the first of PLAIN, LOGIN and CRAM-MD5 that the server offers.
+  It sends no second mechanism after a `535`, because the server may have closed its socket (ADR-0011).
+  It sends no password to a server that offers none of the three, and raises `AuthenticationError` instead.
   `OAuth` uses XOAUTH2 through `smtplib.SMTP.auth` with `user={username}\x01auth=Bearer {token}\x01\x01`.
   It sends no token to a server that does not offer `AUTH XOAUTH2`, and raises `AuthenticationError` instead.
   `auth` returns normally on a `503`, which Postfix sends when AUTH is off (ADR-0011).
@@ -807,7 +809,7 @@ Everything below `421` classifies on `smtp_code // 100`.
 | any exception carrying `421` | `TransportError` |
 | `SMTPSenderRefused` `552` | `RejectedError` |
 | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
-| `SMTPAuthenticationError`; `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth`; `AUTH XOAUTH2` not offered | `AuthenticationError` |
+| `SMTPAuthenticationError`; a bare `SMTPException` from `auth`; no `AUTH` mechanism offered that the credential uses | `AuthenticationError` |
 | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors, STARTTLS not offered | `TransportError` |
 | `SMTPDataError` `5yz` | `RejectedError` |
 | `SMTPDataError` `4yz` | `ProviderError` |
@@ -821,7 +823,7 @@ The `421` rule runs first, so a `SMTPRecipientsRefused` carrying `421` becomes `
 In that case `smtplib` reports the refusals up to and including the `421`, never tries the rest, and closes the socket.
 `552` on MAIL FROM is the server rejecting the message against its advertised `SIZE`.
 That is a fact about the message, not about the from address.
-`login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, and no retry changes that.
+`auth` raises a bare `SMTPException` for a failure such as a server that keeps sending challenges, and no retry changes one.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**

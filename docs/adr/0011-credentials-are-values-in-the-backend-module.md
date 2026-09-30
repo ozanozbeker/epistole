@@ -22,6 +22,7 @@ Amended on [#45](https://github.com/ozanozbeker/epistole/issues/45): `ManagedIde
 Amended on [#47](https://github.com/ozanozbeker/epistole/issues/47): `connect()` sends a token only to a server that offers `AUTH XOAUTH2`.
 Amended on [#53](https://github.com/ozanozbeker/epistole/issues/53): `connect()` ignores an access token saved in an `AuthorizedUser` file.
 Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): `messages.send` replaces a client-supplied `Message-ID` with its own.
+Amended on [#71](https://github.com/ozanozbeker/epistole/issues/71): a `Password` authenticates through `smtplib.SMTP.auth` with one mechanism, not through `login`.
 
 ## Why
 
@@ -79,6 +80,19 @@ Using the wider one on both paths would give a library that only sends the right
 So the two paths request different scopes.
 An administrator granting domain-wide delegation for both grants two.
 
+**A password authenticates with one mechanism, because `login` sends the next one after a `535`.**
+`smtplib.SMTP.login` tries CRAM-MD5, PLAIN and LOGIN in that order, and sends the next one the server offers after a `535`.
+Gmail replies `535` to a wrong password on `AUTH PLAIN`, and closes its socket after some of those replies.
+`login` then sends `AUTH LOGIN` on the closed socket, and raises `SMTPServerDisconnected` in place of the `535`.
+Epistole maps that to `TransportError`, which is in the transient set, so a retry loop repeats a wrong password (ADR-0004).
+Measured on 2026-09-29 against `smtp.gmail.com`, in four attempts with a wrong password: `auth` raised `SMTPAuthenticationError` with `535` each time, and Gmail closed its socket after two of them.
+One attempt has no fallback, so the order is PLAIN, LOGIN, CRAM-MD5.
+`login` sends the next mechanism because a server can offer one it does not support, as the comment in its source says.
+CRAM-MD5 is last, where `login` has it first, because a server that keeps only a salted hash of each password cannot check it.
+PLAIN stays before LOGIN, so each mail service below receives the mechanism `login` sent it first.
+Measured on the same day, after STARTTLS on port 587: Gmail and iCloud offer LOGIN and PLAIN, and Exchange Online offers LOGIN and no PLAIN.
+None of the three offers CRAM-MD5.
+
 **Consent flows and storage stay out.**
 Owning them means depending on `google-auth-oauthlib` and `msal-extensions`.
 It means an encrypted store per operating system (DPAPI, Keychain, libsecret, which headless Linux often lacks).
@@ -94,6 +108,9 @@ No backend would change.
 
 - `SMTPBackend(..., credential=None | Password | OAuth)`.
   `Password(username, password)`.
+  It uses `smtplib.SMTP.auth` with the first of PLAIN, LOGIN and CRAM-MD5 that the server offers.
+  `connect()` sends no second mechanism after a `535`.
+  It raises `AuthenticationError` without sending the password when the server offers none of the three.
   `OAuth(username, credential, scope=None)`, where `credential` is a Graph value, a Gmail value, or a `get_token` object.
   `scope` is required for the last and forbidden for the first two.
   XOAUTH2 uses `smtplib.SMTP.auth` with the auth string `user={username}\x01auth=Bearer {token}\x01\x01`.
@@ -166,6 +183,11 @@ No backend would change.
   Rejected above and by #2.
 - **Copy blastula's password file and keyring helpers.**
   Rejected: the file is unencrypted JSON and the keyring path needs an OS keyring that servers lack.
+- **Keep `login`, and map an `SMTPServerDisconnected` during AUTH to `AuthenticationError`.**
+  Rejected because `smtplib` raises the same class when the network fails during AUTH, and that failure is transient.
+  `login` also discards the `535`, so the error would hold no reply.
+- **Keep `login`'s order, with CRAM-MD5 first.**
+  Rejected above: one attempt has no fallback.
 - **Send an access token saved in an `AuthorizedUser` file while it is unexpired.**
   It saves one token request per connection.
   Rejected because a revoked refresh token would then raise on a later send, not on the `connect()` line.
@@ -180,6 +202,14 @@ No backend would change.
   It is disabled on one tenant type.
   The documentation names the tenant, not the mechanism.
 - Epistole maintains the input formats of two vendor constructors.
+- A server that rejects the first mechanism for a right password, and accepts a later one, no longer authenticates.
+  `login` authenticated there on a later attempt.
+- A server that offers CRAM-MD5 and PLAIN or LOGIN now receives the password itself.
+  `login` sent CRAM-MD5 there first.
+  With `security="none"` the password is in plaintext, as the `security` docstring says.
+- `smtplib` sends the username as LOGIN's initial response.
+  A server that ignores it and sends a `Username:` challenge receives the password as the username, and replies `535`.
+  `login` did the same on a server that offers LOGIN alone, and sent CRAM-MD5 first to one that offers both.
 - The glossary's *Credential* entry now covers a password and none at all.
   The glossary adds *Token credential* for what `connect()` builds.
 - One Gmail fact needs a real send through a service account: whether `me` resolves to the delegated subject on the `send` endpoint.

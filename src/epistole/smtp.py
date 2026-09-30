@@ -85,7 +85,7 @@ class SMTPBackend(Backend):
     security
         `"starttls"` upgrades after EHLO and raises `TransportError` when the server does not offer it. `"tls"` starts TLS on connect. `"none"` sends in plaintext, a password included. There is no opportunistic mode, and nothing infers the mode from the port.
     credential
-        `None` submits anonymously. A `Password` logs in, and an `OAuth` authenticates with an access token through XOAUTH2.
+        `None` submits anonymously. A `Password` authenticates through PLAIN, LOGIN or CRAM-MD5, and an `OAuth` authenticates with an access token through XOAUTH2.
 
     Raises
     ------
@@ -160,11 +160,28 @@ class SMTPBackend(Backend):
                 smtp.starttls(context=context)
                 smtp.ehlo_or_helo_if_needed()
 
+            offered: list[str] = smtp.esmtp_features.get("auth", "").split()
             if isinstance(self._credential, Password):
-                smtp.login(self._credential.username, self._credential.password)
+                smtp.user = self._credential.username
+                smtp.password = self._credential.password
+                # CRAM-MD5 is last, because a server that keeps only password hashes cannot check it (ADR-0011).
+                authobjects = {
+                    "PLAIN": smtp.auth_plain,
+                    "LOGIN": smtp.auth_login,
+                    "CRAM-MD5": smtp.auth_cram_md5,
+                }
+                mechanism: str | None = next(
+                    (one for one in authobjects if one in offered), None
+                )
+                if mechanism is None:
+                    msg = f"{self._host} offers none of AUTH PLAIN, LOGIN and CRAM-MD5 with security={self._security!r}, so a Password cannot authenticate there."
+                    raise AuthenticationError(msg)
+
+                # smtplib's login sends the next mechanism after a 535, on a socket the server may have closed.
+                smtp.auth(mechanism, authobjects[mechanism])
             elif xoauth2 is not None:
                 # smtplib's auth returns normally on a 503 reply, which a server without AUTH sends.
-                if "XOAUTH2" not in smtp.esmtp_features.get("auth", "").split():
+                if "XOAUTH2" not in offered:
                     msg = f"{self._host} does not offer AUTH XOAUTH2 with security={self._security!r}, so an OAuth credential cannot authenticate there."
                     raise AuthenticationError(msg)
 
@@ -181,7 +198,9 @@ class SMTPBackend(Backend):
 
 @dataclass(frozen=True)
 class Password:
-    """A password is the username and password `SMTPBackend` logs in with, through `smtplib.SMTP.login`.
+    """A password is the username and password `SMTPBackend` authenticates with, through PLAIN, LOGIN or CRAM-MD5.
+
+    `connect()` uses the first of the three that the server offers, and no other after a `535`. It raises `AuthenticationError` without sending the password when the server offers none of them. See ADR-0011.
 
     `smtplib` encodes both as ASCII, so `connect()` raises `UnicodeEncodeError` for any other character.
 
@@ -338,7 +357,7 @@ def _mapped(error: OSError, /, *, sending: bool) -> EpistoleError:
     elif isinstance(error, SMTPResponseException):
         kind = RejectedError if code // 100 == _PERMANENT else ProviderError
     else:
-        # login raises SMTPNotSupportedError for a server without AUTH, and a bare SMTPException when smtplib supports none of its mechanisms. No retry fixes either.
+        # smtplib's auth raises a bare SMTPException for a failure such as a server that keeps sending challenges, and no retry fixes one.
         kind = ProviderError if sending else AuthenticationError
 
     return kind(msg)

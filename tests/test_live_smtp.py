@@ -1,6 +1,6 @@
 """Send real mail through iCloud and Gmail, with an app password or Gmail's OAuth, and through an SMTP server on localhost such as aiosmtpd, skipping each test whose account or server is absent.
 
-Run them with `uv run --env-file .env pytest tests/test_live_smtp.py --tb=short`. A long traceback prints each frame's arguments, and `smtplib.SMTP.login` takes the app password as one.
+Run them with `uv run --env-file .env pytest tests/test_live_smtp.py --tb=short`. A long traceback prints each frame's arguments, and `smtplib.SMTP.docmd` takes the app password as one, in base64.
 """
 
 import imaplib
@@ -17,11 +17,7 @@ from typing import Literal, NamedTuple
 import pytest
 
 from epistole import Message, SendResult, SMTPBackend, smtp
-from epistole.exceptions import (
-    AuthenticationError,
-    SenderRefusedError,
-    TransportError,
-)
+from epistole.exceptions import AuthenticationError, SenderRefusedError
 from epistole.gmail import AuthorizedUser
 
 
@@ -129,24 +125,7 @@ def test_the_service_keeps_the_message_id(
     assert received(account, result.message_id)["Message-ID"] == result.message_id
 
 
-@pytest.mark.parametrize(
-    "account",
-    [
-        pytest.param(ICLOUD, id="icloud", marks=icloud),
-        pytest.param(
-            GMAIL,
-            id="gmail",
-            marks=[
-                gmail,
-                pytest.mark.xfail(
-                    raises=TransportError,
-                    reason="#71: Gmail sometimes closes the connection after a failed AUTH",
-                    strict=False,
-                ),
-            ],
-        ),
-    ],
-)
+@pytest.mark.parametrize("account", ACCOUNTS)
 def test_a_wrong_app_password_raises_authentication_error(account: Account):
     with pytest.raises(AuthenticationError):
         send(account, account.address, smtp.Password(account.address, "wrong"))

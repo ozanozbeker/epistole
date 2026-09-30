@@ -26,6 +26,7 @@ The SMTP mapping loses its `SMTPUTF8` row, because SMTP checks the extension its
 A reason in any entry of Gmail's `errors[]` qualifies a row, and the throttle reasons are read first.
 Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): Gmail replaces the `Message-ID` Epistole wrote, and sends from the account's own address when `From` names neither the account nor a verified alias.
 Neither raises, so the send result and the mapping stay as they are.
+Amended on [#71](https://github.com/ozanozbeker/epistole/issues/71): a `Password` authenticates through `auth`, so the SMTP mapping names neither `login` nor `SMTPNotSupportedError` (ADR-0011).
 
 ## Why
 
@@ -165,7 +166,7 @@ Epistole never sleeps and never retries.
   | any exception carrying `421` | `TransportError` |
   | `SMTPSenderRefused` `552` | `RejectedError` |
   | `SMTPSenderRefused`, any other code | `SenderRefusedError` |
-  | `SMTPAuthenticationError`, `SMTPNotSupportedError` or a bare `SMTPException` from `login` or `auth` | `AuthenticationError` |
+  | `SMTPAuthenticationError`, or a bare `SMTPException` from `auth` | `AuthenticationError` |
   | `SMTPConnectError`, `SMTPHeloError`, `SMTPServerDisconnected`, `OSError`, `ssl` errors | `TransportError` |
   | `SMTPDataError` `5yz` | `RejectedError` |
   | `SMTPDataError` `4yz` | `ProviderError` |
@@ -179,10 +180,12 @@ Epistole never sleeps and never retries.
   `smtplib` raises `SMTPRecipientsRefused` only when its refusals number as many as the envelope's recipients.
   A repeated addr-spec breaks that count, so `smtplib` sends `DATA` anyway and raises on the server's reply.
   So `_SMTPTransport` names each addr-spec once.
-  `login` raises a bare `SMTPException` when `smtplib` supports none of the server's mechanisms, such as a server that offers only NTLM.
-  No retry changes that, so it is `AuthenticationError`, as the catch-all Gmail `403` below is.
+  `auth` raises a bare `SMTPException` for a failure such as a server that keeps sending challenges.
+  No retry changes one, so it is `AuthenticationError`, as the catch-all Gmail `403` below is.
   As a `ProviderError` it would be in the transient set.
   A retry loop would then repeat it.
+  A server that offers no mechanism the credential uses, such as one that offers only NTLM, is `AuthenticationError` too.
+  Epistole runs that check itself, so `__cause__` is `None` (ADR-0011).
   `552` on MAIL FROM is the server refusing the message against its advertised `SIZE`.
   That is a fact about the message and not about the from address.
   So it cannot share a row with a genuine refusal of the from address.

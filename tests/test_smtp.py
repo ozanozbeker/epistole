@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import hmac
 import json
 import shutil
 import socket
@@ -20,7 +21,6 @@ from smtplib import (
     SMTPDataError,
     SMTPException,
     SMTPHeloError,
-    SMTPNotSupportedError,
     SMTPRecipientsRefused,
     SMTPResponseException,
     SMTPSenderRefused,
@@ -45,13 +45,21 @@ from epistole.exceptions import (
     TransportError,
 )
 
+
+def b64(text: str) -> str:
+    return base64.b64encode(text.encode()).decode()
+
+
 EXTENSIONS = ("SIZE 10485760", "8BITMIME", "SMTPUTF8", "AUTH PLAIN XOAUTH2")
 STARTTLS = (*EXTENSIONS, "STARTTLS")
 PASSWORD = smtp.Password(username="reports", password="hunter2")  # noqa: S106
-AUTH = f"AUTH PLAIN {base64.b64encode(b'\0reports\0hunter2').decode()}"
-XOAUTH2 = f"AUTH XOAUTH2 {base64.b64encode(b'user=reports@example.com\1auth=Bearer token-1\1\1').decode()}"
+WRONG = smtp.Password(username="reports", password="x")  # noqa: S106
+AUTH = f"AUTH PLAIN {b64('\0reports\0hunter2')}"
+XOAUTH2 = f"AUTH XOAUTH2 {b64('user=reports@example.com\1auth=Bearer token-1\1\1')}"
 OUTLOOK = "https://outlook.office365.com/.default"
 GMAIL = "https://mail.google.com/"
+ACCEPTED = "235 2.7.0 accepted"
+CHALLENGE = "<1896.697170952@postoffice.example.net>"
 TENANT = "contoso.onmicrosoft.com"
 MICROSOFT = f"https://login.microsoftonline.com/{TENANT}"
 
@@ -61,7 +69,7 @@ type Reply = str | bytes | None
 class Server:
     """A scripted SMTP server on 127.0.0.1 that records each command and message it receives.
 
-    `replies` maps a verb, `RCPT` plus an addr-spec, `greeting`, or `.` for the end of the data, to a reply that replaces the default. A `None` reply closes the socket unanswered, and a `421` reply closes it after replying. `tls` answers `STARTTLS`, or with `implicit` starts TLS on connect. `upgraded` replaces the extensions offered once `STARTTLS` has started TLS.
+    `replies` maps a verb, `RCPT` plus an addr-spec, `greeting`, `response` for the line after a `334`, or `.` for the end of the data, to a reply that replaces the default. A `None` reply closes the socket unanswered, and a `421` reply closes it after replying. The server also closes it after replying to the verb `closes_after`. `tls` answers `STARTTLS`, or with `implicit` starts TLS on connect. `upgraded` replaces the extensions offered once `STARTTLS` has started TLS.
     """
 
     def __init__(
@@ -72,12 +80,14 @@ class Server:
         upgraded: tuple[str, ...] | None = None,
         tls: ssl.SSLContext | None = None,
         implicit: bool = False,
+        closes_after: str | None = None,
     ) -> None:
         self.replies = replies or {}
         self.extensions = extensions
         self.upgraded = upgraded
         self.tls = tls
         self.implicit = implicit
+        self.closes_after = closes_after
         self.commands: list[str] = []
         self.messages: list[bytes] = []
         self.hung_up = threading.Event()
@@ -118,8 +128,16 @@ class Server:
 
                     command = line.decode().rstrip("\r\n")
                     self.commands.append(command)
-                    verb = command.partition(" ")[0].upper()
+                    # RFC 4954: the client sends a response after a 334, and a response has no verb.
+                    verb = (
+                        "response"
+                        if reply.startswith(b"334")
+                        else command.partition(" ")[0].upper()
+                    )
                     reply = self._reply(sock, *self._answer(command, verb, extensions))
+                    if verb == self.closes_after:
+                        return
+
                     if verb == "STARTTLS" and reply.startswith(b"220") and self.tls:
                         sock = self.tls.wrap_socket(sock, server_side=True)
                         reader = sock.makefile("rb")
@@ -156,9 +174,7 @@ class Server:
         if verb == "AUTH":
             return (
                 verb,
-                "235 2.7.0 accepted"
-                if command in {AUTH, XOAUTH2}
-                else "535 5.7.8 rejected",
+                ACCEPTED if command in {AUTH, XOAUTH2} else "535 5.7.8 rejected",
             )
 
         defaults = {
@@ -488,22 +504,85 @@ def test_every_socket_operation_times_out_after_60_seconds(
 # --- Credentials -------------------------------------------------------------
 
 
-def test_a_password_logs_in_on_connect(serve: Callable[..., Server]):
-    server = serve()
-
-    with backend(server, credential=PASSWORD).connect():
-        assert server.commands[-1] == AUTH
-
-
 def test_a_wrong_password_raises_on_the_connect_line(serve: Callable[..., Server]):
     server = serve()
-    wrong = backend(server, credential=smtp.Password(username="reports", password="x"))  # noqa: S106
+    wrong = backend(server, credential=WRONG)
 
     with pytest.raises(AuthenticationError) as caught:
         wrong.connect()
 
     assert caught.value.backend is wrong
     assert "MAIL" not in server.verbs()
+    assert server.hung_up.wait(5)
+
+
+@pytest.mark.parametrize(
+    ("offered", "replies", "commands"),
+    [
+        pytest.param("AUTH CRAM-MD5 LOGIN PLAIN", {}, [AUTH], id="PLAIN"),
+        # Exchange Online offers LOGIN and no PLAIN.
+        pytest.param(
+            "AUTH CRAM-MD5 LOGIN XOAUTH2",
+            {"AUTH": f"334 {b64('Password:')}", "response": ACCEPTED},
+            [f"AUTH LOGIN {b64('reports')}", b64("hunter2")],
+            id="LOGIN",
+        ),
+        pytest.param(
+            "AUTH CRAM-MD5 NTLM",
+            {"AUTH": f"334 {b64(CHALLENGE)}", "response": ACCEPTED},
+            [
+                "AUTH CRAM-MD5",
+                b64(
+                    f"reports {hmac.digest(b'hunter2', CHALLENGE.encode(), 'md5').hex()}"
+                ),
+            ],
+            id="CRAM-MD5",
+        ),
+    ],
+)
+def test_a_password_authenticates_through_plain_then_login_then_cram_md5(
+    serve: Callable[..., Server],
+    offered: str,
+    replies: dict[str, Reply],
+    commands: list[str],
+):
+    server = serve(replies, extensions=(offered,))
+
+    with backend(server, credential=PASSWORD).connect():
+        assert server.commands[1:] == commands
+
+
+def test_a_wrong_password_raises_authentication_error_when_the_server_then_closes(
+    serve: Callable[..., Server],
+):
+    # Gmail closes its socket after some of its 535 replies.
+    server = serve(extensions=("AUTH PLAIN LOGIN",), closes_after="AUTH")
+    wrong = backend(server, credential=WRONG)
+
+    with pytest.raises(AuthenticationError, match="535") as caught:
+        wrong.connect()
+
+    assert isinstance(caught.value.__cause__, SMTPAuthenticationError)
+    assert server.verbs() == ["EHLO", "AUTH"]
+
+
+@pytest.mark.parametrize(
+    "extensions",
+    [
+        pytest.param(("8BITMIME",), id="no AUTH"),
+        pytest.param(("AUTH GSSAPI NTLM",), id="no mechanism of the three"),
+    ],
+)
+def test_a_password_sends_no_auth_to_a_server_that_offers_none_of_its_mechanisms(
+    serve: Callable[..., Server], extensions: tuple[str, ...]
+):
+    server = serve(extensions=extensions)
+
+    with pytest.raises(AuthenticationError, match="CRAM-MD5") as caught:
+        backend(server, credential=PASSWORD).connect()
+
+    assert caught.value.__cause__ is None
+    assert "AUTH" not in server.verbs()
     assert server.hung_up.wait(5)
 
 
@@ -528,8 +607,8 @@ def test_oauth_authenticates_through_xoauth2_on_connect(
 
 def test_a_rejected_token_raises_on_the_connect_line(serve: Callable[..., Server]):
     # Gmail sends a 334 challenge that holds its error for a rejected token, then 535 after an empty response.
-    error = base64.b64encode(b'{"status":"400","schemes":"Bearer"}').decode()
-    server = serve({"AUTH": f"334 {error}", "": "535 5.7.8 not accepted"})
+    error = b64('{"status":"400","schemes":"Bearer"}')
+    server = serve({"AUTH": f"334 {error}", "response": "535 5.7.8 not accepted"})
     oauth = smtp.OAuth(
         username="reports@example.com", credential=Credential(), scope=OUTLOOK
     )
@@ -1096,13 +1175,6 @@ CLOSING = "421 4.3.2 closing"
             id="SMTPAuthenticationError",
         ),
         pytest.param(
-            {"extensions": ("8BITMIME",)},
-            {"credential": PASSWORD},
-            SMTPNotSupportedError,
-            AuthenticationError,
-            id="no AUTH at login",
-        ),
-        pytest.param(
             {"replies": {"greeting": "554 5.7.1 go away"}},
             {},
             SMTPConnectError,
@@ -1152,11 +1224,12 @@ CLOSING = "421 4.3.2 closing"
             id="another 4yz reply",
         ),
         pytest.param(
-            {"extensions": ("AUTH GSSAPI",)},
+            # smtplib's auth raises one for a server that keeps sending challenges.
+            {"replies": {"AUTH": "334 ", "response": "334 "}},
             {"credential": PASSWORD},
             SMTPException,
             AuthenticationError,
-            id="a bare SMTPException from login",
+            id="a bare SMTPException from auth",
         ),
         pytest.param(
             {"replies": {"DATA": "250 2.0.0 ok"}},
