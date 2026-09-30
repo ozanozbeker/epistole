@@ -1,4 +1,4 @@
-"""Send real mail through iCloud and Gmail with an app password, and through an SMTP server on localhost such as aiosmtpd, skipping each test whose account or server is absent.
+"""Send real mail through iCloud and Gmail, with an app password or Gmail's OAuth, and through an SMTP server on localhost such as aiosmtpd, skipping each test whose account or server is absent.
 
 Run them with `uv run --env-file .env pytest tests/test_live_smtp.py --tb=short`. A long traceback prints each frame's arguments, and `smtplib.SMTP.login` takes the app password as one.
 """
@@ -11,6 +11,7 @@ from email import message_from_bytes
 from email.message import EmailMessage
 from email.policy import default
 from email.utils import parseaddr
+from pathlib import Path
 from typing import Literal, NamedTuple
 
 import pytest
@@ -21,6 +22,7 @@ from epistole.exceptions import (
     SenderRefusedError,
     TransportError,
 )
+from epistole.gmail import AuthorizedUser
 
 
 class Account(NamedTuple):
@@ -48,6 +50,7 @@ GMAIL = read_account(
     "GMAIL", "smtp.gmail.com", "imap.gmail.com", "[Gmail]/All Mail", "[Gmail]/Spam"
 )
 CUSTOM_ADDRESS = os.environ.get("ICLOUD_CUSTOM_ADDRESS", "")
+AUTHORIZED_USER = Path(os.environ.get("GMAIL_AUTHORIZED_USER", "")).expanduser()
 ARRIVAL_SECONDS = 120
 LOCAL_PORT = 1025
 
@@ -77,20 +80,18 @@ def listening(port: int) -> bool:
 def send(
     account: Account,
     from_address: str,
-    password: str | None = None,
+    credential: smtp.Password | smtp.OAuth | None = None,
     *,
     port: int = 587,
     security: Literal["starttls", "tls"] = "starttls",
 ) -> SendResult:
-    """Send one message from `from_address` to the account's own inbox, with its app password unless `password` replaces it."""
+    """Send one message from `from_address` to the account's own inbox, with its app password unless `credential` replaces it."""
     backend = SMTPBackend(
         account.smtp_host,
         port=port,
         security=security,
         from_address=from_address,
-        credential=smtp.Password(
-            username=account.address, password=password or account.password
-        ),
+        credential=credential or smtp.Password(account.address, account.password),
     )
     return backend.send(
         Message(text="Sent by tests/test_live_smtp.py.")
@@ -148,7 +149,7 @@ def test_the_service_keeps_the_message_id(
 )
 def test_a_wrong_app_password_raises_authentication_error(account: Account):
     with pytest.raises(AuthenticationError):
-        send(account, account.address, "not-the-app-password")
+        send(account, account.address, smtp.Password(account.address, "wrong"))
 
 
 @icloud
@@ -170,6 +171,20 @@ def test_gmail_rewrites_a_from_address_the_account_does_not_own():
     result = send(GMAIL, "nobody@example.com")
 
     assert parseaddr(received(GMAIL, result.message_id)["From"])[1] == GMAIL.address
+
+
+@gmail
+@pytest.mark.skipif(
+    not AUTHORIZED_USER.is_file(), reason="set GMAIL_AUTHORIZED_USER to a saved consent"
+)
+def test_gmail_keeps_the_message_id_over_oauth():
+    credential = smtp.OAuth(
+        username=GMAIL.address, credential=AuthorizedUser(path=AUTHORIZED_USER)
+    )
+
+    result = send(GMAIL, GMAIL.address, credential)
+
+    assert received(GMAIL, result.message_id)["Message-ID"] == result.message_id
 
 
 @pytest.mark.skipif(

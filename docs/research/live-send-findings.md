@@ -53,6 +53,17 @@ In two of three attempts, Gmail replied `535 5.7.8 Username and Password not acc
 In the third, Gmail kept the connection open, as iCloud did in every attempt, and `login` raised `SMTPAuthenticationError`.
 Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
+## SMTP with OAuth, on Gmail
+
+Checked on 2026-09-29 for [#67](https://github.com/ozanozbeker/epistole/issues/67).
+The send went through `smtp.gmail.com` on port 587 with `security="starttls"`, as `smtp.OAuth` over `gmail.AuthorizedUser`.
+It used the consent saved for the Gmail API below, which granted `https://mail.google.com/`, the scope `smtp.OAuth` requests for a Gmail credential.
+IMAP on `imap.gmail.com` read the message back with the account's app password.
+
+**Gmail keeps the `Message-ID` Epistole sets over SMTP with OAuth, as it does over SMTP with a password.**
+The message IMAP read back had the `Message-ID` that `SendResult.message_id` reported.
+So one consent file serves both `GmailBackend` and `smtp.OAuth`.
+
 ## The Gmail API, with a saved consent
 
 Checked on 2026-09-29 for [#68](https://github.com/ozanozbeker/epistole/issues/68).

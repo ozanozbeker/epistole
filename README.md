@@ -460,10 +460,11 @@ A row here means a real send through that mail service passed the `tests/test_li
 | iCloud Mail, including an iCloud+ custom domain | `SMTPBackend` on `smtp.mail.me.com` | `smtp.Password` with the full iCloud address and an app-specific password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
 | Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.Password` with the Gmail address and an app password | `starttls` on port 587, `tls` on port 465 | 2026-09-29 |
 | Gmail | `GmailBackend` | `gmail.AuthorizedUser` with a consent saved from your own Google Cloud OAuth client | HTTPS | 2026-09-29 |
+| Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.OAuth` over the same `gmail.AuthorizedUser` | `starttls` on port 587 | 2026-09-29 |
 
 A Gmail app password needs 2-Step Verification.
 Create one under App passwords on your Google Account's [security page](https://myaccount.google.com/security).
-`GmailBackend` needs your own OAuth client instead, and issue [#68](https://github.com/ozanozbeker/epistole/issues/68) lists the steps.
+`GmailBackend` and `smtp.OAuth` over a Gmail credential need your own OAuth client instead, and issue [#68](https://github.com/ozanozbeker/epistole/issues/68) lists the steps.
 
 The rows differ in three ways:
 
@@ -475,7 +476,7 @@ The rows differ in three ways:
   On Gmail over SMTP it can raise `TransportError`, because Gmail sometimes closes the connection after a failed login.
   Issue [#71](https://github.com/ozanozbeker/epistole/issues/71) tracks the fix.
 
-No mail service has passed a real send through SMTP `OAuth` or `GraphBackend` yet.
+No mail service has passed a real send through `GraphBackend`, or through SMTP `OAuth` over a Graph credential, yet.
 Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
 
 ## Credit
