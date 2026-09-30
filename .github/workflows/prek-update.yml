@@ -1,0 +1,40 @@
+name: Update hooks
+
+# Dependabot does not read `prek.toml`, so this workflow updates its hooks.
+on:
+  schedule:
+    - cron: "17 6 1 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      # Unlike `GITHUB_TOKEN`, an App token lets the PR run CI.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+      # The 7 days match Dependabot's cooldown.
+      - run: uv run --locked --only-dev prek update --freeze --cooldown-days 7
+      - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app.outputs.token }}
+          sign-commits: true
+          branch: prek-update
+          delete-branch: true
+          commit-message: "chore: update prek hooks"
+          title: "chore: update prek hooks"
+          body: "`prek update --freeze --cooldown-days 7` found newer hook releases."

@@ -8,18 +8,22 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Ozan Ozbeker", email = "github@ozanozbeker.com" }]
 keywords = ["email", "gmail", "microsoft-graph", "smtp"]
+# The Python classifiers and the test matrix in `ci.yml` list the same versions (CONTRIBUTING.md).
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Communications :: Email",
   "Typing :: Typed",
 ]
 dependencies = []
 
 [project.urls]
-Changelog = "https://github.com/ozanozbeker/epistole/blob/main/CHANGELOG.md"
-Homepage = "https://github.com/ozanozbeker/epistole"
+Changelog = "https://ozanozbeker.com/epistole/changelog.html"
+Documentation = "https://ozanozbeker.com/epistole/"
 Issues = "https://github.com/ozanozbeker/epistole/issues"
 Repository = "https://github.com/ozanozbeker/epistole"
 
@@ -41,6 +45,8 @@ dev = [
   "rumdl>=0.2.68",
   "tombi>=1.5.2",
 ]
+# Not in `dev`, so the test and lint jobs skip Quarto's Jupyter stack.
+docs = ["great-docs>=0.17"]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
@@ -49,5 +55,7 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 # importlib mode imports epistole from the installed package, not from src/. tests/ needs no __init__.py.
 addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib", "-ra"]
+# A new upstream deprecation fails the Dependabot PR that brings it in, before the removal breaks epistole.
+filterwarnings = ["error"]
 testpaths = ["tests"]
 xfail_strict = true

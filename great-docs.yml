@@ -1,0 +1,16 @@
+# Each build generates `great-docs/_quarto.yml` from this file, so edit this file, not that one.
+
+parser: numpy
+dynamic: true
+
+site_url: https://ozanozbeker.com/epistole/
+
+authors:
+  - name: Ozan Ozbeker
+    role: Maintainer
+    email: github@ozanozbeker.com
+
+user_guide:
+  - section: Guide
+    contents:
+      - upgrading.qmd

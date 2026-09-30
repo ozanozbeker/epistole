@@ -1,51 +1,107 @@
 # Contributing
 
+This file follows the release standard for the maintainer's Python packages, and oxyscraper is its reference repo.
+[How is oxy versioned, documented and released?](https://github.com/ozanozbeker/oxyscraper/issues/22) records each decision and the evidence for it.
+Epistole departs from it in one place: its [Python versions](#python-versions).
+A repo that adopts the standard follows the one-time setup in [oxyscraper's copy](https://github.com/ozanozbeker/oxyscraper/blob/main/CONTRIBUTING.md#a-new-repo).
+
 ## Setup
 
-You need [uv](https://docs.astral.sh/uv/).
-The first command installs everything else from the lockfile.
+You need [uv](https://docs.astral.sh/uv/) and the [GitHub CLI](https://cli.github.com/).
 
 ```sh
 uv sync
-uv run prek install -f
+uv run prek install
 ```
 
-The second command writes two git hooks.
-`pre-commit` runs the linters.
-`commit-msg` checks the commit format.
-Re-run it with `-f` any time `default_install_hook_types` changes in `prek.toml`, because the hook files are copies, not links.
+`prek install` writes a `pre-commit` hook, which runs the linters, and a `commit-msg` hook, which checks the message format.
+The tests run in CI, not in a hook.
 
-## Checks
+## Pull requests
 
-The hooks run on staged files at commit time.
-Run everything against the whole repo with:
+Every change reaches `main` through a pull request, the maintainer's included.
+CI then runs before the change lands.
 
 ```sh
-uv run prek run --all-files
+git switch main && git pull
+git switch -c <branch>
+git commit
+git push
+gh pr create --fill
+gh pr merge --auto --squash
 ```
 
-Run an individual tool when you want a faster loop:
+- `git commit` runs the `pre-commit` and `commit-msg` hooks.
+  A hook that fixes a file stops the commit, so run `git add -A` and commit again.
+- `gh pr create --fill` copies the message of a single commit into the pull request.
+  With several commits, pass `--title` yourself.
+- `gh pr merge --auto --squash` merges the pull request once the required checks pass.
+  `gh pr checks --watch` shows them.
 
-| Command | Covers |
-| --- | --- |
-| `uv run ruff check --fix` | Python lint |
-| `uv run ruff format` | Python and Markdown formatting |
-| `uv run pyrefly check` | Type checking |
-| `uv run rumdl check --fix` | Markdown |
-| `uv run tombi lint` | TOML |
-| `uv run pytest` | Tests |
+Pull requests merge by squash only, and the squash commit takes the pull request's title and description.
+Since release-please reads that commit:
 
-Most hooks fix files in place.
-After a failed commit, `git add` and a retry are often enough.
+- The title follows [Conventional Commits](https://www.conventionalcommits.org/).
+  The `title` check runs the `commit-msg` hook from `prek.toml` against it.
+- A breaking change ends the description with a one-line `BREAKING CHANGE:` footer that links to its section of the upgrade page.
+- To correct a merged entry, edit the merged pull request's description.
+  Put the corrected message between `BEGIN_COMMIT_OVERRIDE` and `END_COMMIT_OVERRIDE`, and release-please uses it on its next run.
+
+## Pull requests from bots
+
+- Dependabot opens `chore: bump the uv group` and `ci: bump the actions group` on Mondays.
+- `prek-update.yml` opens `chore: update prek hooks` on the first of each month.
+- release-please opens `chore(main): release X.Y.Z`, and it updates that pull request after each merge that users would see.
+
+Their types start no release, so merge the first two with `gh pr merge <number> --auto --squash` once they pass.
+The release pull request waits until you want to release.
+
+## What the rulesets block
+
+- The `main` ruleset blocks every push to `main`, and a merge before `all-green` and `title` pass.
+  The admin can still merge a failing pull request with **Merge without waiting for requirements to be met**, so keep that for emergencies.
+- The `version tags` ruleset lets only the App and the admin create, update or delete a `v*` tag.
+
+## Versions
+
+Versions follow [SemVer](https://semver.org/).
+Below 1.0, a new minor always means a breaking change.
+
+| Commit | Changelog | Bump below 1.0 |
+| --- | --- | --- |
+| `feat`, `fix`, `perf`, `docs`, `deps`, `revert` | visible | patch |
+| `refactor`, `test`, `build`, `ci`, `style`, `chore` | hidden | none on its own |
+| any type with `!`, or a `BREAKING CHANGE:` footer | visible | minor |
+
+`bump-minor-pre-major` and `bump-patch-for-minor-pre-major` in `release-please-config.json` set the last column.
+No commit reaches 1.0 on its own.
+Leaving `0.x` takes a `Release-As: 1.0.0` footer, and the policy for after 1.0 is set then.
+
+## Breaking changes
+
+The pull request that makes a break also writes its migration into [`user_guide/upgrading.qmd`](user_guide/upgrading.qmd), under the next minor's heading, such as `## 0.4`.
+Every break before a release goes into the same next minor, so the heading is known when the pull request opens.
+Below 1.0, a break needs no deprecation period.
+
+## CI
+
+`ci.yml` runs on each pull request and each push to `main`:
+
+- `test` runs on Ubuntu, macOS and Windows, on every supported Python, against the built wheel.
+- `next-python` runs the next CPython from its first beta, and it may fail.
+- `lowest` runs the floor Python with each dependency at its floor.
+- `lint` runs every prek hook on every file.
+- `docs` builds the site.
+  Epistole's examples send mail, so the build runs none of them.
+- `all-green` passes when the jobs above pass.
+  The `main` ruleset requires only this job and `title`, so a change to the jobs never touches the ruleset.
+
+pytest turns warnings into errors, so a new upstream deprecation fails the Dependabot pull request that brings it in.
 
 ## Tests
 
-Tests are in `tests/`.
-`uv run pytest` runs them.
-The `pytest` hook runs the whole suite on every commit, not only on commits that stage a Python file.
-A commit that deletes `src/epistole/py.typed` needs this.
-No file-type filter matches that path, so a filtered hook would not run the suite.
-The test that checks for the marker would then never fail.
+Tests are in `tests/`, and `uv run pytest` runs them.
+CI runs them against the built wheel, so `test_packaging.py` fails a change that drops `py.typed` from it.
 
 Annotate every test parameter, including fixtures and `parametrize` values.
 Ruff never enforces this, because `ruff.toml` turns off `ANN` under `**/tests/**`.
@@ -57,6 +113,69 @@ An annotated fixture lets pyrefly check the test body against the real type, so 
 Skip the return-annotation part of `ANN`.
 `-> None` on every test function adds no information.
 
+## Dependencies
+
+Each floor in `pyproject.toml` is as low as the `lowest` job proves.
+A floor rises only in a `deps:` commit, which the changelog shows to users.
+Dependabot moves `uv.lock` and the pinned actions weekly, after a 7-day cooldown.
+Its `chore` and `ci` prefixes keep those pull requests out of the changelog.
+Dependabot does not read `prek.toml`, so `prek-update.yml` updates the hooks monthly.
+
+## Python versions
+
+Epistole supports every CPython from 3.13 on that has not reached its end of life.
+The standard starts at the oldest CPython still supported, and three facts, measured on 2026-09-29, hold Epistole at 3.13:
+
+- `typing.override` needs 3.12, and 8 modules use it.
+- `mimetypes.guess_file_type` needs 3.13.
+- The address check needs the strict `email.utils.getaddresses` from the CVE-2023-27043 fix.
+  3.11 gained it only in 3.11.10 and 3.12 only in 3.12.6, and `requires-python` cannot exclude the earlier patch releases without one `!=` for each.
+
+The rest of the policy is the standard's:
+
+- A version joins at its final release.
+  Add its classifier in `pyproject.toml` and its entry in the `test` matrix, and point `next-python` at the version after it.
+- A version leaves in the first release after its end of life, in a `feat!:` commit.
+  Raise `requires-python`, `.python-version`, ruff's `target-version`, `default_language_version` in `prek.toml` and the Python of the `lowest` job.
+  Then remove the version's classifier and its matrix entry.
+
+## Releasing
+
+1. release-please keeps a release pull request open with the next version, `CHANGELOG.md` and `uv.lock`.
+2. Merging it makes the App create the tag and the GitHub release.
+3. `release.yml` builds the distributions, and its `pypi` job waits for approval.
+   On the run's page, click **Review deployments**, tick `pypi`, then click **Approve and deploy**.
+   The job then uploads the distributions to PyPI with attestations.
+4. `docs.yml` deploys the site.
+
+A release published by hand starts the same two workflows, which makes it the recovery path.
+
+## When something fails
+
+- **A CI job fails.**
+  `gh pr checks` names the job, and `gh run view <run-id> --log-failed` prints its log.
+  Push a fix to the same branch, and auto-merge stays on.
+- **The title check fails.**
+  Fix the title with `gh pr edit --title`, and the check runs again.
+- **A changelog entry is wrong after the merge.**
+  Use `BEGIN_COMMIT_OVERRIDE`, as [Pull requests](#pull-requests) describes.
+- **`release.yml` or `docs.yml` fails after the tag exists.**
+  `gh run rerun <run-id> --failed` runs the failed jobs again.
+
+## Traps
+
+- Never pass `release-type` to `release-please-action`.
+  The action then ignores `release-please-config.json`, and it prints no warning.
+- The `uv.lock` JSONPath in `release-please-config.json` reads `@.name.value`, not `@.name`.
+  release-please parses each TOML value into an object, and without `.value` it updates nothing.
+- An edit to the release pull request's body is lost when `main` moves before the merge, and it never reaches `CHANGELOG.md`.
+  Migration notes go in the upgrade page.
+- `GITHUB_TOKEN` cannot run CI on a pull request it opens, and a release it creates starts no workflow.
+  So release-please and `prek-update.yml` use the App's token.
+- The `pypi` and `github-pages` environments accept `v*` tags only, and both release workflows run on the release's tag.
+- A numpydoc `Returns` block starts with a `:` line.
+  griffe, which great-docs uses, reads a bare description line as the return type.
+
 ## Prose
 
 The package has two spellings in prose.
@@ -65,154 +184,7 @@ Each means one thing.
 - **Epistole** is the name.
   Use it in running text: "Epistole sends the same message through any backend."
 - **`epistole`** is the identifier, in code formatting.
-  Use it for the distribution, the module, and the command: `pip install epistole`, `import epistole`.
+  Use it for the distribution, the module, and the command: `uv add epistole`, `import epistole`.
 
 Never write bare "epistole" in a sentence.
 Never write any other variation, such as "EPISTOLE" or "epistole.py".
-
-## Commits
-
-Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/).
-The `commit-msg` hook enforces the format in strict mode.
-
-```text
-<type>(<optional scope>): <description>
-```
-
-The type sets what happens at release time:
-
-| Type | Changelog section | Version while below 1.0.0 |
-| --- | --- | --- |
-| `feat` | Features | patch bump |
-| `fix` | Bug Fixes | patch bump |
-| `perf` | Performance | patch bump |
-| `docs` | Documentation | patch bump |
-| `deps` | Dependencies | patch bump |
-| `revert` | Reverts | patch bump |
-| `refactor`, `test`, `build`, `ci`, `style`, `chore` | hidden | patch bump |
-
-A `!` after the type, or a `BREAKING CHANGE:` footer, bumps the minor while the version is below 1.0.0.
-
-That column is deliberately conservative.
-Two settings in `release-please-config.json` set it:
-
-```json
-"bump-minor-pre-major": true,
-"bump-patch-for-minor-pre-major": true
-```
-
-Without them, a single `feat!:` would bump 0.x straight to 1.0.0.
-With them, the version stays below 1.0.0 until you add a `Release-As: 1.0.0` commit footer.
-Once the project is past 1.0.0, remove both settings.
-The usual rules then apply: a breaking change bumps the major, and `feat` bumps the minor.
-
-The release still includes commits of hidden types, but `CHANGELOG.md` does not list them.
-Edit `changelog-sections` in `release-please-config.json` to change that.
-
-## Branches and pull requests
-
-Nothing forces you to branch.
-The release flow is identical either way.
-Release-please reads only the commits on `main`.
-
-```mermaid
-flowchart TD
-    A["Branch off main"] --> B["Commit<br>pre-commit and commit-msg hooks run"]
-    B --> C["Open a pull request"]
-    C --> D["Squash and merge"]
-    D --> E["Commit on main"]
-    E --> F["Release workflow runs<br>release-please job"]
-    F --> G["Release pull request<br>chore(main): release X.Y.Z"]
-    G -.->|more work merges into main| E
-    G --> H["You merge the release pull request"]
-    H --> I["Tag vX.Y.Z and GitHub release"]
-    I --> J["publish job<br>runs if release_created"]
-    J --> K["Waits for your approval<br>pypi environment"]
-    K --> L["uv build, then trusted publish"]
-    L --> M["PyPI"]
-```
-
-Squash merges have one risk.
-GitHub builds the squash commit message from the pull request title.
-The `commit-msg` hook checks only commits you make locally, never a pull request title.
-So a branch full of valid commits can still merge into `main` as `Update stuff (#4)`.
-Release-please cannot parse that message and silently ignores it.
-
-Title your pull requests in the conventional format.
-Otherwise, pick merge commits over squash, so the history keeps your original messages.
-
-## Releasing
-
-Releases are automated.
-You never edit `version` in `pyproject.toml`, `uv.lock`, or `CHANGELOG.md` by hand.
-
-1. Merge your work to `main`.
-2. [release-please](https://github.com/googleapis/release-please) opens or updates a pull request titled `chore(main): release X.Y.Z`.
-   It contains the version bump and the changelog entry.
-3. Review that pull request.
-   Release-please rewrites it as more work merges to `main`, so leave it open until you want to ship.
-4. Merge it.
-   That creates the git tag and the GitHub release, and starts the `publish` job.
-5. Approve the deployment.
-   The `pypi` environment lists you as a required reviewer, so the upload waits for your approval.
-
-The publish job runs only when `release_created` is true.
-So ordinary pushes to `main` only update the release pull request and never publish.
-
-### Never pass `release-type` to the action
-
-Every release setting is in `release-please-config.json`.
-The workflow passes no inputs at all, so the action loads the file.
-
-`release-please-action` branches on one input.
-If you set `release-type:` in its `with:` block, it builds its settings from action inputs alone.
-It never opens `release-please-config.json`.
-It does not merge the two sources.
-It prints no warning.
-Release pull requests still open and still look right.
-You find the loss a release or two later, as a wrong changelog or a stale lockfile.
-
-The input is tempting because it duplicates a value the file already sets.
-Four of the six settings in that file have no action input at all: `bump-minor-pre-major`, `bump-patch-for-minor-pre-major`, `changelog-sections`, and `extra-files`.
-The schema defines 34 per-package settings, and the action exposes 4 of them.
-Every input other than `release-type` is safe to add.
-
-### Why `extra-files` points at `uv.lock`
-
-uv records the project's own version in the lockfile as well as in `pyproject.toml`.
-So a release that changes only `pyproject.toml` makes `uv lock --check` fail.
-The `extra-files` entry bumps both together.
-
-Its JSONPath looks like a typo, but it is not one:
-
-```json
-"$.package[?(@.name.value=='epistole')].version"
-```
-
-release-please parses TOML into nodes shaped `{start, end, value}`, so the filter has to match on `.name.value`.
-The write path then works on plain JSON, so the target has to stay `.version`.
-Making the two agree looks like the fix, but it silently stops the update.
-
-### Why publishing runs in the same workflow
-
-Events triggered by the default `GITHUB_TOKEN` do not start new workflow runs.
-A separate workflow triggered by `release: published` would never run, because release-please creates that release with the default token.
-Keeping both jobs in one file avoids needing a personal access token.
-
-### One-time PyPI setup
-
-Publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/), so there is no API token anywhere.
-It needs two things outside this repo.
-
-The first is a pending publisher on PyPI:
-
-| Field | Value |
-| --- | --- |
-| PyPI Project Name | `epistole` |
-| Owner | `ozanozbeker` |
-| Repository name | `epistole` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
-
-The second is a GitHub environment named `pypi`.
-If you want a manual approval before upload, add a required reviewer to that environment.

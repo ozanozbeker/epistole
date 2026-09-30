@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # `increase-if-necessary` leaves each `>=` floor alone and moves only `uv.lock`, so a floor rises only in a `deps:` commit.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    versioning-strategy: increase-if-necessary
+    groups:
+      uv:
+        patterns: ["*"]
+    # The changelog hides `chore` and `ci`, so these PRs start no release.
+    commit-message:
+      prefix: chore
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci

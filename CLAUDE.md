@@ -17,6 +17,14 @@ See `docs/agents/triage-labels.md`.
 The repo has one context, so `CONTEXT.md` and `docs/adr/` are at the repo root.
 See `docs/agents/domain.md`.
 
+## Contributing
+
+@CONTRIBUTING.md
+
+The line above imports `CONTRIBUTING.md` into every session, because it holds the workflow that every change follows.
+When told to commit, follow its pull request flow, and never commit on `main`.
+Never merge a release pull request or approve a deployment unless told to.
+
 ## Writing
 
 These rules cover every piece of prose I read: docstrings, comments, error messages, config comments, documentation, commit messages, issues and chat.
