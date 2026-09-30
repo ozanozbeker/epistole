@@ -1,7 +1,5 @@
 # Epistole
 
-Epistole is a single Python API for sending email, regardless of the backend.
-
 Epistole takes a message you have already composed as HTML and sends it through whichever backend you have configured.
 The interface is the same each time.
 Supported backends are SMTP, Microsoft Graph, and Google.
@@ -11,7 +9,6 @@ Switching providers means changing configuration, not rewriting your code.
 This is an early project and the API is not yet stable.
 
 > **Epistole** (ἐπιστολή, epistolē) is the Greek word for a letter or written message sent from one person to another.
-> The word is also the source of the English epistle.
 
 ## Install
 

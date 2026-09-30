@@ -12,18 +12,30 @@ authors:
     email: github@ozanozbeker.com
 
 logo: assets/epistole-hex.svg
-# great-docs builds the favicons from one file. A PNG source gives the ICO, PNG and Apple sizes; an SVG source gives only the SVG without cairosvg.
-favicon: assets/epistole-favicon-512.png
+
+# The favicon is an SVG, because great-docs copies an SVG unchanged, and its own PNG icons blur the mark.
+favicon: assets/epistole-favicon.svg
+# great-docs reads no pre-made icon sizes, so this links the exported Apple touch icon. The URL is absolute, because Quarto does not rewrite paths in header HTML.
+include_in_header: '<link rel="apple-touch-icon" href="https://ozanozbeker.com/epistole/assets/epistole-favicon-180.png">'
+
+# great-docs reads no `_brand.yml`, so `assets/theme.css` carries its palette until it does.
+accent_color:
+  light: "#9E4A2B"
+  dark: "#D79A80"
+site:
+  css: assets/theme.css
+
+# The image is a URL into `assets/`, because great-docs copies a local path to the build root, which Quarto does not publish.
 social_cards:
-  image: assets/epistole-social-card.png
+  image: https://ozanozbeker.com/epistole/assets/epistole-social-card.png
   twitter_card: summary_large_image
-# Without this, great-docs writes the `github.io` address into the canonical, `og:` and sitemap URLs.
+
+# Without `base_url`, great-docs sets the canonical URL and `og:url` to the github.io address, which redirects to `site_url`.
 seo:
   canonical:
     base_url: https://ozanozbeker.com/epistole/
-
-# Quarto reads `_brand.yml` only from the build directory, which great-docs recreates on each build.
-pre_render: [scripts/copy-brand.py]
+  # great-docs 0.17.0 adds the site name a second time (posit-dev/great-docs#327). Delete this once a release includes #335.
+  title_template: "{page_title}"
 
 user_guide:
   - section: Guide

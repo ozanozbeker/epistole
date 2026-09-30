@@ -1,0 +1,344 @@
+/* The docs site's colors, from `_brand.yml`. great-docs reads its palette from these --gd-* variables, and it reads no `_brand.yml`. */
+
+:root {
+    --gd-bg-primary: #F4EFE4;
+    --gd-bg-secondary: #EBEADE;
+    --gd-bg-tertiary: #E7E7DB;
+    --gd-text-primary: #12261E;
+    --gd-text-secondary: #1E3B31;
+    --gd-text-muted: #2A5244;
+    --gd-border-color: #D2D1C6;
+    --gd-border-light: #DDDBD0;
+    /* Rust, the brand's primary, has 5.3:1 contrast on parchment. */
+    --gd-link-color: #9E4A2B;
+    --gd-code-bg: #EBEADE;
+    --gd-code-color: #12261E;
+    --gd-blockquote-bg: #EBEADE;
+    --gd-sidebar-bg: #F4EFE4;
+    --gd-footer-text: #2A5244;
+    --gd-navbar-bg: rgba(244, 239, 228, 0.85);
+    --gd-navbar-text: #12261E;
+    --gd-highlight-color: rgba(196, 98, 61, 0.25);
+    --gd-active-link: #9E4A2B;
+    --gd-citation-color: #9E4A2B;
+    --bs-body-color: #12261E;
+    --bs-body-color-rgb: 18, 38, 30;
+    --bs-secondary-color: #2A5244;
+    --bs-code-color: #12261E;
+}
+
+/* Dark mode inverts the brand: forest is the page, pine and moss are the surfaces, and parchment is the text. */
+html.quarto-dark,
+body.quarto-dark {
+    --gd-bg-primary: #12261E;
+    --gd-bg-secondary: #1E3B31;
+    --gd-bg-tertiary: #2A5244;
+    --gd-text-primary: #F4EFE4;
+    --gd-text-secondary: #DDDBD0;
+    --gd-text-muted: #9DB8AB;
+    --gd-border-color: rgba(255, 255, 255, 0.12);
+    --gd-border-light: rgba(255, 255, 255, 0.06);
+    /* Terracotta has 3.9:1 contrast on forest, so this is terracotta mixed with 40% parchment, at 6.7:1. */
+    --gd-link-color: #D79A80;
+    --gd-code-bg: #1E3B31;
+    --gd-code-color: #F4EFE4;
+    --gd-blockquote-bg: #1E3B31;
+    --gd-sidebar-bg: #12261E;
+    --gd-footer-text: #DDDBD0;
+    --gd-navbar-bg: rgba(18, 38, 30, 0.85);
+    --gd-navbar-text: #F4EFE4;
+    --gd-highlight-color: rgba(196, 98, 61, 0.35);
+    --gd-active-link: #D79A80;
+    --gd-citation-color: #D79A80;
+    --bs-body-color: #F4EFE4;
+    --bs-body-color-rgb: 244, 239, 228;
+    --bs-secondary-color: #9DB8AB;
+    --bs-code-color: #F4EFE4;
+}
+
+/* The navbar is fixed and semi-transparent, so the blur frosts the page as it scrolls under. */
+.navbar {
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    backdrop-filter: blur(12px) saturate(180%);
+}
+
+/* great-docs draws the navbar logo 24px tall, and the hex needs twice that for its mark to show. */
+.navbar-logo {
+    height: 48px;
+}
+
+.navbar-brand img {
+    max-height: 48px;
+}
+
+/* great-docs draws the pinned sidebar as a box with a background, a border and a shadow, so this removes them and the links sit on the page. */
+@media (min-width: 992px) {
+    #quarto-sidebar.gd-sidebar-float,
+    body.quarto-dark #quarto-sidebar.gd-sidebar-float {
+        background: transparent;
+        border-color: transparent;
+        box-shadow: none;
+    }
+}
+
+/* great-docs sets these dark-mode surfaces to fixed grays, which show as gray patches on the forest page. */
+body.quarto-dark .gd-sidebar-scroll-top {
+    background: linear-gradient(to bottom, rgba(18, 38, 30, 0.92) 0%, transparent 100%);
+}
+
+body.quarto-dark .gd-sidebar-scroll-bottom {
+    background: linear-gradient(to top, rgba(18, 38, 30, 0.92) 0%, transparent 100%);
+}
+
+body.quarto-dark .sidebar-filter-input {
+    background-color: var(--gd-bg-secondary);
+    border-color: var(--gd-border-color);
+    color: var(--gd-text-primary);
+}
+
+/* flatly colors code in the sidebars purple, and great-docs resets it only in dark mode. */
+.sidebar nav li > a > code {
+    color: inherit;
+    background-color: transparent;
+}
+
+/* great-docs colors these links black in light mode, and flatly colors the active contents entry teal. */
+p a,
+li a {
+    color: var(--gd-link-color);
+}
+
+#quarto-sidebar a.sidebar-item-text.sidebar-link.active {
+    color: var(--gd-active-link);
+}
+
+.sidebar nav[role="doc-toc"] ul > li > a.active,
+.sidebar nav[role="doc-toc"] ul > li > ul > li > a.active {
+    border-left-color: var(--gd-link-color);
+    color: var(--gd-link-color) !important;
+}
+
+/* Code blocks sit on pine in both modes, so one set of token colors serves both. Each color is a palette color mixed with parchment until it has 4.5:1 contrast on pine. */
+:root,
+html.quarto-dark,
+body.quarto-dark {
+    --gd-syn-keyword: #D79A80;
+    --gd-syn-operator: #F4EFE4;
+    --gd-syn-none: #C2AA7B;
+    --gd-syn-bool: #C2AA7B;
+    --gd-syn-string: #9DB8AB;
+    --gd-syn-number: #C2AA7B;
+    --gd-syn-function: #F4EFE4;
+    --gd-syn-builtin: #A5BABC;
+    --gd-syn-name: #F4EFE4;
+    --gd-syn-class: #A5BABC;
+    --gd-syn-comment: #A5A99F;
+    /* Quarto reads these in light mode, and great-docs reads the --gd-syn-* variables above in dark mode. */
+    --quarto-hl-kw-color: var(--gd-syn-keyword);
+    --quarto-hl-cf-color: var(--gd-syn-keyword);
+    --quarto-hl-im-color: var(--gd-syn-keyword);
+    --quarto-hl-pp-color: var(--gd-syn-keyword);
+    --quarto-hl-at-color: var(--gd-syn-keyword);
+    --quarto-hl-op-color: var(--gd-syn-operator);
+    --quarto-hl-ot-color: var(--gd-syn-operator);
+    --quarto-hl-va-color: var(--gd-syn-operator);
+    --quarto-hl-fu-color: var(--gd-syn-function);
+    --quarto-hl-ex-color: var(--gd-syn-function);
+    --quarto-hl-bu-color: var(--gd-syn-builtin);
+    --quarto-hl-dt-color: var(--gd-syn-class);
+    --quarto-hl-st-color: var(--gd-syn-string);
+    --quarto-hl-vs-color: var(--gd-syn-string);
+    --quarto-hl-ss-color: var(--gd-syn-string);
+    --quarto-hl-ch-color: var(--gd-syn-string);
+    --quarto-hl-sc-color: var(--gd-syn-string);
+    --quarto-hl-dv-color: var(--gd-syn-number);
+    --quarto-hl-fl-color: var(--gd-syn-number);
+    --quarto-hl-bn-color: var(--gd-syn-number);
+    --quarto-hl-cn-color: var(--gd-syn-none);
+    --quarto-hl-co-color: var(--gd-syn-comment);
+    --quarto-hl-do-color: var(--gd-syn-comment);
+    --quarto-hl-an-color: var(--gd-syn-comment);
+    --quarto-hl-cv-color: var(--gd-syn-comment);
+    --quarto-hl-in-color: var(--gd-syn-comment);
+    --quarto-hl-wa-color: #C2AA7B;
+    --quarto-hl-al-color: #D4A79B;
+    --quarto-hl-er-color: #D4A79B;
+}
+
+pre,
+div.sourceCode,
+div.sourceCode pre.sourceCode,
+body.quarto-dark pre {
+    background-color: #1E3B31;
+    border-color: transparent;
+    color: #F4EFE4;
+}
+
+/* Quarto colors the line spans with its own navy, and a token with no class inherits from its line. */
+pre.sourceCode > code > span,
+div.sourceCode code {
+    color: #F4EFE4;
+}
+
+/* Quarto writes each token's light-mode color as a literal, so these rules read the variables above instead. */
+code span.al {
+    color: var(--quarto-hl-al-color);
+}
+
+code span.an {
+    color: var(--quarto-hl-an-color);
+}
+
+code span.at {
+    color: var(--quarto-hl-at-color);
+}
+
+code span.bn {
+    color: var(--quarto-hl-bn-color);
+}
+
+code span.bu {
+    color: var(--quarto-hl-bu-color);
+}
+
+code span.cf {
+    color: var(--quarto-hl-cf-color);
+}
+
+code span.ch {
+    color: var(--quarto-hl-ch-color);
+}
+
+code span.cn {
+    color: var(--quarto-hl-cn-color);
+}
+
+code span.co {
+    color: var(--quarto-hl-co-color);
+}
+
+code span.cv {
+    color: var(--quarto-hl-cv-color);
+}
+
+code span.do {
+    color: var(--quarto-hl-do-color);
+}
+
+code span.dt {
+    color: var(--quarto-hl-dt-color);
+}
+
+code span.dv {
+    color: var(--quarto-hl-dv-color);
+}
+
+code span.er {
+    color: var(--quarto-hl-er-color);
+}
+
+code span.ex {
+    color: var(--quarto-hl-ex-color);
+}
+
+code span.fl {
+    color: var(--quarto-hl-fl-color);
+}
+
+code span.fu {
+    color: var(--quarto-hl-fu-color);
+}
+
+code span.im {
+    color: var(--quarto-hl-im-color);
+}
+
+code span.in {
+    color: var(--quarto-hl-in-color);
+}
+
+code span.kw {
+    color: var(--quarto-hl-kw-color);
+}
+
+code span.op {
+    color: var(--quarto-hl-op-color);
+}
+
+code span.ot {
+    color: var(--quarto-hl-ot-color);
+}
+
+code span.pp {
+    color: var(--quarto-hl-pp-color);
+}
+
+code span.sc {
+    color: var(--quarto-hl-sc-color);
+}
+
+code span.ss {
+    color: var(--quarto-hl-ss-color);
+}
+
+code span.st {
+    color: var(--quarto-hl-st-color);
+}
+
+code span.va {
+    color: var(--quarto-hl-va-color);
+}
+
+code span.vs {
+    color: var(--quarto-hl-vs-color);
+}
+
+code span.wa {
+    color: var(--quarto-hl-wa-color);
+}
+
+/* great-docs colors a signature's parameters navy for a light background. */
+.doc-signature code span.va {
+    color: #F4EFE4;
+}
+
+/* great-docs sets these signature colors for a light background, and the signature blocks are pine. */
+code span.sig-name {
+    color: var(--gd-syn-name);
+}
+
+code span.sig-class {
+    color: var(--gd-syn-class);
+}
+
+code span.cn-none {
+    color: var(--gd-syn-none);
+}
+
+code span.cn-bool {
+    color: var(--gd-syn-bool);
+}
+
+#cb1 code span.op {
+    color: var(--gd-syn-operator);
+}
+
+/* Inline code is one color on a surface one step from the page, and great-docs colors it salmon in dark mode. */
+:not(pre) > code:not(.sourceCode) {
+    color: #12261E;
+    background-color: #EBEADE;
+}
+
+body.quarto-dark :not(pre) > code:not(.sourceCode) {
+    color: #F4EFE4;
+    background-color: #1E3B31;
+}
+
+html.quarto-light :not(pre) > code span[class] {
+    color: inherit;
+}
+
+a code:not(.sourceCode),
+body.quarto-dark a code:not(.sourceCode) {
+    color: inherit;
+}
