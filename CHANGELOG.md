@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.6](https://github.com/ozanozbeker/epistole/compare/v0.0.5...v0.0.6) (2026-09-30)
+
+
+### Documentation
+
+* color the site from a stylesheet in assets ([#87](https://github.com/ozanozbeker/epistole/issues/87)) ([70ac733](https://github.com/ozanozbeker/epistole/commit/70ac733329e3df05595abe3cac9f72110375dc9a))
+* move the README's guide into site pages ([#85](https://github.com/ozanozbeker/epistole/issues/85)) ([d61a006](https://github.com/ozanozbeker/epistole/commit/d61a006a22f704c83946174ebb8e359407d202c2)), closes [#77](https://github.com/ozanozbeker/epistole/issues/77)
+* write the setup steps for each mail service ([#89](https://github.com/ozanozbeker/epistole/issues/89)) ([ae67bf0](https://github.com/ozanozbeker/epistole/commit/ae67bf04fd8b6fac7019e7d7dbd06c18f1bee76f)), closes [#78](https://github.com/ozanozbeker/epistole/issues/78)
+
 ## [0.0.5](https://github.com/ozanozbeker/epistole/compare/v0.0.4...v0.0.5) (2026-09-30)
 
 
