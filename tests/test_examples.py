@@ -15,10 +15,12 @@ from epistole import (
     Transport,
 )
 
-README = Path(__file__).parents[1] / "README.md"
+ROOT = Path(__file__).parents[1]
+PAGES = [ROOT / "README.md", *sorted((ROOT / "user_guide").glob("*.qmd"))]
+"""The README and the user guide pages, whose Python blocks the test runs."""
 EXAMPLE = re.compile(r"^#+ ([^\n]+)$|^```python\n(.*?)^```$", re.MULTILINE | re.DOTALL)
 RAISES = {"Kept a connection past its `with`": ValueError}
-"""The README shows the example under each of these headings raising."""
+"""The guide shows the example under each of these headings raising."""
 
 FILES = {
     "kpis.html": b"<p>Daily KPIs</p>",
@@ -27,23 +29,24 @@ FILES = {
     "weekly.pdf": b"%PDF-1.7",
     "weekly.txt": b"Weekly numbers",
 }
-"""The README reads each of these from the working directory."""
+"""The examples read each of these from the working directory."""
 
 
 def examples() -> list[tuple[str, str]]:
-    """Return each Python block in the README, with the heading above it."""
-    heading = ""
+    """Return each Python block in the pages, with the heading above it."""
     found: list[tuple[str, str]] = []
-    for title, code in EXAMPLE.findall(README.read_text(encoding="utf-8")):
-        if title:
-            heading = title
-        else:
-            found.append((heading, code))
+    for page in PAGES:
+        heading = ""
+        for title, code in EXAMPLE.findall(page.read_text(encoding="utf-8")):
+            if title:
+                heading = title
+            else:
+                found.append((heading, code))
 
     return found
 
 
-def test_every_readme_example_runs(
+def test_every_example_runs(
     subtests: pytest.Subtests, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     # Each real backend keeps its constructor's checks and sends through a MemoryBackend transport.

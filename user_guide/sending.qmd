@@ -1,0 +1,208 @@
+---
+title: Sending
+---
+
+A `Message` is an immutable value you build by chaining.
+A backend holds the credentials and the from address.
+`backend.send(message)` or `connection.send(message)` sends the message.
+
+## One report, one recipient
+
+```python
+from pathlib import Path
+from epistole import Message, SMTPBackend, smtp
+
+backend = SMTPBackend(
+    host="mail.corp.example",
+    port=587,
+    from_address="reports@corp.example",
+    credential=smtp.Password(username="reports", password=...),
+)
+
+backend.send(
+    Message(html=Path("kpis.html").read_text(encoding="utf-8"))
+    .subject("Daily KPIs")
+    .to("boss@corp.example")
+)
+```
+
+The backend opens a connection, authenticates, submits, and closes, all inside that one call.
+With a wrong password, that line raises `AuthenticationError`.
+
+The message you build and the code that sends it are the same on every backend.
+Only the constructor differs:
+
+```python
+from epistole import GmailBackend, GraphBackend, SMTPBackend
+from epistole import gmail, graph, smtp
+
+SMTPBackend(
+    host="mail.corp.example",
+    port=587,
+    security="starttls",
+    from_address="reports@corp.example",
+    credential=smtp.Password(username="reports", password=...),
+)
+
+GraphBackend(
+    from_address="reports@corp.example",
+    credential=graph.ClientSecret(tenant_id=..., client_id=..., client_secret=...),
+)
+
+GmailBackend(
+    from_address="reports@corp.example",
+    credential=gmail.ServiceAccount(
+        path=Path("service-account.json"), subject="reports@corp.example"
+    ),
+)
+```
+
+## One report, many recipients
+
+```python
+report = (
+    Message(html=Path("weekly.html").read_text(encoding="utf-8"))
+    .subject("Weekly numbers")
+    .attach(Path("weekly.pdf"))
+)
+
+with backend.connect() as connection:
+    for subscriber in subscribers:
+        connection.send(report.to(subscriber.email))
+```
+
+The connection authenticates once, then makes one send per subscriber.
+`.to()` replaces the recipient list on a copy, so each subscriber sees only their own address.
+`.attach()` reads the PDF from disk once, not once per subscriber.
+
+If subscriber 140's mailbox no longer accepts mail, that send raises `RecipientsRefusedError`.
+The connection stays open, so wrap the send in `try` and log the error.
+If the mail server restarts at subscriber 200, that send raises `TransportError` and the loop ends.
+The connection closes without raising as the `with` block exits.
+Nothing is skipped silently.
+
+## Forgot `connect()`
+
+```python
+for subscriber in subscribers:
+    backend.send(report.to(subscriber.email))
+```
+
+This loop is still correct, only slower.
+It makes one handshake per subscriber.
+A relay that limits connections may refuse a handshake partway through.
+That send raises `TransportError`.
+Use `connect()` for loops.
+
+## Kept a connection past its `with`
+
+```python
+with backend.connect() as connection:
+    pass
+
+connection.send(report)
+```
+
+The last line raises `ValueError`, because the connection is closed.
+It is a mistake in the calling code, not a mail failure, so it is not an `EpistoleError`.
+`except EpistoleError` does not catch it.
+A connection cannot be reopened.
+To send again, call `connect()` again.
+
+## Notebook, two cells, Graph
+
+Cell one opens a connection on a `GraphBackend`:
+
+```python
+connection = backend.connect()
+```
+
+This line acquires the token.
+With a bad tenant id, it fails here rather than on the first send.
+
+Cell two runs an hour later:
+
+```python
+connection.send(message)
+```
+
+The connection refreshes its token through the credential you gave the backend, so an expired token is not an error.
+A refresh that the token endpoint rejects raises `AuthenticationError`.
+One that fails on the provider's side, such as a `5xx`, raises `ProviderError`.
+Both leave the connection open.
+A refresh that fails on the network raises `TransportError`.
+Like any transport failure, that closes the connection.
+An unclosed connection holds a socket on SMTP and a connection pool on Graph and Gmail until the object is garbage collected.
+Use `with backend.connect()` for a loop.
+For one message, use `backend.send()`, which closes the connection for you.
+
+## Threads
+
+A backend is immutable and safe to share.
+A connection is not.
+Use one per thread, the same rule as for a DB-API connection.
+Epistole does not lock a connection for you.
+Two threads on one connection is a bug in the caller.
+The one exception is `MemoryBackend.submissions`, which every send appends to.
+Appending is atomic, so the list cannot be corrupted.
+But concurrent sends append in completion order.
+A test that asserts on order sends from one thread.
+
+## Markdown instead of HTML
+
+```python
+note = (
+    Message(markdown="## Numbers\n\nSee the [dashboard](https://kpi.example).")
+    .subject("Numbers")
+    .to("boss@corp.example")
+)
+```
+
+Markdown needs the extra: `uv add "epistole[markdown]"`.
+Without it, this line raises `ImportError` naming the extra.
+Epistole renders the Markdown to HTML for clients that show HTML.
+The source you wrote is the plain text for clients that do not.
+Pass exactly one of `html=` or `markdown=` per message.
+
+## Plain text only
+
+```python
+backend.send(
+    Message(text="Pipeline failed at 03:12. See run 4821.")
+    .subject("Pipeline failed")
+    .to("oncall@corp.example")
+)
+```
+
+Epistole makes no HTML part.
+The message is `text/plain`, which every client renders.
+
+## A better plain-text part
+
+Every HTML message carries plain text.
+Epistole derives it with a small extractor of its own.
+The extractor keeps links, marks list items, and drops the stylesheet.
+To supply your own, pass `text=`, and Epistole derives nothing:
+
+```python
+Message(html=html, text=Path("weekly.txt").read_text(encoding="utf-8"))
+```
+
+To derive it with a library you prefer, pass `text_renderer=`, a callable from HTML to text.
+Epistole calls it once, after moving `data:` images out of the HTML.
+So the text holds no base64.
+
+```python
+from inscriptis import get_text
+from inscriptis.model.config import ParserConfig
+
+config = ParserConfig(display_links=True)
+
+Message(html=html, text_renderer=lambda h: get_text(h, config))
+```
+
+`inscriptis` aligns table columns, which Epistole's extractor does not.
+`html2text` works the same way through `HTML2Text().handle`.
+Set `unicode_snob = True` on it, or it writes `Café` as `Cafe`.
+Its licence is GPL-3.0-or-later.
+Epistole exports the default as `epistole.html_to_text` if you want to wrap it.

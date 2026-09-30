@@ -162,7 +162,7 @@ No backend would change.
   `os.environ[...]` is one line.
   `keyring` is a library the caller can call.
 - There are no `provider=` presets for SMTP host and port.
-  A preset table is guidance, so it belongs in the README's [Choosing a backend](../../README.md#choosing-a-backend) section, not in the constructor.
+  A preset table is guidance, so it belongs in the site's [Choosing a backend](https://ozanozbeker.com/epistole/user-guide/choosing-a-backend.html) page, not in the constructor.
 
 ## Considered options
 
