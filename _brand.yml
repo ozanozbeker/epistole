@@ -1,0 +1,24 @@
+color:
+  palette:
+    forest: "#12261E"
+    pine: "#1E3B31"
+    moss: "#2A5244"
+    sage: "#9DB8AB"
+    parchment: "#F4EFE4"
+    terracotta: "#C4623D"
+    rust: "#9E4A2B"
+    olive: "#46703A"
+    teal: "#2E6A80"
+    ochre: "#8F6512"
+    crimson: "#A33A2E"
+  background: parchment
+  foreground: forest
+  primary: rust
+  secondary: moss
+  tertiary: terracotta
+  success: olive
+  info: teal
+  warning: ochre
+  danger: crimson
+  light: parchment
+  dark: forest
