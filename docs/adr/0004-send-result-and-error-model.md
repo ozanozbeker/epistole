@@ -38,7 +38,7 @@ The only identifier that exists on all three is the `Message-ID` that `send` set
 So the send result carries that and nothing provider-specific.
 It is never `None`, because Epistole wrote it.
 Gmail replaces it with its own `Message-ID` in the message it sends ([#68](https://github.com/ozanozbeker/epistole/issues/68)).
-Whether Graph keeps it is still a live-test question, open on [#23](https://github.com/ozanozbeker/epistole/issues/23).
+Whether Graph keeps it is still a live-test question, open on [#69](https://github.com/ozanozbeker/epistole/issues/69).
 The answer does not change the send result: the id names the submission Epistole made either way.
 The prototype's `accepted`, `backend`, and `retry_after` fields are gone.
 A returned send result means accepted.

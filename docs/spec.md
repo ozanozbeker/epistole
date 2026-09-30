@@ -907,7 +907,8 @@ def html_to_text(html: str, /) -> str: ...
 
 These are facts the ADRs took from documentation or set conservatively.
 The decision on [#23](https://github.com/ozanozbeker/epistole/issues/23) left them out of the written spec.
-Live sends on [#68](https://github.com/ozanozbeker/epistole/issues/68) settled facts 1 and 2, and every other item below is still open on #23.
+Live sends on [#68](https://github.com/ozanozbeker/epistole/issues/68) settled facts 1 and 2.
+Fact 3 is still open on [#72](https://github.com/ozanozbeker/epistole/issues/72), and facts 4 to 9 and both reopeners on [#69](https://github.com/ozanozbeker/epistole/issues/69).
 
 **Facts.**
 None changes a signature above.
