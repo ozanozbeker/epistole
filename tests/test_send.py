@@ -3,9 +3,11 @@ import contextlib
 import dataclasses
 import inspect
 import io
+import os
 import re
-import time
-from collections.abc import Callable, Iterator, Mapping
+import subprocess
+import sys
+from collections.abc import Callable, Mapping
 from datetime import timedelta
 from email.message import EmailMessage
 from email.utils import format_datetime
@@ -104,16 +106,8 @@ class FakeBackend(Backend):
         return self.transport
 
 
-@pytest.fixture
-def india_standard_time() -> Iterator[None]:
-    """Set this process's local zone to UTC+05:30 for one test."""
-    # POSIX writes the offset west of UTC, so -5:30 is UTC+05:30. The string needs no tz database.
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("TZ", "IST-5:30")
-        time.tzset()
-        yield
-
-    time.tzset()
+INDIA_STANDARD_TIME = "IST-5:30"
+"""A `TZ` value for UTC+05:30. POSIX and the Windows C runtime write the offset west of UTC, and the value needs no tz database."""
 
 
 # --- Backend -----------------------------------------------------------------
@@ -436,11 +430,19 @@ def test_the_date_is_timezone_aware():
     assert MemoryBackend().send(message()).date.utcoffset() is not None
 
 
-def test_the_date_carries_the_sending_machines_offset(india_standard_time: None):
-    # On a machine in UTC, datetime.now(UTC) gives the same offset, so the fixture sets another zone.
-    date = MemoryBackend().send(message()).date
+def test_the_date_carries_the_sending_machines_offset():
+    # On a machine in UTC, datetime.now(UTC) gives the same offset, so the send runs in a process started in UTC+05:30.
+    script = "from epistole import MemoryBackend, Message; print(MemoryBackend().send(Message(text='x').to('ada@example.com')).date.utcoffset())"
+    # Every OS reads TZ when a process starts, and time.tzset, which would change it in this process, exists only on Unix.
+    ran = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", script],
+        env=os.environ | {"TZ": INDIA_STANDARD_TIME},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
 
-    assert date.utcoffset() == timedelta(hours=5, minutes=30)
+    assert ran.stdout.strip() == str(timedelta(hours=5, minutes=30))
 
 
 def test_sending_one_message_twice_makes_two_ids():

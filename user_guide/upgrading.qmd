@@ -1,0 +1,6 @@
+---
+title: Upgrading
+---
+
+Each breaking release has a section here, written in the pull request that made the break.
+A new minor version always means a breaking change, and every other release is a patch.

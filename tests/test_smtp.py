@@ -101,6 +101,9 @@ class Server:
         return [command.partition(" ")[0].upper() for command in self.commands]
 
     def close(self) -> None:
+        # Linux keeps a socket listening while a thread blocks in accept() on it, until shutdown() wakes that thread.
+        with contextlib.suppress(OSError):
+            self._listener.shutdown(socket.SHUT_RDWR)
         self._listener.close()
 
     def _accept(self) -> None:
