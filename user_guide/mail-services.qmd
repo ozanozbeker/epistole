@@ -13,7 +13,7 @@ A row here means a real send through that mail service passed the `tests/test_li
 | Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.OAuth` over the same `gmail.AuthorizedUser` | `starttls` on port 587 | 2026-09-29 |
 
 No mail service has passed a real send through `GraphBackend`, or through SMTP `OAuth` over a Graph credential, yet.
-Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
+Issue [#69](https://github.com/ozanozbeker/epistole/issues/69) tracks both.
 
 Each call below reads its secrets from the environment, under the names in [`.env.example`](https://github.com/ozanozbeker/epistole/blob/main/.env.example).
 `uv run --env-file .env` sets them from a `.env` file, as it does for the live tests.
