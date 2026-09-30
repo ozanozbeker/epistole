@@ -12,16 +12,163 @@ A row here means a real send through that mail service passed the `tests/test_li
 | Gmail | `GmailBackend` | `gmail.AuthorizedUser` with a consent saved from your own Google Cloud OAuth client | HTTPS | 2026-09-29 |
 | Gmail | `SMTPBackend` on `smtp.gmail.com` | `smtp.OAuth` over the same `gmail.AuthorizedUser` | `starttls` on port 587 | 2026-09-29 |
 
-A Gmail app password needs 2-Step Verification.
-Create one under App passwords on your Google Account's [security page](https://myaccount.google.com/security).
-`GmailBackend` and `smtp.OAuth` over a Gmail credential need your own OAuth client instead, and issue [#68](https://github.com/ozanozbeker/epistole/issues/68) lists the steps.
-
-The rows differ in two ways:
-
-- iCloud and Gmail over SMTP keep the `Message-ID` that Epistole sets.
-  The Gmail API replaces it, so a recipient sees a different one than `SendResult.message_id`.
-- A from address the account does not own raises `SenderRefusedError` on iCloud.
-  Gmail, over SMTP and over its API, sends the message anyway, with the account's own address in `From`.
-
 No mail service has passed a real send through `GraphBackend`, or through SMTP `OAuth` over a Graph credential, yet.
 Issue [#23](https://github.com/ozanozbeker/epistole/issues/23) tracks them.
+
+Each call below reads its secrets from the environment, under the names in [`.env.example`](https://github.com/ozanozbeker/epistole/blob/main/.env.example).
+`uv run --env-file .env` sets them from a `.env` file, as it does for the live tests.
+
+## iCloud Mail
+
+1. Sign in at [account.apple.com](https://account.apple.com).
+   Under Sign-In and Security, choose App-Specific Passwords, then Generate an app-specific password.
+   Apple [requires two-factor authentication](https://support.apple.com/en-us/102654) for it.
+2. Set `ICLOUD_ADDRESS` to the account's full iCloud address, and `ICLOUD_APP_PASSWORD` to the app-specific password.
+
+```python
+import os
+
+from epistole import SMTPBackend, smtp
+
+backend = SMTPBackend(
+    host="smtp.mail.me.com",
+    port=587,
+    security="starttls",
+    from_address=os.environ["ICLOUD_ADDRESS"],
+    credential=smtp.Password(
+        username=os.environ["ICLOUD_ADDRESS"],
+        password=os.environ["ICLOUD_APP_PASSWORD"],
+    ),
+)
+```
+
+`from_address` can also be an address on the account's iCloud+ custom domain.
+The username stays the iCloud address, and iCloud signs the message with DKIM for the custom domain.
+A from address the account does not own raises `SenderRefusedError`.
+Changing or resetting the Apple Account password [revokes every app-specific password](https://support.apple.com/en-us/102654#revoke).
+
+## Gmail
+
+A Gmail sender proves who it is in one of two ways: an app password, or an OAuth consent.
+The app password takes fewer steps, and it has no 7-day expiry.
+Google [may offer no app password](https://support.google.com/accounts/answer/185833) to a work or school account, to an account with Advanced Protection, or to one whose 2-Step Verification uses only security keys.
+The Google Cloud pieces exist only for the consent, because a consent needs an OAuth client to consent to.
+
+| Piece | Where it lives | What it produces | What uses it |
+| --- | --- | --- | --- |
+| 2-Step Verification | Google Account, Security & sign-in | Nothing on its own | App passwords, which [require it](https://support.google.com/accounts/answer/185833#app-passwords) |
+| App password | Google Account, App passwords | A 16-character password | `smtp.Password` on `smtp.gmail.com`, and the live tests' IMAP read-back |
+| Google Cloud project | Cloud console | The project that holds the OAuth client | Every row below |
+| Gmail API, enabled | Cloud console, APIs & Services | The project's right to call the Gmail API | `GmailBackend` |
+| Google Auth Platform | Cloud console | The consent screen: app name, audience, test users, publishing status | The consent. In Testing, only a test user can give it, and Google [expires its refresh token after 7 days](https://developers.google.com/identity/protocols/oauth2#expiration) |
+| OAuth client, Desktop app | Cloud console, Google Auth Platform, Clients | A client JSON file with an id and a secret | The consent, again every 7 days in Testing |
+| Consent | A browser tab that `google-auth-oauthlib` opens | A saved consent file with a refresh token | `gmail.AuthorizedUser`, for both `GmailBackend` and `smtp.OAuth` |
+| Scope `gmail.send` | Granted at consent | The right to send through the Gmail API | `GmailBackend` |
+| Scope `https://mail.google.com/` | Granted at consent | Full mailbox access, and [the scope Google requires](https://developers.google.com/workspace/gmail/imap/xoauth2-protocol#oauth_20_scopes) for SMTP and IMAP over OAuth | `smtp.OAuth`, and the live tests' Gmail API read-back |
+
+Over either backend, Gmail sends from the account's own address when `from_address` is neither the account nor a verified alias.
+Nothing raises.
+Changing the Google Account password [revokes every app password](https://support.google.com/accounts/answer/185833#app_password_revoke).
+A refresh token with a Gmail scope [stops working then too](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+### With an app password
+
+1. Turn on [2-Step Verification](https://myaccount.google.com/signinoptions/two-step-verification).
+2. Create an app password at [App passwords](https://myaccount.google.com/apppasswords).
+3. Set `GMAIL_ADDRESS` to the account's address, and `GMAIL_APP_PASSWORD` to the app password.
+
+```python
+import os
+
+from epistole import SMTPBackend, smtp
+
+backend = SMTPBackend(
+    host="smtp.gmail.com",
+    port=587,
+    security="starttls",
+    from_address=os.environ["GMAIL_ADDRESS"],
+    credential=smtp.Password(
+        username=os.environ["GMAIL_ADDRESS"],
+        password=os.environ["GMAIL_APP_PASSWORD"].replace(" ", ""),
+    ),
+)
+```
+
+The call removes the spaces Google shows between the password's four groups of letters.
+A wrong app password raises `AuthenticationError`.
+
+### With your own OAuth client
+
+1. Create a project in the [Google Cloud console](https://console.cloud.google.com/).
+2. [Enable the Gmail API](https://console.cloud.google.com/apis/enableflow;apiid=gmail.googleapis.com) in it.
+3. Open [Google Auth Platform](https://console.cloud.google.com/auth/branding), and choose Get Started.
+   Give an app name and your address, choose External as the audience, and agree to the policy.
+4. Under Audience, leave the publishing status at Testing, and add your Gmail address as a test user.
+5. Under Clients, create a client of type Desktop app.
+   Google shows its secret [only at creation](https://support.google.com/cloud/answer/15549257#client-secret-hashing), so download the JSON then.
+   Save it as `gmail-oauth-client.json`.
+6. Save the script below as `save_consent.py` beside `gmail-oauth-client.json`, and run it.
+
+```{.python filename="save_consent.py"}
+import os
+from pathlib import Path
+
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://mail.google.com/"]
+
+flow = InstalledAppFlow.from_client_secrets_file("gmail-oauth-client.json", SCOPES)
+credentials = flow.run_local_server(
+    port=0,
+    prompt="consent",  # Without it, a repeat run may save no refresh token.
+)
+
+path = Path(os.environ["GMAIL_AUTHORIZED_USER"]).expanduser()
+path.parent.mkdir(parents=True, exist_ok=True)
+path.touch(mode=0o600)
+path.write_text(credentials.to_json(), encoding="utf-8")
+```
+
+```sh
+uv run --env-file .env --with google-auth-oauthlib save_consent.py
+```
+
+The script opens a browser.
+Sign in as the test user.
+Google warns that it has not verified the app.
+Choose Advanced, then the link that ends in "(unsafe)".
+Allow both scopes, because the script raises if Google grants only one.
+Run the script on a machine with a browser, then copy the file to the machine that sends.
+
+`GmailBackend` sends through the Gmail API with the saved consent:
+
+```python
+import os
+from pathlib import Path
+
+from epistole import GmailBackend, gmail
+
+consent = gmail.AuthorizedUser(
+    path=Path(os.environ["GMAIL_AUTHORIZED_USER"]).expanduser()
+)
+backend = GmailBackend(from_address=os.environ["GMAIL_ADDRESS"], credential=consent)
+```
+
+`smtp.OAuth` sends through Gmail's SMTP server with the same consent:
+
+```python
+from epistole import SMTPBackend, smtp
+
+backend = SMTPBackend(
+    host="smtp.gmail.com",
+    port=587,
+    security="starttls",
+    from_address=os.environ["GMAIL_ADDRESS"],
+    credential=smtp.OAuth(username=os.environ["GMAIL_ADDRESS"], credential=consent),
+)
+```
+
+In Testing, Google [expires the refresh token after 7 days](https://developers.google.com/identity/protocols/oauth2#expiration).
+The next `connect()` or `backend.send()` then raises `AuthenticationError`, and running `save_consent.py` again saves a new consent.
+The Gmail API replaces the `Message-ID` Epistole sets, so a recipient sees a different one than `SendResult.message_id`.
+`smtp.OAuth` keeps it.
