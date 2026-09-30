@@ -19,3 +19,6 @@ line-length = 0
 code-blocks = false
 reflow = true
 reflow-mode = "sentence-per-line"
+
+[MD093]
+code = false

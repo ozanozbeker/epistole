@@ -672,7 +672,8 @@ This list ranks them by how much design they force.
   The Graph draft examples all show an Exchange-generated `internetMessageId`, which suggests the JSON path assigns one.
   If Epistole is to return its own `Message-ID` as the uniform identifier, that design depends on this.
   Test it first.
-- ~~**No overall `sendMail` size limit is published for Graph.**~~ **Resolved 2026-09-09.**
+- ~~**No overall `sendMail` size limit is published for Graph.**~~
+  **Resolved 2026-09-09.**
   It is 4 MB, the platform-wide write-request cap.
   See the corrected [Graph request shape](#graph-request-shape).
 - **Graph's "4 MB" could mean 4,000,000 or 4,194,304 bytes.**
