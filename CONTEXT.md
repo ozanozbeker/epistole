@@ -49,6 +49,10 @@ A message holds at most one value per name.
 Graph accepts only names starting with `x-`.
 _Avoid_: header on its own (the addressing and MIME lines are headers too, so `.headers()` and `headers_` keep RFC 5322's word and hold only the caller's set), metadata, extra, field (RFC 5322's word for both kinds)
 
+**Mail service**: The system a backend sends through, named as its operator names it: iCloud Mail, Gmail, Exchange Online, or a company's own SMTP relay.
+One mail service can take more than one backend: Gmail takes SMTP and the Gmail API.
+_Avoid_: provider (the company that runs one, as in `ProviderError`), Microsoft 365 (the suite, whose mail service is Exchange Online), server (one host of it, such as `smtp.gmail.com`)
+
 **Backend**: The configuration for sending through one mail service.
 The test doubles that substitute for one are backends too.
 It owns the credentials, the from address, and every setting specific to its mail service.
