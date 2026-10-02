@@ -48,9 +48,6 @@ _CHUNK = 3_000_000
 _MAX_ATTACHMENT = 150_000_000
 """Graph caps one attachment at this many raw bytes (ADR-0019)."""
 
-_MAX_RECIPIENTS = 500
-"""Exchange Online's cap across to, cc and bcc, from Graph's `message` resource page (ADR-0019)."""
-
 
 class _GraphTransport(_http.RESTTransport):
     """`GraphBackend` opens this transport."""
@@ -61,11 +58,6 @@ class _GraphTransport(_http.RESTTransport):
     def submit(self, submission: Submission, /) -> Mapping[str, Refusal]:
         """Post the message as one `sendMail` JSON body, or through a draft when that body is too large (ADR-0012)."""
         message: Message = submission.message
-        recipients: int = len(message.recipients)
-        if recipients > _MAX_RECIPIENTS:
-            msg = f"the message has {recipients} recipients, and Graph accepts at most {_MAX_RECIPIENTS}."
-            raise RejectedError(msg)
-
         for name in message.headers_:
             if not name.lower().startswith("x-"):
                 msg = f"Graph sends only custom headers whose names start with x-, so it cannot send {name!r}."

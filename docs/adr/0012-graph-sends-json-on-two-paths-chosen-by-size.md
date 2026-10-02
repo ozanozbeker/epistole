@@ -9,6 +9,7 @@ A draft path without `Mail.ReadWrite` fails as `AuthenticationError`.
 Decided on [#20](https://github.com/ozanozbeker/epistole/issues/20), based on `docs/research/attachment-and-inline-rules.md` and `docs/research/send-boundary-semantics.md`.
 Amended on [#27](https://github.com/ozanozbeker/epistole/issues/27): the custom-header pre-check now has the surface it lacked, and `singleValueExtendedProperties` is named as its reopener (ADR-0016).
 Amended on [#30](https://github.com/ozanozbeker/epistole/issues/30): every request addresses the mailbox as `/users/{addr-spec}`, because `/me` resolves against a signed-in user and no credential this ADR offers has one.
+Amended on [#96](https://github.com/ozanozbeker/epistole/issues/96): the recipient pre-check is gone, because each Exchange Online mailbox sets its own recipient limit (ADR-0019).
 
 ## Why
 
@@ -108,9 +109,10 @@ It can be added later if a use appears.
   Each is best effort, and its failure is suppressed.
   Then the original error is raised.
   A `TransportError` closes the connection after cleanup (ADR-0005).
-- **Three pre-checks raise `RejectedError` with `__cause__` `None`** (ADR-0004): an attachment over `150_000_000` raw bytes, more than 500 recipients, and a custom header not starting with `x-`.
+- **Two pre-checks raise `RejectedError` with `__cause__` `None`** (ADR-0004): an attachment over `150_000_000` raw bytes, and a custom header not starting with `x-`.
   The tenant message limit (1 MB to 150 MB, default 35 MB) is not knowable and has no pre-check.
   A message over it bounces as a non-delivery report Epistole never receives.
+  The mailbox recipient limit (1 to 1,000) is not knowable either and has no pre-check (ADR-0019).
 - **`internetMessageId`** is set to the `Message-ID` Epistole generated, on both paths.
   Whether Exchange keeps it needs a live test.
   ADR-0004 already defines `SendResult.message_id` as the id of the submission Epistole made, so the result changes documentation, not the contract.

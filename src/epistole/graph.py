@@ -30,7 +30,7 @@ class GraphBackend(Backend):
 
     A message whose `sendMail` request would be 4,000,000 bytes or more goes through a draft instead: Epistole creates the draft, adds each attachment by its own call, and sends it. That path needs the `Mail.ReadWrite` permission as well as `Mail.Send`. Without it, the send raises `AuthenticationError`. When a send fails partway, Epistole deletes the draft. See ADR-0012.
 
-    Before writing, a send raises `RejectedError` for more than 500 recipients, for an attachment over 150,000,000 bytes, or for a custom header whose name does not start with `x-`. See ADR-0016 and ADR-0019.
+    Before writing, a send raises `RejectedError` for an attachment over 150,000,000 bytes, or for a custom header whose name does not start with `x-`. It does not count recipients, because each Exchange Online mailbox sets its own limit, from 1 to 1,000. See ADR-0016 and ADR-0019.
 
     Graph accepts or refuses the whole message, so `SendResult.refused` is always empty.
 

@@ -11,6 +11,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, override
 
 from epistole import _http
+from epistole._address import addr_spec
 from epistole._rfc5322 import build
 from epistole._tokens import REPLY_ERRORS
 from epistole.exceptions import (
@@ -36,7 +37,7 @@ _MAX_BYTES = 36_700_160
 """The v1 discovery document's `maxSize` for `messages.send`: 35 MiB of RFC 5322 message (ADR-0019)."""
 
 _MAX_RECIPIENTS = 500
-"""Google's API usage limits page, taken over a Workspace page that says 2,000 (ADR-0019)."""
+"""Google's limit per API message, counted as RCPT TO addresses, so each addr-spec counts once (ADR-0019)."""
 
 _THROTTLED = frozenset(
     {"rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded"}
@@ -52,9 +53,9 @@ class _GmailTransport(_http.RESTTransport):
 
     def submit(self, submission: Submission, /) -> Mapping[str, Refusal]:
         """Post the RFC 5322 message as base64url `raw`."""
-        recipients: int = len(submission.message.recipients)
-        if recipients > _MAX_RECIPIENTS:
-            msg = f"the message has {recipients} recipients, and Gmail accepts at most {_MAX_RECIPIENTS}."
+        distinct: int = len({addr_spec(one) for one in submission.message.recipients})
+        if distinct > _MAX_RECIPIENTS:
+            msg = f"the message has {distinct} distinct recipients, and Gmail accepts at most {_MAX_RECIPIENTS}."
             raise RejectedError(msg)
 
         data: bytes = build(submission).as_bytes()
