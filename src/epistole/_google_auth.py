@@ -1,6 +1,6 @@
 """`_google_auth` adapts `google-auth` to `Tokens`, and `_Request` sends its token requests on the connection's client.
 
-`_tokens` imports this module only for a Gmail value or for a `TokenCredential` on the Gmail API, because it imports `google-auth` and `httpx2`. Each token call maps its own errors, because SMTP has no mail mapping around its token.
+`_tokens` imports this module only for a Gmail value, because it imports `google-auth` and `httpx2`. Each token call maps its own errors, because SMTP has no mail mapping around its token.
 """
 
 from __future__ import annotations
@@ -20,12 +20,7 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 
 from epistole import _http
-from epistole._tokens import (
-    CREDENTIAL_REJECTED,
-    REPLY_ERRORS,
-    ForeignTokens,
-    oauth_error,
-)
+from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, oauth_error
 from epistole.exceptions import (
     AuthenticationError,
     EpistoleError,
@@ -39,12 +34,11 @@ if TYPE_CHECKING:
 
     from google.auth.credentials import Credentials
 
-    from epistole._backend import TokenCredential
     from epistole._tokens import Tokens
 
 
 def tokens(
-    credential: ServiceAccount | AuthorizedUser | TokenCredential,
+    credential: ServiceAccount | AuthorizedUser,
     scope: str,
     client: httpx2.Client,
     /,
@@ -68,8 +62,6 @@ def tokens(
             credentials = UserCredentials.from_authorized_user_info(
                 consent, scopes=[scope]
             )
-        case _:
-            return _ForeignTokens(credential, scope)
 
     return _GoogleTokens(credentials, _Request(client))
 
@@ -104,20 +96,6 @@ def _token_mapped(response: httpx2.Response) -> EpistoleError:
         return AuthenticationError(msg)
 
     return ProviderError(msg)
-
-
-class _ForeignTokens(ForeignTokens):
-    """The tokens of a caller's `TokenCredential` on the Gmail API, with each call under `_mapping`.
-
-    So a `GoogleAuthError` from `get_token` raises `AuthenticationError`, against `docs/spec.md`. #99 removes this class.
-    """
-
-    @override
-    def token(self) -> str:
-        with _mapping():
-            return super().token()
-
-    refresh = token
 
 
 class _GoogleTokens:

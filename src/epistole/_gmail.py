@@ -63,9 +63,7 @@ class _GmailTransport(_http.RESTTransport):
             raise RejectedError(msg)
 
         raw: str = base64.urlsafe_b64encode(data).decode("ascii")
-        with self.mapping():
-            self.request("POST", _SEND, content=json.dumps({"raw": raw}).encode())
-
+        self.request("POST", _SEND, content=json.dumps({"raw": raw}).encode())
         return {}
 
     @staticmethod

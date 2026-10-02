@@ -1,6 +1,6 @@
 """`_tokens` builds the tokens of every credential for a `Purpose` (ADR-0009, ADR-0011).
 
-`_google_auth` and `_msal` hold the adapters: this module imports `_msal` only for a Graph value, and `_google_auth` only for a Gmail value or a `TokenCredential` on `"gmail"`. It imports no third-party library at module level, so `GmailBackend`, `GraphBackend` and an `SMTPBackend` with a `TokenCredential` import without any extra.
+`_google_auth` and `_msal` hold the adapters: this module imports `_msal` only for a Graph value, and `_google_auth` only for a Gmail value. It imports no third-party library at module level, so `GmailBackend`, `GraphBackend` and an `SMTPBackend` with a `TokenCredential` import without any extra.
 """
 
 from __future__ import annotations
@@ -141,10 +141,12 @@ def tokens(
             return ForeignTokens(
                 credential, f"{_SCOPES['microsoft', purpose]}/.default"
             )
-        case gmail.ServiceAccount() | gmail.AuthorizedUser() | TokenCredential():
+        case gmail.ServiceAccount() | gmail.AuthorizedUser():
             from epistole import _google_auth  # noqa: PLC0415
 
             return _google_auth.tokens(credential, _SCOPES["google", purpose], client)
+        case TokenCredential():
+            return ForeignTokens(credential, _SCOPES["google", purpose])
         case _:
             msg = f"a {type(credential).__name__} gets no token for {purpose}."
             raise TypeError(msg)
