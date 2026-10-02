@@ -33,6 +33,7 @@ import httpx2
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from google.auth.exceptions import GoogleAuthError
 
 from epistole import Message, Refusal, SMTPBackend, Submission, gmail, graph, smtp
 from epistole.exceptions import (
@@ -830,13 +831,28 @@ def test_a_missing_key_file_stays_a_file_not_found_error(
     assert all(one.is_closed for one in issuer.clients)
 
 
-def test_an_error_from_get_token_stays_unmapped(serve: Callable[..., Server]):
-    error = TypeError("get_token failed")
+@pytest.mark.parametrize(
+    "error",
+    [
+        TypeError("get_token failed"),
+        httpx2.HTTPStatusError(
+            "401",
+            request=httpx2.Request("POST", "https://login.example.com/token"),
+            response=httpx2.Response(401),
+        ),
+        httpx2.ConnectError("refused"),
+        GoogleAuthError("get_token failed"),
+    ],
+    ids=["TypeError", "HTTPStatusError", "ConnectError", "GoogleAuthError"],
+)
+def test_an_error_from_get_token_stays_unmapped(
+    serve: Callable[..., Server], error: Exception
+):
     oauth = smtp.OAuth(
         username="reports@example.com", credential=Broken(error), scope=OUTLOOK
     )
 
-    with pytest.raises(TypeError) as caught:
+    with pytest.raises(type(error)) as caught:
         backend(serve(), credential=oauth).connect()
 
     assert caught.value is error
