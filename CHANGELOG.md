@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.7](https://github.com/ozanozbeker/epistole/compare/v0.0.6...v0.0.7) (2026-10-02)
+
+
+### Bug Fixes
+
+* count each addr-spec once in Gmail's recipient check, and drop Graph's ([#111](https://github.com/ozanozbeker/epistole/issues/111)) ([25ae8a1](https://github.com/ozanozbeker/epistole/commit/25ae8a16334b09a5a93a91986e6ff9c0cf6d5ce0)), closes [#96](https://github.com/ozanozbeker/epistole/issues/96)
+* let a get_token error propagate unchanged on every backend ([#109](https://github.com/ozanozbeker/epistole/issues/109)) ([d48ae77](https://github.com/ozanozbeker/epistole/commit/d48ae777c2df032e95d57eb5568cd225c2dd1852))
+* request a new Gmail token after a failed 401 refresh ([#110](https://github.com/ozanozbeker/epistole/issues/110)) ([98bb9b8](https://github.com/ozanozbeker/epistole/commit/98bb9b85af4e7dfd1a1bee42a4e342ae1cd7ce20)), closes [#100](https://github.com/ozanozbeker/epistole/issues/100)
+
+
+### Documentation
+
+* point live-send references at the open tickets ([#94](https://github.com/ozanozbeker/epistole/issues/94)) ([3a17bdf](https://github.com/ozanozbeker/epistole/commit/3a17bdfc114c828745e1bfafc63176afeae40124))
+
 ## [0.0.6](https://github.com/ozanozbeker/epistole/compare/v0.0.5...v0.0.6) (2026-09-30)
 
 
