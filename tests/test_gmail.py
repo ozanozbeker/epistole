@@ -682,7 +682,7 @@ def test_a_503_on_the_refresh_at_expiry_is_one_request_and_leaves_the_connection
     assert [str(one.url) for one in google.requests] == [TOKEN_URI, TOKEN_URI]
 
 
-def test_the_send_after_a_failed_refresh_sends_the_rejected_token(
+def test_the_send_after_a_failed_refresh_requests_a_new_token(
     google: Google, service_account: gmail.ServiceAccount
 ):
     with backend(service_account).connect() as connection:
@@ -691,13 +691,13 @@ def test_the_send_after_a_failed_refresh_sends_the_rejected_token(
         with pytest.raises(ProviderError):
             connection.send(message())
 
+        assert not google.clients[0].is_closed
         connection.send(message())
 
-    # google-auth sets the token only after a successful grant.
-    assert [str(one.url) for one in google.requests].count(TOKEN_URI) == 2
+    assert [str(one.url) for one in google.requests].count(TOKEN_URI) == 3
     assert [one.headers["Authorization"] for one in google.sent()] == [
         "Bearer token-1",
-        "Bearer token-1",
+        "Bearer token-2",
     ]
 
 

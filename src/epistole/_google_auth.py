@@ -114,7 +114,8 @@ class _GoogleTokens:
         return cast("str", self._credentials.token)
 
     def refresh(self) -> str:
-        """Refresh the credential's token, even before its expiry."""
+        """Drop the credential's token and request a new one, because google-auth keeps the old token when a grant fails."""
+        self._credentials.token = None
         replies: int = self._request.replies
         with _mapping():
             try:
