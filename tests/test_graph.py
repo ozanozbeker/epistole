@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
+from google.auth.exceptions import GoogleAuthError
 
 from epistole import (
     Address,
@@ -49,6 +50,11 @@ DRAFT = f"{DRAFTS}/draft-1"
 UPLOAD = "https://outlook.office.com/api/v2.0/Users('reports@example.com')/Messages('draft-1')/AttachmentSessions('session-1')"
 AUDIENCE = "https://graph.microsoft.com"
 SCOPE = "https://graph.microsoft.com/.default"
+OPENID_CONFIGURATION = {
+    "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
+    "token_endpoint": TOKEN_URI,
+    "issuer": f"https://login.microsoftonline.com/{TENANT}/v2.0",
+}
 
 UNAVAILABLE = {
     "error": "temporarily_unavailable",
@@ -102,14 +108,7 @@ class Microsoft:
             return reply
 
         if where == DISCOVERY:
-            return httpx2.Response(
-                200,
-                json={
-                    "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
-                    "token_endpoint": TOKEN_URI,
-                    "issuer": f"https://login.microsoftonline.com/{TENANT}/v2.0",
-                },
-            )
+            return httpx2.Response(200, json=OPENID_CONFIGURATION)
 
         if where in {TOKEN_URI, IMDS}:
             self._issued += 1
@@ -999,7 +998,9 @@ def test_a_network_failure_on_connect_is_a_transport_error(
     failure = httpx2.ConnectError("refused")
     microsoft.replies[where] = [failure]
 
-    with pytest.raises(TransportError) as caught:
+    with pytest.raises(
+        TransportError, match=r"^the request to Microsoft failed: refused$"
+    ) as caught:
         backend(secret).connect()
 
     assert caught.value.__cause__ is failure
@@ -1062,7 +1063,8 @@ def test_a_token_status_outside_2xx_but_400_401_or_403_is_a_provider_error(
     ]
 
     with pytest.raises(
-        ProviderError, match=f"{status} temporarily_unavailable.*Try again later"
+        ProviderError,
+        match=rf"^Microsoft replied {status} temporarily_unavailable to a token request: Try again later\.$",
     ) as caught:
         backend(credential).connect()
 
@@ -1148,16 +1150,124 @@ def test_a_rejection_msal_cannot_read_is_a_provider_error(
         backend(secret).connect()
 
 
+def test_a_200_token_reply_without_an_access_token_is_an_authentication_error(
+    microsoft: Microsoft, secret: graph.ClientSecret
+):
+    microsoft.replies[TOKEN_URI] = [httpx2.Response(200, json={"token_type": "Bearer"})]
+
+    with pytest.raises(AuthenticationError) as caught:
+        backend(secret).connect()
+
+    assert (
+        str(caught.value) == "the credential could not get an access token: None: None"
+    )
+    assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    ("reply", "raised", "text"),
+    [
+        pytest.param(
+            httpx2.Response(200, content=b"<html>Sign in</html>"),
+            ValueError,
+            "authority configuration",
+            id="not JSON",
+        ),
+        pytest.param(
+            httpx2.Response(200, content=b"[]"), AttributeError, None, id="an array"
+        ),
+        pytest.param(
+            httpx2.Response(200, json={}), KeyError, None, id="an empty object"
+        ),
+        pytest.param(
+            httpx2.Response(200, content=DEEP),
+            RecursionError,
+            None,
+            id="nested too deeply",
+        ),
+        pytest.param(
+            httpx2.Response(
+                200,
+                json=OPENID_CONFIGURATION
+                | {"token_endpoint": "http://login.example.com/t"},
+            ),
+            ValueError,
+            "https url",
+            id="token_endpoint not https",
+        ),
+        pytest.param(
+            httpx2.Response(202, json=OPENID_CONFIGURATION),
+            RuntimeError,
+            "OIDC Discovery: 202",
+            id="202",
+        ),
+        pytest.param(
+            httpx2.Response(204), RuntimeError, "OIDC Discovery: 204", id="204"
+        ),
+    ],
+)
+def test_a_discovery_reply_msal_cannot_read_stays_unmapped(
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    reply: httpx2.Response,
+    raised: type[Exception],
+    text: str | None,
+):
+    microsoft.replies[DISCOVERY] = [reply]
+
+    with pytest.raises(raised, match=text) as caught:
+        backend(secret).connect()
+
+    assert type(caught.value) is raised
+    assert TOKEN_URI not in [url(one) for one in microsoft.requests]
+
+
 @pytest.mark.parametrize(
     "error",
-    [TypeError("get_token failed"), json.JSONDecodeError("get_token failed", "", 0)],
-    ids=["TypeError", "JSONDecodeError"],
+    [
+        TypeError("get_token failed"),
+        json.JSONDecodeError("get_token failed", "", 0),
+        GoogleAuthError("get_token failed"),
+    ],
+    ids=["TypeError", "JSONDecodeError", "GoogleAuthError"],
 )
 def test_an_error_from_get_token_stays_unmapped(microsoft: Microsoft, error: Exception):
     with pytest.raises(type(error)) as caught:
         backend(Broken(error)).connect()
 
     assert caught.value is error
+
+
+@pytest.mark.parametrize(
+    ("error", "expected", "text"),
+    [
+        pytest.param(
+            httpx2.HTTPStatusError(
+                "401",
+                request=httpx2.Request("POST", "https://login.example.com/token"),
+                response=httpx2.Response(401),
+            ),
+            AuthenticationError,
+            "Graph replied 401: Unauthorized",
+            id="HTTPStatusError",
+        ),
+        pytest.param(
+            httpx2.ConnectError("refused"),
+            TransportError,
+            "the request to Microsoft failed: refused",
+            id="ConnectError",
+        ),
+    ],
+)
+def test_an_httpx2_error_from_get_token_is_mapped(
+    microsoft: Microsoft, error: Exception, expected: type[EpistoleError], text: str
+):
+    with pytest.raises(EpistoleError) as caught:
+        backend(Broken(error)).connect()
+
+    assert type(caught.value) is expected
+    assert str(caught.value) == text
+    assert caught.value.__cause__ is error
 
 
 def test_an_error_raised_before_the_token_reply_stays_unmapped(
@@ -1442,18 +1552,23 @@ def test_a_network_failure_on_a_send_is_a_transport_error_that_closes_the_connec
     assert caught.value.backend is configured
 
 
+@pytest.mark.parametrize(
+    ("where", "status"), [(SEND_MAIL, 202), (TOKEN_URI, 200)], ids=["send", "token"]
+)
 def test_a_reply_that_does_not_decode_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret
+    microsoft: Microsoft, secret: graph.ClientSecret, where: str, status: int
 ):
-    microsoft.replies[SEND_MAIL] = [
+    microsoft.replies[where] = [
         httpx2.Response(
-            202,
+            status,
             headers={"Content-Encoding": "gzip"},
             stream=httpx2.ByteStream(b"not gzip"),
         )
     ]
 
-    with pytest.raises(ProviderError) as caught:
+    with pytest.raises(
+        ProviderError, match=r"^Microsoft's reply could not be read: "
+    ) as caught:
         backend(secret).send(message())
 
     assert isinstance(caught.value.__cause__, httpx2.DecodingError)

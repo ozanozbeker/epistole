@@ -14,7 +14,7 @@ import httpx2
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import GoogleAuthError, MalformedError, RefreshError
 
 from epistole import GmailBackend, Message, Submission, TokenCredential, gmail, smtp
 from epistole.exceptions import (
@@ -636,8 +636,10 @@ def test_a_refused_refresh_is_an_authentication_error_on_the_connect_line(
     with pytest.raises(AuthenticationError) as caught:
         configured.connect()
 
-    assert "400 invalid_grant" in str(caught.value)
-    assert "Invalid JWT Signature." in str(caught.value)
+    assert (
+        str(caught.value)
+        == "Google's token endpoint replied 400 invalid_grant: Invalid JWT Signature."
+    )
     assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
     assert google.clients[0].is_closed
@@ -681,6 +683,10 @@ def test_a_token_reply_other_than_200_is_one_request_mapped_by_its_status(
     cause = caught.value.__cause__
     assert isinstance(cause, httpx2.HTTPStatusError)
     assert cause.response.status_code == status
+    assert (
+        str(caught.value)
+        == f"Google's token endpoint replied {status} temporarily_unavailable: {cause.response.reason_phrase}"
+    )
     assert caught.value.backend is configured
 
 
@@ -772,6 +778,19 @@ def test_an_error_raised_before_the_token_reply_stays_unmapped(
     assert google.requests == []
 
 
+def test_a_key_file_without_client_email_raises_google_auths_malformed_error(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    key = json.loads(service_account.path.read_text())
+    del key["client_email"]
+    service_account.path.write_text(json.dumps(key))
+
+    with pytest.raises(MalformedError, match="client_email"):
+        backend(service_account).connect()
+
+    assert google.requests == []
+
+
 def test_an_error_from_get_token_stays_unmapped(google: Google):
     error = TypeError("get_token failed")
 
@@ -781,13 +800,53 @@ def test_an_error_from_get_token_stays_unmapped(google: Google):
     assert caught.value is error
 
 
+@pytest.mark.parametrize(
+    ("error", "expected", "text"),
+    [
+        pytest.param(
+            httpx2.HTTPStatusError(
+                "401",
+                request=httpx2.Request("POST", "https://login.example.com/token"),
+                response=httpx2.Response(401),
+            ),
+            AuthenticationError,
+            "Gmail replied 401: Unauthorized",
+            id="HTTPStatusError",
+        ),
+        pytest.param(
+            httpx2.ConnectError("refused"),
+            TransportError,
+            "the request to Google failed: refused",
+            id="ConnectError",
+        ),
+        pytest.param(
+            GoogleAuthError("refused"),
+            AuthenticationError,
+            "the credential could not get an access token: refused",
+            id="GoogleAuthError",
+        ),
+    ],
+)
+def test_an_httpx2_or_google_auth_error_from_get_token_is_mapped(
+    google: Google, error: Exception, expected: type[EpistoleError], text: str
+):
+    with pytest.raises(EpistoleError) as caught:
+        backend(Broken(error)).connect()
+
+    assert type(caught.value) is expected
+    assert str(caught.value) == text
+    assert caught.value.__cause__ is error
+
+
 def test_a_network_failure_on_a_refresh_is_a_transport_error(
     google: Google, authorized_user: gmail.AuthorizedUser
 ):
     failure = httpx2.ConnectError("refused")
     google.replies[TOKEN_URI] = [failure]
 
-    with pytest.raises(TransportError) as caught:
+    with pytest.raises(
+        TransportError, match=r"^the token request to Google failed: refused$"
+    ) as caught:
         backend(authorized_user).connect()
 
     assert caught.value.__cause__ is failure
@@ -867,10 +926,30 @@ def test_a_503_on_the_refresh_at_expiry_is_one_request_and_leaves_the_connection
     assert [str(one.url) for one in google.requests] == [TOKEN_URI, TOKEN_URI]
 
 
-def test_a_reply_that_does_not_decode_is_a_provider_error(
+def test_the_send_after_a_failed_refresh_sends_the_rejected_token(
     google: Google, service_account: gmail.ServiceAccount
 ):
-    google.replies[SEND] = [
+    with backend(service_account).connect() as connection:
+        google.replies[SEND] = [httpx2.Response(401)]
+        google.replies[TOKEN_URI] = [httpx2.Response(503)]
+        with pytest.raises(ProviderError):
+            connection.send(message())
+
+        connection.send(message())
+
+    # google-auth sets the token only after a successful grant.
+    assert [str(one.url) for one in google.requests].count(TOKEN_URI) == 2
+    assert [one.headers["Authorization"] for one in google.sent()] == [
+        "Bearer token-1",
+        "Bearer token-1",
+    ]
+
+
+@pytest.mark.parametrize("where", [SEND, TOKEN_URI], ids=["send", "token"])
+def test_a_reply_that_does_not_decode_is_a_provider_error(
+    google: Google, service_account: gmail.ServiceAccount, where: str
+):
+    google.replies[where] = [
         httpx2.Response(
             200,
             headers={"Content-Encoding": "gzip"},
@@ -878,7 +957,9 @@ def test_a_reply_that_does_not_decode_is_a_provider_error(
         )
     ]
 
-    with pytest.raises(ProviderError) as caught:
+    with pytest.raises(
+        ProviderError, match=r"^Google's reply could not be read: "
+    ) as caught:
         backend(service_account).send(message())
 
     assert isinstance(caught.value.__cause__, httpx2.DecodingError)
