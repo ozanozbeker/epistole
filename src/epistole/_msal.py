@@ -87,10 +87,7 @@ def _client_credential(
 
 @contextmanager
 def _mapping() -> Generator[None]:
-    """Raise the Epistole error for a failed token request, by the Graph token rows in ADR-0009.
-
-    A plain `httpx2.HTTPStatusError` passes, so `_graph` maps it by its mail table.
-    """
+    """Raise the Epistole error for a failed token request, by the Graph token rows in ADR-0009."""
     try:
         with _http.request_mapping("Microsoft"):
             yield

@@ -83,12 +83,11 @@ class _GraphTransport(_http.RESTTransport):
         fields: dict[str, object] = _message(submission)
         request: bytes = _json({"message": fields})
         mailbox: str = f"{_USERS}{quote(addr_spec(submission.from_address), safe='@')}"
-        with self.mapping():
-            if len(request) < _MAX_REQUEST:
-                self.request("POST", f"{mailbox}/sendMail", content=request)
-            else:
-                fields.pop("attachments", None)
-                self._send_draft(mailbox, fields, attachments)
+        if len(request) < _MAX_REQUEST:
+            self.request("POST", f"{mailbox}/sendMail", content=request)
+        else:
+            fields.pop("attachments", None)
+            self._send_draft(mailbox, fields, attachments)
 
         return {}
 
@@ -134,16 +133,17 @@ class _GraphTransport(_http.RESTTransport):
         No request carries the bearer, because the URL holds its own token on another host (ADR-0009).
         """
         try:
-            for start in range(0, len(data), _CHUNK):
-                chunk: bytes = data[start : start + _CHUNK]
-                self._client.put(
-                    url,
-                    content=chunk,
-                    headers={
-                        "Content-Type": "application/octet-stream",
-                        "Content-Range": f"bytes {start}-{start + len(chunk) - 1}/{len(data)}",
-                    },
-                ).raise_for_status()
+            with self.mapping():
+                for start in range(0, len(data), _CHUNK):
+                    chunk: bytes = data[start : start + _CHUNK]
+                    self._client.put(
+                        url,
+                        content=chunk,
+                        headers={
+                            "Content-Type": "application/octet-stream",
+                            "Content-Range": f"bytes {start}-{start + len(chunk) - 1}/{len(data)}",
+                        },
+                    ).raise_for_status()
         except BaseException:
             with suppress(Exception):
                 self._client.delete(url)

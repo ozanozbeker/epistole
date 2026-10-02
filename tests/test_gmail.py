@@ -13,7 +13,7 @@ import httpx2
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import GoogleAuthError, RefreshError
 
 from epistole import GmailBackend, Message, Submission, TokenCredential, gmail, smtp
 from epistole.exceptions import (
@@ -132,13 +132,18 @@ class Credential:
 
 
 class Broken:
-    """A `TokenCredential` whose `get_token` raises `error`."""
+    """A `TokenCredential` whose `get_token` returns `tokens` tokens, then raises `error`."""
 
-    def __init__(self, error: Exception) -> None:
+    def __init__(self, error: Exception, tokens: int = 0) -> None:
         self.error = error
+        self.tokens = tokens
 
     def get_token(self, *_: str) -> AccessToken:
-        raise self.error
+        if not self.tokens:
+            raise self.error
+
+        self.tokens -= 1
+        return AccessToken("foreign", int(time.time()) + 3600)
 
 
 def backend(
@@ -574,21 +579,33 @@ def test_a_refused_refresh_is_an_authentication_error_on_the_connect_line(
     assert google.clients[0].is_closed
 
 
-def test_an_http_status_error_from_get_token_is_mapped_by_the_mail_table(
-    google: Google,
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx2.HTTPStatusError(
+            "401",
+            request=httpx2.Request("POST", "https://login.example.com/token"),
+            response=httpx2.Response(401),
+        ),
+        httpx2.ConnectError("refused"),
+        httpx2.DecodingError("garbled"),
+        GoogleAuthError("refused"),
+    ],
+    ids=lambda error: type(error).__name__,
+)
+@pytest.mark.parametrize("tokens", [0, 1, 2], ids=["connect", "send", "refresh"])
+def test_an_error_from_get_token_propagates_unchanged(
+    google: Google, error: Exception, tokens: int
 ):
-    error = httpx2.HTTPStatusError(
-        "401",
-        request=httpx2.Request("POST", "https://login.example.com/token"),
-        response=httpx2.Response(401),
-    )
+    google.replies[SEND] = [httpx2.Response(401)]
 
-    with pytest.raises(
-        AuthenticationError, match=r"^Gmail replied 401: Unauthorized$"
-    ) as caught:
-        backend(Broken(error)).connect()
+    with (
+        pytest.raises(type(error)) as caught,
+        backend(Broken(error, tokens)).connect() as connection,
+    ):
+        connection.send(message())
 
-    assert caught.value.__cause__ is error
+    assert caught.value is error
 
 
 @pytest.mark.parametrize(

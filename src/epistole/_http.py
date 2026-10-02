@@ -72,10 +72,8 @@ class RESTTransport(ABC):
         opened: httpx2.Client = client()
         with ExitStack() as on_failure:
             on_failure.callback(opened.close)
-            with cls.mapping():
-                tokens: Tokens = _tokens.tokens(credential, cls.purpose, opened)
-                tokens.token()
-
+            tokens: Tokens = _tokens.tokens(credential, cls.purpose, opened)
+            tokens.token()
             on_failure.pop_all()
 
         return cls(opened, tokens)
@@ -86,21 +84,25 @@ class RESTTransport(ABC):
         """Send one request with a bearer token, and on `401` refresh once and retry it once.
 
         `content` is a JSON body. The caller serializes it, so a pre-check can measure the bytes sent (ADR-0019). The budget is per request, not per send, because a token can expire partway through a send of several requests (ADR-0009).
+
+        Only the requests run under `mapping`. Each issued `Tokens` maps its own errors, and an error from a caller's `get_token` propagates unchanged (ADR-0009).
         """
         headers = {"Authorization": f"Bearer {self._tokens.token()}"}
         if content is not None:
             headers["Content-Type"] = "application/json"
 
-        response: httpx2.Response = self._client.request(
-            method, url, headers=headers, content=content
-        )
-        if response.status_code == HTTPStatus.UNAUTHORIZED:
-            headers["Authorization"] = f"Bearer {self._tokens.refresh()}"
-            response = self._client.request(
+        with self.mapping():
+            response: httpx2.Response = self._client.request(
                 method, url, headers=headers, content=content
             )
+            if response.status_code != HTTPStatus.UNAUTHORIZED:
+                return response.raise_for_status()
 
-        return response.raise_for_status()
+        headers["Authorization"] = f"Bearer {self._tokens.refresh()}"
+        with self.mapping():
+            return self._client.request(
+                method, url, headers=headers, content=content
+            ).raise_for_status()
 
     def close(self) -> None:
         """Close the client."""

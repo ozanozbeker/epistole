@@ -423,13 +423,13 @@ def test_every_error_after_a_token_request_is_an_epistole_error(
     ],
     ids=lambda error: type(error).__name__,
 )
-def test_every_error_from_get_token_is_an_epistole_error_or_the_callers_own(
+def test_an_error_from_get_token_stays_unmapped(
     issuer: Issuer, purpose: Purpose, error: Exception
 ):
-    with pytest.raises((type(error), EpistoleError)) as caught:
+    with pytest.raises(type(error)) as caught:
         get(Broken(error), purpose, issuer)
 
-    assert caught.value is error or isinstance(caught.value, EpistoleError)
+    assert caught.value is error
 
 
 # --- Scopes ------------------------------------------------------------------
@@ -935,71 +935,6 @@ def test_an_error_raised_before_any_token_reply_stays_unmapped(
 
     assert type(caught.value) is raised
     assert issuer.tokens() == []
-
-
-@pytest.mark.parametrize(
-    ("purpose", "error"),
-    [
-        *(
-            pytest.param(purpose, error, id=f"{purpose} {type(error).__name__}")
-            for purpose in ("gmail", "graph", "smtp")
-            for error in (
-                TypeError("get_token failed"),
-                json.JSONDecodeError("get_token failed", "", 0),
-                httpx2.HTTPStatusError(
-                    "401",
-                    request=httpx2.Request("POST", "https://login.example.com/token"),
-                    response=httpx2.Response(401),
-                ),
-            )
-        ),
-        *(
-            pytest.param(purpose, error, id=f"{purpose} {type(error).__name__}")
-            for purpose in ("graph", "smtp")
-            for error in (
-                GoogleAuthError("get_token failed"),
-                httpx2.ConnectError("refused"),
-            )
-        ),
-    ],
-)
-def test_an_error_from_get_token_stays_unmapped(
-    issuer: Issuer, purpose: Purpose, error: Exception
-):
-    with pytest.raises(type(error)) as caught:
-        get(Broken(error), purpose, issuer)
-
-    assert caught.value is error
-
-
-@pytest.mark.parametrize(
-    ("error", "expected", "text"),
-    [
-        pytest.param(
-            GoogleAuthError("refused"),
-            AuthenticationError,
-            "the credential could not get an access token: refused",
-            id="GoogleAuthError",
-        ),
-        pytest.param(
-            httpx2.ConnectError("refused"),
-            TransportError,
-            "the request to Google failed: refused",
-            id="ConnectError",
-        ),
-    ],
-)
-def test_on_gmail_a_google_auth_or_network_error_from_get_token_is_mapped(
-    issuer: Issuer,
-    error: Exception,
-    expected: type[EpistoleError],
-    text: str,
-):
-    with pytest.raises(expected) as caught:
-        get(Broken(error), "gmail", issuer)
-
-    assert str(caught.value) == text
-    assert caught.value.__cause__ is error
 
 
 def test_token_closes_its_client_before_it_returns_or_raises(

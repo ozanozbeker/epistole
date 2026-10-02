@@ -172,13 +172,18 @@ class Credential:
 
 
 class Broken:
-    """A `TokenCredential` whose `get_token` raises `error`."""
+    """A `TokenCredential` whose `get_token` returns `tokens` tokens, then raises `error`."""
 
-    def __init__(self, error: Exception) -> None:
+    def __init__(self, error: Exception, tokens: int = 0) -> None:
         self.error = error
+        self.tokens = tokens
 
     def get_token(self, *_: str) -> AccessToken:
-        raise self.error
+        if not self.tokens:
+            raise self.error
+
+        self.tokens -= 1
+        return AccessToken("foreign", int(time.time()) + 3600)
 
 
 def backend(
@@ -938,35 +943,31 @@ def test_a_discovery_reply_msal_cannot_read_stays_unmapped(
 
 
 @pytest.mark.parametrize(
-    ("error", "expected", "text"),
+    "error",
     [
-        pytest.param(
-            httpx2.HTTPStatusError(
-                "401",
-                request=httpx2.Request("POST", "https://login.example.com/token"),
-                response=httpx2.Response(401),
-            ),
-            AuthenticationError,
-            "Graph replied 401: Unauthorized",
-            id="HTTPStatusError",
+        httpx2.HTTPStatusError(
+            "401",
+            request=httpx2.Request("POST", "https://login.example.com/token"),
+            response=httpx2.Response(401),
         ),
-        pytest.param(
-            httpx2.ConnectError("refused"),
-            TransportError,
-            "the request to Microsoft failed: refused",
-            id="ConnectError",
-        ),
+        httpx2.ConnectError("refused"),
+        httpx2.DecodingError("garbled"),
     ],
+    ids=lambda error: type(error).__name__,
 )
-def test_an_httpx2_error_from_get_token_is_mapped(
-    microsoft: Microsoft, error: Exception, expected: type[EpistoleError], text: str
+@pytest.mark.parametrize("tokens", [0, 1, 2], ids=["connect", "send", "refresh"])
+def test_an_error_from_get_token_propagates_unchanged(
+    microsoft: Microsoft, error: Exception, tokens: int
 ):
-    with pytest.raises(EpistoleError) as caught:
-        backend(Broken(error)).connect()
+    microsoft.replies[SEND_MAIL] = [httpx2.Response(401)]
 
-    assert type(caught.value) is expected
-    assert str(caught.value) == text
-    assert caught.value.__cause__ is error
+    with (
+        pytest.raises(type(error)) as caught,
+        backend(Broken(error, tokens)).connect() as connection,
+    ):
+        connection.send(message())
+
+    assert caught.value is error
 
 
 def test_a_tenant_that_does_not_exist_raises_msals_value_error(
