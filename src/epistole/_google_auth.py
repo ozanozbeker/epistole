@@ -1,0 +1,198 @@
+"""`_google_auth` adapts `google-auth` to `Tokens`, and `_Request` sends its token requests on the connection's client.
+
+`_tokens` imports this module only for a Gmail value or for a `TokenCredential` on the Gmail API, because it imports `google-auth` and `httpx2`. Each token call maps its own errors, because SMTP has no mail mapping around its token.
+"""
+
+from __future__ import annotations
+
+import json
+from contextlib import contextmanager
+from http import HTTPStatus
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
+
+import httpx2
+from google.auth.credentials import TokenState
+from google.auth.exceptions import GoogleAuthError
+from google.auth.exceptions import TransportError as GoogleTransportError
+from google.auth.transport import Request
+from google.oauth2.credentials import Credentials as UserCredentials
+from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+
+from epistole import _http
+from epistole._tokens import (
+    CREDENTIAL_REJECTED,
+    REPLY_ERRORS,
+    ForeignTokens,
+    oauth_error,
+)
+from epistole.exceptions import (
+    AuthenticationError,
+    EpistoleError,
+    ProviderError,
+    TransportError,
+)
+from epistole.gmail import AuthorizedUser, ServiceAccount
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping
+
+    from google.auth.credentials import Credentials
+
+    from epistole._backend import TokenCredential
+    from epistole._tokens import Tokens
+
+
+def tokens(
+    credential: ServiceAccount | AuthorizedUser | TokenCredential,
+    scope: str,
+    client: httpx2.Client,
+    /,
+) -> Tokens:
+    """Build the tokens for `credential`, reading its file if it has one.
+
+    The build runs outside `_mapping`, so a malformed key file raises `google-auth`'s own error (`docs/spec.md`).
+    """
+    match credential:
+        case ServiceAccount(path=path, subject=subject):
+            credentials: Credentials = (
+                ServiceAccountCredentials.from_service_account_file(
+                    path, scopes=[scope], subject=subject
+                )
+            )
+        case AuthorizedUser(path=path):
+            consent: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
+            # Every connect() requests a token for this scope, so an expired or revoked refresh token raises there (ADR-0011).
+            consent.pop("token", None)
+            consent.pop("expiry", None)
+            credentials = UserCredentials.from_authorized_user_info(
+                consent, scopes=[scope]
+            )
+        case _:
+            return _ForeignTokens(credential, scope)
+
+    return _GoogleTokens(credentials, _Request(client))
+
+
+@contextmanager
+def _mapping() -> Generator[None]:
+    """Raise the Epistole error for a failed token request, by the Gmail token rows in ADR-0009."""
+    try:
+        with _http.request_mapping("Google"):
+            yield
+    except GoogleAuthError as error:
+        # _Request raises google-auth's TransportError from the httpx2 error, so a network failure or a token reply other than 200 is one level down (ADR-0009).
+        cause: BaseException | None = error.__cause__
+        if isinstance(cause, httpx2.TransportError):
+            msg = f"the token request to Google failed: {cause}"
+            raise TransportError(msg) from cause
+
+        if isinstance(cause, httpx2.HTTPStatusError):
+            raise _token_mapped(cause.response) from cause
+
+        msg = f"the credential could not get an access token: {error}"
+        raise AuthenticationError(msg) from error
+
+
+def _token_mapped(response: httpx2.Response) -> EpistoleError:
+    """Return the Epistole error for a token reply other than `200`, by its status alone (ADR-0009)."""
+    status: int = response.status_code
+    error, description = oauth_error(response)
+    label: str = f"{status} {error}" if error else str(status)
+    msg = f"Google's token endpoint replied {label}: {description}"
+    if status in CREDENTIAL_REJECTED:
+        return AuthenticationError(msg)
+
+    return ProviderError(msg)
+
+
+class _ForeignTokens(ForeignTokens):
+    """The tokens of a caller's `TokenCredential` on the Gmail API, with each call under `_mapping`.
+
+    So a `GoogleAuthError` from `get_token` raises `AuthenticationError`, against `docs/spec.md`. #99 removes this class.
+    """
+
+    @override
+    def token(self) -> str:
+        with _mapping():
+            return super().token()
+
+    refresh = token
+
+
+class _GoogleTokens:
+    """The tokens of a `google-auth` credential."""
+
+    def __init__(self, credentials: Credentials, request: _Request, /) -> None:
+        self._credentials = credentials
+        self._request = request
+
+    def token(self) -> str:
+        """Return the credential's token, refreshing it once it is within google-auth's expiry margin."""
+        # before_request would also start google-auth's background Regional Access Boundary lookup on this client.
+        if self._credentials.token_state is not TokenState.FRESH:
+            return self.refresh()
+
+        return cast("str", self._credentials.token)
+
+    def refresh(self) -> str:
+        """Refresh the credential's token, even before its expiry."""
+        replies: int = self._request.replies
+        with _mapping():
+            try:
+                self._credentials.refresh(self._request)
+            except REPLY_ERRORS as error:
+                # With no new 200, these come from the caller's file rather than from google-auth reading a reply (ADR-0009).
+                if self._request.replies == replies:
+                    raise
+
+                msg = f"Google's token reply could not be read: {error}"
+                raise ProviderError(msg) from error
+
+        return cast("str", self._credentials.token)
+
+
+class _Request(Request):
+    """A request adapter that sends `google-auth`'s token requests on the connection's client, so they share its timeout, proxy and CA (ADR-0009)."""
+
+    def __init__(self, client: httpx2.Client, /) -> None:
+        self._client = client
+        self.replies = 0
+        """How many `200` replies this adapter has returned to `google-auth`."""
+
+    @override
+    def __call__(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+        **kwargs: object,
+    ) -> _Response:
+        """Raise `google.auth.exceptions.TransportError` for any status but `200`, the one `google-auth` accepts, so it never retries a token request (ADR-0009).
+
+        Ignore `timeout`, because the client's 60 seconds covers token requests too.
+        """
+        try:
+            response = self._client.request(method, url, content=body, headers=headers)
+        except httpx2.TransportError as error:
+            raise GoogleTransportError(error) from error
+
+        if response.status_code != HTTPStatus.OK:
+            msg = f"Google's token endpoint replied {response.status_code}"
+            status = httpx2.HTTPStatusError(
+                msg, request=response.request, response=response
+            )
+            raise GoogleTransportError(status) from status
+
+        self.replies += 1
+        return _Response(response.status_code, response.headers, response.content)
+
+
+class _Response(NamedTuple):
+    """The status, headers and body of an `httpx2` response, under the names `google-auth` reads."""
+
+    status: int
+    headers: Mapping[str, str]
+    data: bytes

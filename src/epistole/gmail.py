@@ -1,6 +1,6 @@
 """`GmailBackend` sends through the Gmail API, and `ServiceAccount` and `AuthorizedUser` are the credentials it takes.
 
-The module is public, because a caller imports a credential value from its backend's module (ADR-0011). `epistole._gmail` holds the code that needs the extra, so `from epistole import GmailBackend` works without it.
+The module is public, because a caller imports a credential value from its backend's module (ADR-0011). `epistole._gmail` and `epistole._google_auth` hold the code that needs the extra, so `from epistole import GmailBackend` works without it.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
+from epistole import _tokens
 from epistole._backend import Backend, TokenCredential
 
 if TYPE_CHECKING:
@@ -58,24 +59,14 @@ class GmailBackend(Backend):
             raise TypeError(msg)
 
         # A job without the extra fails at construction rather than on its first send (ADR-0009).
-        _check_extra("GmailBackend")
+        _tokens.require(credential, "gmail")
         self._credential = credential
 
     @override
     def _open(self) -> Transport:
-        from epistole._gmail import connect  # noqa: PLC0415
+        from epistole._gmail import _GmailTransport  # noqa: PLC0415
 
-        return connect(self._credential)
-
-
-def _check_extra(dependent: str, /) -> None:
-    """Raise `ImportError` naming `epistole[gmail]` unless `httpx2` and `google-auth` import."""
-    try:
-        import google.auth  # noqa: F401, PLC0415
-        import httpx2  # noqa: F401, PLC0415
-    except ImportError as error:
-        msg = f"{dependent} needs httpx2 and google-auth, so install the extra: pip install 'epistole[gmail]'"
-        raise ImportError(msg) from error
+        return _GmailTransport.connect(self._credential)
 
 
 @dataclass(frozen=True)

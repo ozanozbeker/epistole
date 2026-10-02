@@ -613,7 +613,7 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   `ClientSecret` and `Certificate` request the scope `https://graph.microsoft.com/.default`.
   `ManagedIdentity` requests the resource `https://graph.microsoft.com`, because `msal.ManagedIdentityClient` takes a resource and accepts no scope (ADR-0011).
   Neither spelling appears in a signature.
-  The private token-source adapter selects one by the credential's type.
+  The private tokens adapter selects one by the credential's type.
   `ManagedIdentity` does not work on Service Fabric, because `msal` accepts only a real `requests.Session` there (ADR-0011).
 - `Certificate` takes exactly one complete form: `pfx` with an optional `passphrase`, or `private_key` and `thumbprint` together.
   Neither form, both forms, either half of the second form alone, and `passphrase` without `pfx` are each a `TypeError`.

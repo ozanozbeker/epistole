@@ -90,20 +90,29 @@ The check runs when the backend is constructed.
 _Avoid_: sender (RFC 5322 `Sender` names the transmitter, a different header; `SenderRefusedError` names the service's refusal of this address and is the one place the word appears), from_, user_id, mailbox
 
 **Credential**: What a backend holds to prove its identity to a mail service.
-It is a username and password, or the inputs from which a token credential is built: a client secret, a certificate, a service account file, a user's saved consent, or the machine's own identity.
+It is a username and password, or the inputs from which tokens are built: a client secret, a certificate, a service account file, a user's saved consent, or the machine's own identity.
 An anonymous relay takes none.
 A caller passes one in as a value from the backend's own module.
 A backend never accepts the vendor's API client built from one.
 _Avoid_: client (the vendor SDK object), token (one short-lived output of a credential), bearer (the spelling of a token in an HTTP header), auth, login, key (one kind of secret), creds (blastula's spelling)
 
-**Token credential**: The object Epistole builds from a credential at connect time.
-It produces a fresh access token on demand, in the shape `get_token` defines.
+**Token credential**: An object a caller already has that returns an access token on demand, in the shape `get_token` defines.
 The name and the shape are `azure-identity`'s, and `TokenCredential` is the exported Protocol that spells it.
-A caller who already has one passes it in as a credential, and Epistole uses it unchanged.
-_Avoid_: token source, provider, authenticator
+A caller passes one in as a credential, and Epistole uses it unchanged.
+_Avoid_: token source, provider, authenticator, tokens (what a connection builds from it)
+
+**Tokens**: The access tokens one connection's requests carry, built from the backend's credential when the connection opens.
+Every credential takes this one shape, a token credential included.
+It gives a token on demand, and a new one after the mail service rejects the last.
+_Avoid_: token source, token credential (the caller's object, which tokens may wrap), token (one of them)
+
+**Purpose**: What a token is for: the Gmail API, Microsoft Graph, or SMTP AUTH.
+The credential's issuer and the purpose together fix the scope, so one Gmail credential requests `gmail.send` for `GmailBackend` and `https://mail.google.com/` inside `smtp.OAuth`.
+_Avoid_: use, target, scope (OAuth's word for the string a purpose selects), audience (Microsoft's word for the resource a token is for)
 
 **Transport**: The object that makes the network calls, which a backend opens and a connection holds.
 It is the only code that uses SMTP, the Gmail API, or Microsoft Graph.
+The Gmail API's and Graph's transports are REST transports: each request carries a token from the connection's tokens.
 It submits submissions and closes.
 It returns the refusals the mail service gave, and nothing more.
 A third-party backend supplies one and nothing else.
