@@ -13,6 +13,11 @@ The amendment also adds one finding: `Mail.ReadWrite` has a second, independent 
 They were re-verified against the sources on 2026-09-09.
 Amended passages are marked **Corrected 2026-09-09**.
 
+**Amended 2026-10-02 under [#96](https://github.com/ozanozbeker/epistole/issues/96).**
+Two recipient-limit claims were incomplete, and this file corrects them in place.
+The amendment also adds one finding: what Exchange Online does over the mailbox recipient limit is undetermined.
+Amended passages are marked **Corrected 2026-10-02**.
+
 ## What this means for Epistole
 
 **`send()` cannot return a message id from the mail service.**
@@ -314,6 +319,12 @@ For Workspace accounts, the limits are 2,000 messages per day, 2,000 recipients 
 Trial accounts are limited to 500 messages per day ([Workspace sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace)).
 "After reaching one of these limits, users can't send new messages for up to 24 hours."
 
+**Corrected 2026-10-02.**
+The same page has a separate row for messages sent with the Gmail API: 500 recipients per message.
+It counts "Addresses that presented as 'RCPT TO' commands", which are the envelope recipients.
+The 2,000 figure is the page's general row.
+The API row applies to `messages.send`.
+
 Three distinct `429` messages exist ([error guide](https://developers.google.com/workspace/gmail/api/guides/handle-errors)):
 
 - `"Too many requests: User-rate limit exceeded (Mail sending)"` is for the sending quota.
@@ -388,6 +399,11 @@ It accepts the exact bytes the SMTP backend would send, so both backends can use
 It preserves headers the JSON model cannot express.
 
 A single message from an Exchange Online mailbox can have at most 500 recipients across `toRecipients`, `ccRecipients`, and `bccRecipients` ([`message` resource](https://learn.microsoft.com/en-us/graph/api/resources/message)).
+
+**Corrected 2026-10-02.**
+The [Exchange Online limits](https://learn.microsoft.com/en-us/office365/servicedescriptions/exchange-online-service-description/exchange-online-limits#sending-limits) page, which the `message` resource links to, makes this limit a per-mailbox setting.
+An admin can set it from 1 to 1,000.
+Neither page says whether a repeated address counts once.
 
 **Corrected 2026-09-09.**
 This section previously described the 4 MB figure as an S/MIME footnote.
@@ -652,12 +668,13 @@ This list ranks them by how much design they force.
 
 ## Unverified and conflicting
 
-- **Two Google pages disagree on Gmail's recipient limit.**
+- **Two Google pages disagreed on Gmail's recipient limit.**
+  **Corrected 2026-10-02.**
   The API [usage limits](https://developers.google.com/workspace/gmail/api/reference/quota) page states "a limit of 500 recipients per email message".
-  The [Workspace sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace) page states 2,000 total addresses per message with a maximum of 500 external recipients.
-  The 500 figures probably describe the same external-recipient cap.
-  Neither page says so.
-  Assume 500 as the safe limit.
+  The [Workspace sending limits](https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace) page has a row for the Gmail API that says the same, so the two pages agree.
+- **What Exchange Online does over the mailbox recipient limit is undetermined.**
+  Neither Microsoft page says whether `sendMail` replies with an error or replies `202` and sends a non-delivery report.
+  Only a live response settles it.
 - **Gmail `Retry-After` is undetermined.**
   The error guide says `429` is returned "with a time to retry" but never names a header.
   Its own remediation section prescribes exponential backoff.

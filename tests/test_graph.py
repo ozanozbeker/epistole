@@ -372,19 +372,15 @@ def test_html_goes_out_alone_beside_every_address_header_and_attachment(
 # --- Pre-checks --------------------------------------------------------------
 
 
-def test_more_than_500_recipients_is_rejected_before_writing(
+def test_any_number_of_recipients_is_written(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
-    recipients = [f"r{n}@example.com" for n in range(501)]
+    recipients = [f"r{n}@example.com" for n in range(1001)]
 
-    with backend(secret).connect() as connection:
-        with pytest.raises(RejectedError, match="501") as caught:
-            connection.send(message(*recipients))
+    backend(secret).send(message(*recipients))
 
-        connection.send(message(*recipients[:500]))
-
-    assert caught.value.__cause__ is None
-    assert len(microsoft.sent()) == 1
+    fields = json.loads(microsoft.sent()[0].content)["message"]
+    assert len(fields["toRecipients"]) == 1001
 
 
 def test_a_custom_header_not_starting_with_x_is_rejected_naming_it(

@@ -144,7 +144,7 @@ Epistole never sleeps and never retries.
   `ValueError` is for a `str` whose content fails a check.
   The type check runs first, so no caller sees the `TypeError` that `re` raises for a non-`str`, which names no argument.
   A backend-local limit checked before writing is `RejectedError` with `__cause__` `None`.
-  Examples are Graph's 150 MB attachment limit and its 500-recipient limit.
+  Examples are Graph's 150 MB attachment limit and Gmail's 500-recipient limit (ADR-0019).
   The class is `RejectedError` because the same message succeeds on SMTP, and the caller should get one class whether Epistole or the service rejects it first.
 - **`__cause__` is `None` on any check Epistole ran itself**, before any network call or after one.
   A backend pre-check and the every-recipient-refused check in `Connection.send` both raise with no native exception as the cause.

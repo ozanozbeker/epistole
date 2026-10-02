@@ -26,7 +26,7 @@ class GmailBackend(Backend):
 
     Epistole requests the scope `https://www.googleapis.com/auth/gmail.send` alone, which grants no right to read or delete messages. See ADR-0011.
 
-    Before writing, a send raises `RejectedError` for more than 500 recipients, or for a message over 36,700,160 bytes once encoded. Both limits are Google's. See ADR-0019.
+    Before writing, a send raises `RejectedError` for more than 500 recipients, or for a message over 36,700,160 bytes once encoded. Both limits are Google's. The recipient count includes each addr-spec once, as the SMTP envelope does. See ADR-0019.
 
     Gmail accepts or refuses the whole message, so `SendResult.refused` is always empty.
 

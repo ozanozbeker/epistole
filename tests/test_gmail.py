@@ -255,6 +255,17 @@ def test_more_than_500_recipients_is_rejected_before_writing(
     assert len(google.sent()) == 1
 
 
+def test_the_recipient_limit_counts_each_addr_spec_once(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    recipients = [f"r{n}@example.com" for n in range(500)]
+    repeated = message(*recipients).cc("r0@example.com").bcc("R <r1@example.com>")
+
+    backend(service_account).send(repeated)
+
+    assert len(google.sent()) == 1
+
+
 def test_a_message_over_35_mib_once_encoded_is_rejected_before_writing(
     google: Google, service_account: gmail.ServiceAccount
 ):

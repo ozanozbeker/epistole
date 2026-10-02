@@ -604,7 +604,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
 - Pre-checks raise on an encoded message over 36,700,160 bytes and on more than 500 recipients (ADR-0019).
   Both figures are Google's.
   The byte count comes from the v1 discovery document.
-  The recipient cap comes from the API usage limits page, taken as the safe reading against a Workspace page that says 2,000 total with 500 external.
+  The recipient cap comes from the API usage limits page and the Workspace sending-limits row for the Gmail API, which counts RCPT TO addresses.
+  So the count includes each addr-spec once, as the SMTP envelope does.
 - Gmail writes every custom header after Epistole's own, in the caller's order.
 
 **Graph (ADR-0009, ADR-0011, ADR-0012, ADR-0016, ADR-0019).**
@@ -630,7 +631,8 @@ Both are the shape `azure.core.credentials` defines, so an `azure-identity` obje
   Path selection is automatic, and there is no flag.
 - On a failure after the draft exists, `DELETE` the upload session if open, then the draft, each best effort.
   Then raise the original error.
-- Pre-checks raise on an attachment over 150,000,000 raw bytes, on more than 500 recipients, and on a custom header whose name does not start with `x-` (case-insensitive), naming the header (ADR-0012, ADR-0016).
+- Pre-checks raise on an attachment over 150,000,000 raw bytes, and on a custom header whose name does not start with `x-` (case-insensitive), naming the header (ADR-0012, ADR-0016).
+  There is no recipient pre-check, because each Exchange Online mailbox sets its own recipient limit (ADR-0019).
 - `internetMessageId` is set to the `Message-ID` Epistole generated.
   Inline images are `fileAttachment` with `isInline: true` and a bare `contentId`.
 - With HTML present, the body carries `contentType: "html"` alone.
