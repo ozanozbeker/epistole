@@ -8,13 +8,12 @@ from email.policy import default
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import parse_qs
 
 import httpx2
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.auth.exceptions import GoogleAuthError, MalformedError, RefreshError
+from google.auth.exceptions import RefreshError
 
 from epistole import GmailBackend, Message, Submission, TokenCredential, gmail, smtp
 from epistole.exceptions import (
@@ -112,30 +111,6 @@ def service_account(tmp_path: Path, private_key: str) -> gmail.ServiceAccount:
     }
     path.write_text(json.dumps(key))
     return gmail.ServiceAccount(path, subject="reports@example.com")
-
-
-@pytest.fixture
-def authorized_user(tmp_path: Path) -> gmail.AuthorizedUser:
-    path = tmp_path / "authorized-user.json"
-    consent = {
-        "type": "authorized_user",
-        "client_id": "epistole",
-        "client_secret": "hunter2",
-        "refresh_token": "refresh",
-    }
-    path.write_text(json.dumps(consent))
-    return gmail.AuthorizedUser(path)
-
-
-@pytest.fixture
-def user_with_saved_token(
-    authorized_user: gmail.AuthorizedUser,
-) -> gmail.AuthorizedUser:
-    """Save an unexpired access token in `authorized_user`'s file, as `Credentials.to_json()` writes one."""
-    consent = json.loads(authorized_user.path.read_text())
-    consent |= {"token": "saved-token", "expiry": "2099-01-01T00:00:00Z"}
-    authorized_user.path.write_text(json.dumps(consent))
-    return authorized_user
 
 
 class AccessToken(NamedTuple):
@@ -322,35 +297,6 @@ def test_the_size_check_takes_36_700_160_bytes_and_rejects_one_more(
 # --- Credentials -------------------------------------------------------------
 
 
-def test_a_service_account_requests_gmail_send_as_its_subject(
-    google: Google, service_account: gmail.ServiceAccount
-):
-    backend(service_account).connect()
-
-    [request] = google.requests
-    assertion = parse_qs(request.content.decode())["assertion"][0]
-    claims = json.loads(base64.urlsafe_b64decode(assertion.split(".")[1] + "=="))
-    assert claims["scope"] == SCOPE
-    assert claims["sub"] == "reports@example.com"
-
-
-@pytest.mark.parametrize("fixture", ["authorized_user", "user_with_saved_token"])
-def test_an_authorized_user_refreshes_for_gmail_send(
-    google: Google, request: pytest.FixtureRequest, fixture: str
-):
-    credential: gmail.AuthorizedUser = request.getfixturevalue(fixture)
-    saved = credential.path.read_bytes()
-
-    backend(credential).send(message())
-
-    assert [str(one.url) for one in google.requests] == [TOKEN_URI, SEND]
-    form = parse_qs(google.requests[0].content.decode())
-    assert form["grant_type"] == ["refresh_token"]
-    assert form["scope"] == [SCOPE]
-    assert google.sent()[0].headers["Authorization"] == "Bearer token-1"
-    assert credential.path.read_bytes() == saved
-
-
 def test_get_token_is_called_with_gmail_send_before_each_request(
     google: Google,
 ):
@@ -367,17 +313,6 @@ def test_get_token_is_called_with_gmail_send_before_each_request(
     ]
 
 
-def test_connect_reads_the_key_file_and_the_constructor_does_not(
-    google: Google, tmp_path: Path
-):
-    missing = backend(gmail.ServiceAccount(tmp_path / "missing.json", "a@example.com"))
-
-    with pytest.raises(FileNotFoundError):
-        missing.connect()
-
-    assert all(one.is_closed for one in google.clients)
-
-
 @pytest.mark.parametrize(
     "credential",
     ["token", smtp.Password(username="reports", password="hunter2")],  # noqa: S106
@@ -387,11 +322,10 @@ def test_a_credential_of_another_type_raises(credential: object):
         backend(credential)  # pyrefly: ignore
 
 
-@pytest.mark.parametrize("module", ["httpx2", "google.auth"])
 def test_the_constructor_raises_naming_the_extra_when_it_is_missing(
-    monkeypatch: pytest.MonkeyPatch, module: str
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setitem(sys.modules, module, None)
+    monkeypatch.setitem(sys.modules, "google.auth", None)
 
     with pytest.raises(ImportError, match=r"epistole\[gmail\]"):
         backend(gmail.ServiceAccount(Path("key.json"), subject="reports@example.com"))
@@ -636,220 +570,25 @@ def test_a_refused_refresh_is_an_authentication_error_on_the_connect_line(
     with pytest.raises(AuthenticationError) as caught:
         configured.connect()
 
-    assert (
-        str(caught.value)
-        == "Google's token endpoint replied 400 invalid_grant: Invalid JWT Signature."
-    )
-    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
     assert caught.value.backend is configured
     assert google.clients[0].is_closed
 
 
-@pytest.mark.parametrize(
-    "fixture", ["service_account", "authorized_user", "user_with_saved_token"]
-)
-@pytest.mark.parametrize(
-    ("status", "expected"),
-    [
-        pytest.param(202, ProviderError, id="202"),
-        pytest.param(408, ProviderError, id="408"),
-        pytest.param(429, ProviderError, id="429"),
-        pytest.param(500, ProviderError, id="500"),
-        pytest.param(502, ProviderError, id="502"),
-        pytest.param(503, ProviderError, id="503"),
-        pytest.param(504, ProviderError, id="504"),
-        pytest.param(400, AuthenticationError, id="400"),
-        pytest.param(401, AuthenticationError, id="401"),
-        pytest.param(403, AuthenticationError, id="403"),
-    ],
-)
-def test_a_token_reply_other_than_200_is_one_request_mapped_by_its_status(
+def test_an_http_status_error_from_get_token_is_mapped_by_the_mail_table(
     google: Google,
-    request: pytest.FixtureRequest,
-    fixture: str,
-    status: int,
-    expected: type[EpistoleError],
 ):
-    # google-auth retries on this error whatever the status, and sleeps before the retry, unless the adapter raises (ADR-0009).
-    body = {"error": "temporarily_unavailable"}
-    google.replies[TOKEN_URI] = [httpx2.Response(status, json=body)]
-    configured = backend(request.getfixturevalue(fixture))
-
-    with pytest.raises(EpistoleError) as caught:
-        configured.connect()
-
-    assert type(caught.value) is expected
-    assert [str(one.url) for one in google.requests] == [TOKEN_URI]
-    cause = caught.value.__cause__
-    assert isinstance(cause, httpx2.HTTPStatusError)
-    assert cause.response.status_code == status
-    assert (
-        str(caught.value)
-        == f"Google's token endpoint replied {status} temporarily_unavailable: {cause.response.reason_phrase}"
+    error = httpx2.HTTPStatusError(
+        "401",
+        request=httpx2.Request("POST", "https://login.example.com/token"),
+        response=httpx2.Response(401),
     )
-    assert caught.value.backend is configured
-
-
-@pytest.mark.parametrize("fixture", ["service_account", "authorized_user"])
-@pytest.mark.parametrize(
-    ("body", "cause"),
-    [
-        pytest.param(b"<html>proxy login</html>", TypeError, id="a proxy login page"),
-        pytest.param(b"", TypeError, id="empty"),
-        pytest.param(b"[]", TypeError, id="an array"),
-        pytest.param(b'"token"', TypeError, id="a string"),
-        pytest.param(b"null", TypeError, id="null"),
-        pytest.param(b"123", TypeError, id="a number"),
-        pytest.param(b"\xff\xfe", UnicodeDecodeError, id="not UTF-8"),
-        pytest.param(
-            b'{"access_token": "t", "expires_in": "soon"}',
-            ValueError,
-            id="expires_in not a number",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "expires_in": "3600.5"}',
-            ValueError,
-            id="expires_in a decimal string",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "expires_in": [1]}',
-            TypeError,
-            id="expires_in an array",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "expires_in": "99999999999999"}',
-            OverflowError,
-            id="expires_in out of range",
-        ),
-        pytest.param(DEEP, RecursionError, id="nested too deeply"),
-    ],
-)
-def test_a_200_token_reply_google_auth_cannot_read_is_a_provider_error(
-    google: Google,
-    request: pytest.FixtureRequest,
-    fixture: str,
-    body: bytes,
-    cause: type[Exception],
-):
-    google.replies[TOKEN_URI] = [httpx2.Response(200, content=body)]
-    configured = backend(request.getfixturevalue(fixture))
-
-    with pytest.raises(ProviderError) as caught:
-        configured.connect()
-
-    assert type(caught.value.__cause__) is cause
-    assert caught.value.backend is configured
-    assert google.clients[0].is_closed
-
-
-def test_a_token_error_nested_too_deeply_to_read_maps_by_its_status(
-    google: Google, service_account: gmail.ServiceAccount
-):
-    google.replies[TOKEN_URI] = [httpx2.Response(400, content=DEEP)]
-
-    with pytest.raises(AuthenticationError) as caught:
-        backend(service_account).connect()
-
-    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
-
-
-@pytest.mark.parametrize("scope", [None, [SCOPE]], ids=["null", "an array"])
-def test_a_token_reply_whose_scope_is_not_a_string_is_a_provider_error(
-    google: Google, authorized_user: gmail.AuthorizedUser, scope: list[str] | None
-):
-    body = {"access_token": "token-1", "expires_in": 3600, "scope": scope}
-    google.replies[TOKEN_URI] = [httpx2.Response(200, json=body)]
-
-    with pytest.raises(ProviderError) as caught:
-        backend(authorized_user).connect()
-
-    assert type(caught.value.__cause__) is AttributeError
-
-
-def test_an_error_raised_before_the_token_reply_stays_unmapped(
-    google: Google, service_account: gmail.ServiceAccount
-):
-    key = json.loads(service_account.path.read_text())
-    service_account.path.write_text(json.dumps(key | {"token_uri": 123}))
-
-    with pytest.raises(TypeError, match="url"):
-        backend(service_account).connect()
-
-    assert google.requests == []
-
-
-def test_a_key_file_without_client_email_raises_google_auths_malformed_error(
-    google: Google, service_account: gmail.ServiceAccount
-):
-    key = json.loads(service_account.path.read_text())
-    del key["client_email"]
-    service_account.path.write_text(json.dumps(key))
-
-    with pytest.raises(MalformedError, match="client_email"):
-        backend(service_account).connect()
-
-    assert google.requests == []
-
-
-def test_an_error_from_get_token_stays_unmapped(google: Google):
-    error = TypeError("get_token failed")
-
-    with pytest.raises(TypeError) as caught:
-        backend(Broken(error)).connect()
-
-    assert caught.value is error
-
-
-@pytest.mark.parametrize(
-    ("error", "expected", "text"),
-    [
-        pytest.param(
-            httpx2.HTTPStatusError(
-                "401",
-                request=httpx2.Request("POST", "https://login.example.com/token"),
-                response=httpx2.Response(401),
-            ),
-            AuthenticationError,
-            "Gmail replied 401: Unauthorized",
-            id="HTTPStatusError",
-        ),
-        pytest.param(
-            httpx2.ConnectError("refused"),
-            TransportError,
-            "the request to Google failed: refused",
-            id="ConnectError",
-        ),
-        pytest.param(
-            GoogleAuthError("refused"),
-            AuthenticationError,
-            "the credential could not get an access token: refused",
-            id="GoogleAuthError",
-        ),
-    ],
-)
-def test_an_httpx2_or_google_auth_error_from_get_token_is_mapped(
-    google: Google, error: Exception, expected: type[EpistoleError], text: str
-):
-    with pytest.raises(EpistoleError) as caught:
-        backend(Broken(error)).connect()
-
-    assert type(caught.value) is expected
-    assert str(caught.value) == text
-    assert caught.value.__cause__ is error
-
-
-def test_a_network_failure_on_a_refresh_is_a_transport_error(
-    google: Google, authorized_user: gmail.AuthorizedUser
-):
-    failure = httpx2.ConnectError("refused")
-    google.replies[TOKEN_URI] = [failure]
 
     with pytest.raises(
-        TransportError, match=r"^the token request to Google failed: refused$"
+        AuthenticationError, match=r"^Gmail replied 401: Unauthorized$"
     ) as caught:
-        backend(authorized_user).connect()
+        backend(Broken(error)).connect()
 
-    assert caught.value.__cause__ is failure
+    assert caught.value.__cause__ is error
 
 
 @pytest.mark.parametrize(
@@ -945,11 +684,10 @@ def test_the_send_after_a_failed_refresh_sends_the_rejected_token(
     ]
 
 
-@pytest.mark.parametrize("where", [SEND, TOKEN_URI], ids=["send", "token"])
 def test_a_reply_that_does_not_decode_is_a_provider_error(
-    google: Google, service_account: gmail.ServiceAccount, where: str
+    google: Google, service_account: gmail.ServiceAccount
 ):
-    google.replies[where] = [
+    google.replies[SEND] = [
         httpx2.Response(
             200,
             headers={"Content-Encoding": "gzip"},

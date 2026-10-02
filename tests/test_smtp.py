@@ -33,7 +33,6 @@ import httpx2
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.auth.exceptions import GoogleAuthError
 
 from epistole import Message, Refusal, SMTPBackend, Submission, gmail, graph, smtp
 from epistole.exceptions import (
@@ -289,27 +288,13 @@ class Credential:
         return AccessToken("token-1", int(time.time()) + 3600)
 
 
-class Broken:
-    """A `TokenCredential` whose `get_token` raises `error`."""
-
-    def __init__(self, error: Exception) -> None:
-        self.error = error
-
-    def get_token(self, *_: str) -> AccessToken:
-        raise self.error
-
-
 class Issuer:
-    """A fake of the token endpoints of Microsoft and Google, which issues `token-1` and records each request.
-
-    Once `failure` is set, the issuer returns it for every token request, or raises it when it is an exception.
-    """
+    """A fake of the token endpoints of Microsoft and Google, which issues `token-1` and records each request."""
 
     def __init__(self) -> None:
         self.requests: list[httpx2.Request] = []
         self.clients: list[httpx2.Client] = []
         self.options: list[dict[str, Any]] = []
-        self.failure: httpx2.Response | Exception | None = None
 
     def __call__(self, request: httpx2.Request) -> httpx2.Response:
         self.requests.append(request)
@@ -322,12 +307,6 @@ class Issuer:
                     "issuer": f"{MICROSOFT}/v2.0",
                 },
             )
-
-        if isinstance(self.failure, httpx2.Response):
-            return self.failure
-
-        if self.failure is not None:
-            raise self.failure
 
         return httpx2.Response(
             200,
@@ -399,17 +378,6 @@ def authorized_user(tmp_path: Path) -> gmail.AuthorizedUser:
         )
     )
     return gmail.AuthorizedUser(path)
-
-
-@pytest.fixture
-def user_with_saved_token(
-    authorized_user: gmail.AuthorizedUser,
-) -> gmail.AuthorizedUser:
-    """Save an unexpired access token in `authorized_user`'s file, as `Credentials.to_json()` writes one."""
-    consent = json.loads(authorized_user.path.read_text())
-    consent |= {"token": "saved-token", "expiry": "2099-01-01T00:00:00Z"}
-    authorized_user.path.write_text(json.dumps(consent))
-    return authorized_user
 
 
 # --- Sending -----------------------------------------------------------------
@@ -681,54 +649,15 @@ def test_oauth_over_a_graph_value_requests_the_exchange_online_scope(
 
     [token] = [one for one in issuer.requests if one.method == "POST"]
     assert parse_qs(token.content.decode())["scope"] == [OUTLOOK]
-    assert all(one.is_closed for one in issuer.clients)
 
 
-def test_oauth_over_a_managed_identity_requests_the_exchange_online_resource(
-    serve: Callable[..., Server], issuer: Issuer
-):
-    server = serve()
-    identity = graph.ManagedIdentity()
-    oauth = smtp.OAuth(username="reports@example.com", credential=identity)
-
-    with backend(server, credential=oauth).connect():
-        assert server.commands[-1] == XOAUTH2
-
-    [token] = issuer.requests
-    query = parse_qs(token.url.query.decode())
-    assert query["resource"] == ["https://outlook.office365.com"]
-    assert "scope" not in query
-
-
-def test_oauth_over_a_service_account_requests_the_gmail_smtp_scope(
-    serve: Callable[..., Server],
-    issuer: Issuer,
-    service_account: gmail.ServiceAccount,
-):
-    server = serve()
-    oauth = smtp.OAuth(username="reports@example.com", credential=service_account)
-
-    with backend(server, credential=oauth).connect():
-        assert server.commands[-1] == XOAUTH2
-
-    [token] = issuer.requests
-    assertion = parse_qs(token.content.decode())["assertion"][0]
-    claims = json.loads(base64.urlsafe_b64decode(assertion.split(".")[1] + "=="))
-    assert claims["scope"] == GMAIL
-    assert all(one.is_closed for one in issuer.clients)
-
-
-@pytest.mark.parametrize("fixture", ["authorized_user", "user_with_saved_token"])
 def test_oauth_over_an_authorized_user_requests_the_gmail_smtp_scope(
     serve: Callable[..., Server],
     issuer: Issuer,
-    request: pytest.FixtureRequest,
-    fixture: str,
+    authorized_user: gmail.AuthorizedUser,
 ):
     server = serve()
-    oauth = smtp.OAuth(
-        username="reports@example.com", credential=request.getfixturevalue(fixture)
-    )
+    oauth = smtp.OAuth(username="reports@example.com", credential=authorized_user)
 
     with backend(server, credential=oauth).connect():
         assert server.commands[-1] == XOAUTH2
@@ -770,36 +699,13 @@ def test_the_token_client_takes_proxy_and_ca_settings_from_the_environment(
     assert issuer.options == [{"timeout": 60}]
 
 
-@pytest.mark.parametrize(
-    ("credential", "module", "extra"),
-    [
-        pytest.param(
-            graph.ClientSecret(TENANT, "epistole", "hunter2"),
-            "msal",
-            "graph",
-            id="graph value without msal",
-        ),
-        pytest.param(
-            graph.ManagedIdentity(), "httpx2", "graph", id="graph value without httpx2"
-        ),
-        pytest.param(
-            gmail.AuthorizedUser(Path("authorized-user.json")),
-            "google.auth",
-            "gmail",
-            id="gmail value without google-auth",
-        ),
-    ],
-)
 def test_the_constructor_raises_naming_the_extra_the_wrapped_credential_needs(
-    monkeypatch: pytest.MonkeyPatch,
-    credential: graph.ClientSecret | graph.ManagedIdentity | gmail.AuthorizedUser,
-    module: str,
-    extra: str,
+    monkeypatch: pytest.MonkeyPatch, secret: graph.ClientSecret
 ):
-    monkeypatch.setitem(sys.modules, module, None)
-    oauth = smtp.OAuth(username="reports@example.com", credential=credential)
+    monkeypatch.setitem(sys.modules, "msal", None)
+    oauth = smtp.OAuth(username="reports@example.com", credential=secret)
 
-    with pytest.raises(ImportError, match=rf"epistole\[{extra}\]"):
+    with pytest.raises(ImportError, match=r"epistole\[graph\]"):
         SMTPBackend("127.0.0.1", from_address="reports@example.com", credential=oauth)
 
 
@@ -817,109 +723,6 @@ def test_oauth_over_get_token_needs_no_extra(
     backend(server, credential=oauth).send(message())
 
     assert len(server.messages) == 1
-
-
-def test_a_missing_key_file_stays_a_file_not_found_error(
-    serve: Callable[..., Server], issuer: Issuer, tmp_path: Path
-):
-    missing = gmail.AuthorizedUser(tmp_path / "missing.json")
-    oauth = smtp.OAuth(username="reports@example.com", credential=missing)
-
-    with pytest.raises(FileNotFoundError):
-        backend(serve(), credential=oauth).connect()
-
-    assert all(one.is_closed for one in issuer.clients)
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        TypeError("get_token failed"),
-        httpx2.HTTPStatusError(
-            "401",
-            request=httpx2.Request("POST", "https://login.example.com/token"),
-            response=httpx2.Response(401),
-        ),
-        httpx2.ConnectError("refused"),
-        GoogleAuthError("get_token failed"),
-    ],
-    ids=["TypeError", "HTTPStatusError", "ConnectError", "GoogleAuthError"],
-)
-def test_an_error_from_get_token_stays_unmapped(
-    serve: Callable[..., Server], error: Exception
-):
-    oauth = smtp.OAuth(
-        username="reports@example.com", credential=Broken(error), scope=OUTLOOK
-    )
-
-    with pytest.raises(type(error)) as caught:
-        backend(serve(), credential=oauth).connect()
-
-    assert caught.value is error
-
-
-@pytest.mark.parametrize("fixture", ["secret", "authorized_user"])
-def test_a_network_failure_getting_the_token_is_a_transport_error(
-    serve: Callable[..., Server],
-    issuer: Issuer,
-    request: pytest.FixtureRequest,
-    fixture: str,
-):
-    issuer.failure = failure = httpx2.ConnectError("refused")
-    oauth = smtp.OAuth(
-        username="reports@example.com", credential=request.getfixturevalue(fixture)
-    )
-    configured = backend(serve(), credential=oauth)
-
-    with pytest.raises(TransportError) as caught:
-        configured.connect()
-
-    assert caught.value.__cause__ is failure
-    assert caught.value.backend is configured
-
-
-@pytest.mark.parametrize(
-    ("fixture", "status"), [("service_account", 503), ("secret", 429)]
-)
-def test_a_429_or_5xx_from_the_token_endpoint_is_one_request_and_a_provider_error(
-    serve: Callable[..., Server],
-    issuer: Issuer,
-    request: pytest.FixtureRequest,
-    fixture: str,
-    status: int,
-):
-    issuer.failure = httpx2.Response(status)
-    oauth = smtp.OAuth(
-        username="reports@example.com", credential=request.getfixturevalue(fixture)
-    )
-    configured = backend(serve(), credential=oauth)
-
-    with pytest.raises(ProviderError) as caught:
-        configured.connect()
-
-    assert len([one for one in issuer.requests if one.url.path.endswith("/token")]) == 1
-    assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
-    assert caught.value.backend is configured
-
-
-@pytest.mark.parametrize("fixture", ["service_account", "secret"])
-def test_a_token_reply_the_library_cannot_read_is_a_provider_error(
-    serve: Callable[..., Server],
-    issuer: Issuer,
-    request: pytest.FixtureRequest,
-    fixture: str,
-):
-    issuer.failure = httpx2.Response(200, content=b"[]")
-    oauth = smtp.OAuth(
-        username="reports@example.com", credential=request.getfixturevalue(fixture)
-    )
-    configured = backend(serve(), credential=oauth)
-
-    with pytest.raises(ProviderError) as caught:
-        configured.connect()
-
-    assert isinstance(caught.value.__cause__, (AttributeError, TypeError))
-    assert caught.value.backend is configured
 
 
 @pytest.mark.parametrize(

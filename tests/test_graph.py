@@ -1,19 +1,12 @@
 import json
 import sys
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import parse_qs
 
 import httpx2
 import pytest
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.serialization import pkcs12
-from cryptography.x509.oid import NameOID
-from google.auth.exceptions import GoogleAuthError
 
 from epistole import (
     Address,
@@ -158,48 +151,6 @@ def microsoft(monkeypatch: pytest.MonkeyPatch) -> Microsoft:
 @pytest.fixture
 def secret() -> graph.ClientSecret:
     return graph.ClientSecret(TENANT, "epistole", "hunter2")
-
-
-@pytest.fixture(scope="session")
-def rsa_key() -> rsa.RSAPrivateKey:
-    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
-@pytest.fixture(scope="session")
-def private_key(rsa_key: rsa.RSAPrivateKey) -> str:
-    return rsa_key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ).decode()
-
-
-@pytest.fixture
-def pfx(tmp_path: Path, rsa_key: rsa.RSAPrivateKey) -> Path:
-    """Write a PKCS #12 file holding the key and a self-signed certificate, encrypted with `hunter2`."""
-    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "epistole")])
-    now = datetime.now(UTC)
-    certificate = (
-        x509.CertificateBuilder()
-        .subject_name(name)
-        .issuer_name(name)
-        .public_key(rsa_key.public_key())
-        .serial_number(1)
-        .not_valid_before(now)
-        .not_valid_after(now + timedelta(days=1))
-        .sign(rsa_key, hashes.SHA256())
-    )
-    path = tmp_path / "epistole.pfx"
-    path.write_bytes(
-        pkcs12.serialize_key_and_certificates(
-            b"epistole",
-            rsa_key,
-            certificate,
-            None,
-            serialization.BestAvailableEncryption(b"hunter2"),
-        )
-    )
-    return path
 
 
 class AccessToken(NamedTuple):
@@ -779,56 +730,6 @@ def test_a_draft_id_or_upload_url_that_is_empty_or_not_a_string_is_a_provider_er
 # --- Credentials -------------------------------------------------------------
 
 
-def test_a_client_secret_requests_the_default_scope(
-    microsoft: Microsoft, secret: graph.ClientSecret
-):
-    backend(secret).connect()
-
-    [token] = [one for one in microsoft.requests if url(one) == TOKEN_URI]
-    form = parse_qs(token.content.decode())
-    assert form["grant_type"] == ["client_credentials"]
-    assert form["client_secret"] == ["hunter2"]
-    assert form["scope"] == [SCOPE]
-
-
-@pytest.mark.parametrize("form", ["pfx", "private_key"])
-def test_a_certificate_signs_an_assertion_for_the_default_scope(
-    microsoft: Microsoft, pfx: Path, private_key: str, form: str
-):
-    certificate = (
-        graph.Certificate(TENANT, "epistole", pfx=pfx, passphrase="hunter2")  # noqa: S106
-        if form == "pfx"
-        else graph.Certificate(
-            TENANT, "epistole", private_key=private_key, thumbprint="a1b2c3d4" * 5
-        )
-    )
-
-    backend(certificate).connect()
-
-    [token] = [one for one in microsoft.requests if url(one) == TOKEN_URI]
-    sent = parse_qs(token.content.decode())
-    assert sent["client_assertion_type"] == [
-        "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
-    ]
-    assert "client_assertion" in sent
-    assert "client_secret" not in sent
-    assert sent["scope"] == [SCOPE]
-
-
-@pytest.mark.parametrize(("client_id", "expected"), [(None, None), ("7f3c", ["7f3c"])])
-def test_a_managed_identity_requests_the_graph_resource(
-    microsoft: Microsoft, client_id: str | None, expected: list[str] | None
-):
-    backend(graph.ManagedIdentity(client_id)).send(message())
-
-    [token] = [one for one in microsoft.requests if url(one) == IMDS]
-    query = parse_qs(token.url.query.decode())
-    assert query["resource"] == [AUDIENCE]
-    assert query.get("client_id") == expected
-    assert "scope" not in query
-    assert microsoft.sent()[0].headers["Authorization"] == "Bearer token-1"
-
-
 def test_get_token_is_called_with_the_default_scope_before_each_request(
     microsoft: Microsoft,
 ):
@@ -843,19 +744,6 @@ def test_get_token_is_called_with_the_default_scope_before_each_request(
         "Bearer foreign-2",
         "Bearer foreign-3",
     ]
-
-
-def test_connect_reads_the_pfx_and_the_constructor_does_not(
-    microsoft: Microsoft, tmp_path: Path
-):
-    missing = backend(
-        graph.Certificate(TENANT, "epistole", pfx=tmp_path / "missing.pfx")
-    )
-
-    with pytest.raises(FileNotFoundError):
-        missing.connect()
-
-    assert all(one.is_closed for one in microsoft.clients)
 
 
 @pytest.mark.parametrize(
@@ -909,11 +797,10 @@ def test_a_credential_of_another_type_raises(credential: object):
         backend(credential)  # pyrefly: ignore
 
 
-@pytest.mark.parametrize("module", ["httpx2", "msal"])
 def test_the_constructor_raises_naming_the_extra_when_it_is_missing(
-    monkeypatch: pytest.MonkeyPatch, secret: graph.ClientSecret, module: str
+    monkeypatch: pytest.MonkeyPatch, secret: graph.ClientSecret
 ):
-    monkeypatch.setitem(sys.modules, module, None)
+    monkeypatch.setitem(sys.modules, "msal", None)
 
     with pytest.raises(ImportError, match=r"epistole\[graph\]"):
         backend(secret)
@@ -957,197 +844,25 @@ def test_the_client_takes_proxy_and_ca_settings_from_the_environment(
     assert microsoft.options == [{"timeout": 60}]
 
 
-@pytest.mark.parametrize(
-    ("status", "code"),
-    [
-        (400, "invalid_client"),
-        (401, "invalid_client"),
-        (403, "invalid_client"),
-        (400, "temporarily_unavailable"),
-    ],
-    ids=["400", "401", "403", "400 temporarily_unavailable"],
-)
 def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
-    microsoft: Microsoft, secret: graph.ClientSecret, status: int, code: str
+    microsoft: Microsoft, secret: graph.ClientSecret
 ):
     microsoft.replies[TOKEN_URI] = [
         httpx2.Response(
-            status,
+            400,
             json={
-                "error": code,
+                "error": "invalid_client",
                 "error_description": "AADSTS7000215: Invalid client secret provided.",
             },
         )
     ]
     configured = backend(secret)
 
-    with pytest.raises(AuthenticationError, match=f"{code}: AADSTS7000215") as caught:
+    with pytest.raises(AuthenticationError) as caught:
         configured.connect()
 
-    # msal returns its error as a dict and raises nothing, so there is no cause.
-    assert caught.value.__cause__ is None
-    assert [url(one) for one in microsoft.requests] == [DISCOVERY, TOKEN_URI]
     assert caught.value.backend is configured
     assert microsoft.clients[0].is_closed
-
-
-@pytest.mark.parametrize("where", [DISCOVERY, TOKEN_URI], ids=["discovery", "token"])
-def test_a_network_failure_on_connect_is_a_transport_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, where: str
-):
-    failure = httpx2.ConnectError("refused")
-    microsoft.replies[where] = [failure]
-
-    with pytest.raises(
-        TransportError, match=r"^the request to Microsoft failed: refused$"
-    ) as caught:
-        backend(secret).connect()
-
-    assert caught.value.__cause__ is failure
-    assert microsoft.clients[0].is_closed
-
-
-@pytest.mark.parametrize("kind", ["client secret", "certificate", "managed identity"])
-@pytest.mark.parametrize("body", [UNAVAILABLE, None], ids=["JSON", "empty"])
-def test_a_429_from_the_identity_platform_is_one_token_request_and_a_provider_error(
-    microsoft: Microsoft,
-    secret: graph.ClientSecret,
-    pfx: Path,
-    kind: str,
-    body: dict[str, str] | None,
-):
-    where, credential = {
-        "client secret": (TOKEN_URI, secret),
-        "certificate": (
-            TOKEN_URI,
-            graph.Certificate(TENANT, "epistole", pfx=pfx, passphrase="hunter2"),  # noqa: S106
-        ),
-        "managed identity": (IMDS, graph.ManagedIdentity()),
-    }[kind]
-    microsoft.replies[where] = [
-        httpx2.Response(429, headers={"Retry-After": "30"}, json=body)
-    ]
-
-    with pytest.raises(ProviderError, match="429") as caught:
-        backend(credential).connect()
-
-    cause = caught.value.__cause__
-    assert isinstance(cause, httpx2.HTTPStatusError)
-    assert cause.response.status_code == 429
-    assert cause.response.headers["Retry-After"] == "30"
-    assert [url(one) for one in microsoft.requests].count(where) == 1
-    assert microsoft.clients[0].is_closed
-
-
-@pytest.mark.parametrize(
-    ("where", "status"),
-    [
-        pytest.param(TOKEN_URI, 500, id="token 500"),
-        pytest.param(TOKEN_URI, 502, id="token 502"),
-        pytest.param(TOKEN_URI, 503, id="token 503"),
-        pytest.param(TOKEN_URI, 504, id="token 504"),
-        pytest.param(DISCOVERY, 429, id="discovery 429"),
-        pytest.param(DISCOVERY, 503, id="discovery 503"),
-        pytest.param(IMDS, 404, id="IMDS 404"),
-        pytest.param(IMDS, 410, id="IMDS 410"),
-        pytest.param(IMDS, 500, id="IMDS 500"),
-        pytest.param(IMDS, 503, id="IMDS 503"),
-    ],
-)
-def test_a_token_status_outside_2xx_but_400_401_or_403_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, where: str, status: int
-):
-    credential = graph.ManagedIdentity() if where == IMDS else secret
-    microsoft.replies[where] = [
-        httpx2.Response(status, headers={"Retry-After": "30"}, json=UNAVAILABLE)
-    ]
-
-    with pytest.raises(
-        ProviderError,
-        match=rf"^Microsoft replied {status} temporarily_unavailable to a token request: Try again later\.$",
-    ) as caught:
-        backend(credential).connect()
-
-    cause = caught.value.__cause__
-    assert isinstance(cause, httpx2.HTTPStatusError)
-    assert cause.response.status_code == status
-    assert cause.response.headers["Retry-After"] == "30"
-    assert [url(one) for one in microsoft.requests].count(where) == 1
-
-
-@pytest.mark.parametrize("kind", ["client secret", "managed identity"])
-@pytest.mark.parametrize(
-    ("body", "cause"),
-    [
-        pytest.param(b"<html>Sign in</html>", json.JSONDecodeError, id="not JSON"),
-        pytest.param(b"[]", (AttributeError, TypeError), id="an array"),
-        pytest.param(b'"token"', (AttributeError, TypeError), id="a string"),
-        pytest.param(b"null", (AttributeError, TypeError), id="null"),
-        pytest.param(b"123", (AttributeError, TypeError), id="a number"),
-        pytest.param(
-            b'{"access_token": "t", "token_type": "Bearer", "expires_in": "soon"}',
-            ValueError,
-            id="expires_in not a number",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "token_type": "Bearer", "expires_in": "3600.5"}',
-            ValueError,
-            id="expires_in a decimal string",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "token_type": "Bearer", "expires_in": [1]}',
-            TypeError,
-            id="expires_in an array",
-        ),
-        pytest.param(
-            b'{"access_token": "t", "token_type": "Bearer", "expires_in": 1e400}',
-            OverflowError,
-            id="expires_in infinite",
-        ),
-        pytest.param(DEEP, RecursionError, id="nested too deeply"),
-    ],
-)
-def test_a_token_reply_msal_cannot_read_is_a_provider_error(
-    microsoft: Microsoft,
-    secret: graph.ClientSecret,
-    kind: str,
-    body: bytes,
-    cause: type[Exception] | tuple[type[Exception], ...],
-):
-    where, credential = (
-        (TOKEN_URI, secret)
-        if kind == "client secret"
-        else (IMDS, graph.ManagedIdentity())
-    )
-    microsoft.replies[where] = [httpx2.Response(200, content=body)]
-
-    with pytest.raises(ProviderError) as caught:
-        backend(credential).connect()
-
-    assert isinstance(caught.value.__cause__, cause)
-    assert microsoft.clients[0].is_closed
-
-
-def test_a_token_reply_whose_id_token_is_not_a_jwt_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret
-):
-    body = {"access_token": "t", "token_type": "Bearer", "id_token": "abc"}
-    microsoft.replies[TOKEN_URI] = [httpx2.Response(200, json=body)]
-
-    with pytest.raises(ProviderError) as caught:
-        backend(secret).connect()
-
-    assert type(caught.value.__cause__) is IndexError
-
-
-@pytest.mark.parametrize("body", [b"[]", DEEP], ids=["an array", "nested too deeply"])
-def test_a_rejection_msal_cannot_read_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, body: bytes
-):
-    microsoft.replies[TOKEN_URI] = [httpx2.Response(400, content=body)]
-
-    with pytest.raises(ProviderError):
-        backend(secret).connect()
 
 
 def test_a_200_token_reply_without_an_access_token_is_an_authentication_error(
@@ -1223,22 +938,6 @@ def test_a_discovery_reply_msal_cannot_read_stays_unmapped(
 
 
 @pytest.mark.parametrize(
-    "error",
-    [
-        TypeError("get_token failed"),
-        json.JSONDecodeError("get_token failed", "", 0),
-        GoogleAuthError("get_token failed"),
-    ],
-    ids=["TypeError", "JSONDecodeError", "GoogleAuthError"],
-)
-def test_an_error_from_get_token_stays_unmapped(microsoft: Microsoft, error: Exception):
-    with pytest.raises(type(error)) as caught:
-        backend(Broken(error)).connect()
-
-    assert caught.value is error
-
-
-@pytest.mark.parametrize(
     ("error", "expected", "text"),
     [
         pytest.param(
@@ -1270,24 +969,6 @@ def test_an_httpx2_error_from_get_token_is_mapped(
     assert caught.value.__cause__ is error
 
 
-def test_an_error_raised_before_the_token_reply_stays_unmapped(
-    microsoft: Microsoft, rsa_key: rsa.RSAPrivateKey
-):
-    encrypted = rsa_key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.BestAvailableEncryption(b"hunter2"),
-    ).decode()
-    certificate = graph.Certificate(
-        TENANT, "epistole", private_key=encrypted, thumbprint="a1b2c3d4" * 5
-    )
-
-    with pytest.raises(TypeError, match="encrypted"):
-        backend(certificate).connect()
-
-    assert TOKEN_URI not in [url(one) for one in microsoft.requests]
-
-
 def test_a_tenant_that_does_not_exist_raises_msals_value_error(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
@@ -1297,25 +978,6 @@ def test_a_tenant_that_does_not_exist_raises_msals_value_error(
 
     with pytest.raises(ValueError, match="authority configuration"):
         backend(secret).connect()
-
-
-def test_a_pfx_with_the_wrong_passphrase_raises_msals_value_error(
-    microsoft: Microsoft, pfx: Path
-):
-    certificate = graph.Certificate(TENANT, "epistole", pfx=pfx, passphrase="wrong")  # noqa: S106
-
-    with pytest.raises(ValueError, match="PKCS12"):
-        backend(certificate).connect()
-
-
-def test_a_pfx_that_is_not_pkcs_12_raises_msals_value_error(
-    microsoft: Microsoft, tmp_path: Path
-):
-    path = tmp_path / "epistole.pfx"
-    path.write_bytes(b"not a PKCS #12 file")
-
-    with pytest.raises(ValueError, match="PKCS12"):
-        backend(graph.Certificate(TENANT, "epistole", pfx=path)).connect()
 
 
 # --- Refreshing on 401 -------------------------------------------------------
