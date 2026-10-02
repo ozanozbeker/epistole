@@ -1,6 +1,7 @@
 import ast
 import importlib.metadata
 import importlib.resources
+import json
 import re
 import subprocess
 import sys
@@ -8,6 +9,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 import epistole
 from epistole import exceptions, gmail, graph, smtp
@@ -40,6 +43,78 @@ def test_the_http_backends_import_without_any_extra():
     # None in sys.modules makes an import raise, as if the extra were not installed.
     code = "import sys; sys.modules.update(dict.fromkeys(['httpx2', 'google.auth', 'msal', 'markdown_it'])); from epistole import GmailBackend, GraphBackend"
     subprocess.run([sys.executable, "-c", code], check=True)  # noqa: S603
+
+
+ISSUER = """
+import sys
+
+sys.modules[sys.argv[1]] = None
+import httpx2
+
+TENANT = "https://login.microsoftonline.com/contoso.onmicrosoft.com"
+
+
+def reply(request):
+    if request.url.path.endswith("/openid-configuration"):
+        endpoints = {
+            "authorization_endpoint": f"{TENANT}/oauth2/v2.0/authorize",
+            "token_endpoint": f"{TENANT}/oauth2/v2.0/token",
+            "issuer": f"{TENANT}/v2.0",
+        }
+        return httpx2.Response(200, json=endpoints)
+
+    token = {"access_token": "token-1", "token_type": "Bearer", "expires_in": 3600}
+    return httpx2.Response(200, json=token)
+
+
+build = httpx2.Client
+httpx2.Client = lambda **options: build(transport=httpx2.MockTransport(reply), **options)
+"""
+"""Block the module named by the first argument, then send every request to a fake issuer."""
+
+
+@pytest.mark.parametrize(
+    ("blocked", "connect"),
+    [
+        pytest.param(
+            "msal",
+            "from epistole import GmailBackend, gmail\n"
+            "credential = gmail.ServiceAccount(sys.argv[2], subject='reports@example.com')\n"
+            "GmailBackend(from_address='reports@example.com', credential=credential).connect().close()",
+            id="gmail without msal",
+        ),
+        pytest.param(
+            "google.auth",
+            "from epistole import GraphBackend, graph\n"
+            "credential = graph.ClientSecret('contoso.onmicrosoft.com', 'epistole', 'hunter2')\n"
+            "GraphBackend(from_address='reports@example.com', credential=credential).connect().close()",
+            id="graph without google-auth",
+        ),
+    ],
+)
+def test_each_http_backend_gets_a_token_without_the_other_extra(
+    tmp_path: Path, blocked: str, connect: str
+):
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    path = tmp_path / "service-account.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "client_email": "epistole@project.iam.gserviceaccount.com",
+                "private_key": key.private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption(),
+                ).decode(),
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+    )
+    # Run a fresh interpreter, because an earlier test may already have imported epistole._msal or epistole._google_auth here.
+    code = f"{ISSUER}\n{connect}"
+
+    subprocess.run([sys.executable, "-c", code, blocked, str(path)], check=True)  # noqa: S603
 
 
 def test_every_dependency_belongs_to_an_extra():

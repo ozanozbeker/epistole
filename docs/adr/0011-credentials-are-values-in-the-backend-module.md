@@ -8,7 +8,7 @@ The Gmail values are `epistole.gmail.ServiceAccount` and `epistole.gmail.Authori
 Epistole also accepts an object with `get_token` in the shape `azure.core.credentials.TokenCredential` defines, and uses it unchanged.
 It accepts nothing else: no bare token string, no callable, no vendor client.
 The value holds inputs only.
-`connect()` builds the `msal` or `google-auth` object and adapts it to Epistole's private token-source shape.
+`connect()` builds the `msal` or `google-auth` object and adapts it to Epistole's private tokens shape.
 SMTP OAuth takes a Graph or Gmail value and derives its scope from that value's issuer.
 Consent flows and token storage stay out of scope, as [#2](https://github.com/ozanozbeker/epistole/issues/2) says.
 Decided on [#18](https://github.com/ozanozbeker/epistole/issues/18).
@@ -23,6 +23,9 @@ Amended on [#47](https://github.com/ozanozbeker/epistole/issues/47): `connect()`
 Amended on [#53](https://github.com/ozanozbeker/epistole/issues/53): `connect()` ignores an access token saved in an `AuthorizedUser` file.
 Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): `messages.send` replaces a client-supplied `Message-ID` with its own.
 Amended on [#71](https://github.com/ozanozbeker/epistole/issues/71): a `Password` authenticates through `smtplib.SMTP.auth` with one mechanism, not through `login`.
+Amended on [#104](https://github.com/ozanozbeker/epistole/issues/104): three private modules hold the token code.
+`_tokens` holds the scope for each issuer and purpose.
+`_google_auth` adapts `google-auth`, and `_msal` adapts `msal`.
 
 ## Why
 
@@ -69,7 +72,7 @@ Inferring an audience from `host=` would be a guess.
 `ConfidentialClientApplication.acquire_token_for_client` takes `scopes=["<audience>/.default"]`.
 `ManagedIdentityClient.acquire_token_for_client` takes `resource="<audience>"` and does not accept a scope at all.
 So a single declared scope for all three Graph credentials leaves `ManagedIdentity` with no token path.
-The private token-source adapter picks the spelling from the credential's own type.
+The private tokens adapter picks the spelling from the credential's own type.
 The same rule covers `smtp.OAuth(credential=graph.ManagedIdentity(...))`.
 
 **The Gmail REST backend requests less than SMTP does.**
@@ -211,7 +214,8 @@ No backend would change.
   A server that ignores it and sends a `Username:` challenge receives the password as the username, and replies `535`.
   `login` did the same on a server that offers LOGIN alone, and sent CRAM-MD5 first to one that offers both.
 - The glossary's *Credential* entry now covers a password and none at all.
-  The glossary adds *Token credential* for what `connect()` builds.
+  The glossary adds *Tokens* for what `connect()` builds.
+  Its *Token credential* entry names the caller's object with `get_token`.
 - One Gmail fact needs a real send through a service account: whether `me` resolves to the delegated subject on the `send` endpoint.
 - `messages.send` does not preserve a client-supplied `Message-ID`, and writes its own ([#68](https://github.com/ozanozbeker/epistole/issues/68)).
   That changes no rule here, because `SendResult.message_id` is the id Epistole set (ADR-0004).

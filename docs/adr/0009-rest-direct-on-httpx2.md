@@ -25,6 +25,8 @@ Amended on [#63](https://github.com/ozanozbeker/epistole/issues/63): the Graph a
 Epistole maps that reply by its status, as it maps a Google token reply.
 So `msal` never reads a `5xx` and never raises `MsalServiceError`.
 Epistole also turns off `msal`'s HTTP cache, so `msal` sends every token request on the connection's client.
+Amended on [#104](https://github.com/ozanozbeker/epistole/issues/104): the token code is in `_tokens.py`, and the auth adapters are in `_google_auth.py` and `_msal.py`.
+`_GmailTransport` and `_GraphTransport` subclass `_http.RESTTransport`, which opens the client, gets the first token, and sends each request with the `401` retry.
 
 ## Why
 
@@ -98,7 +100,7 @@ ADR-0004 makes `ProviderError` transient, so a caller retries it.
 The adapter's reply count does not change either, so an error from reading a kept reply propagates unmapped.
 Measured on `msal` 1.38.0: after a refresh received a `400` with body `[]`, the next send raised a raw `AttributeError`.
 Both `msal` clients take `http_cache=`, a public parameter that accepts any dict-like object.
-Epistole passes a `dict` that keeps nothing, so it uses no private `msal` name.
+Epistole passes `_msal._NoCache`, a `dict` that keeps nothing, so it uses no private `msal` name.
 
 **A backend takes a credential, never a client.**
 Unwrapping a built SDK client reads the credential through private attributes: one on Google and three on Graph.
@@ -107,9 +109,9 @@ Accepting a credential covers every vendor shape through one public interface: `
 It also still allows Epistole to build credentials itself later (#2's standing constraint).
 Taking a client would make the backend signature depend on a vendor class.
 
-**Epistole gets the token eagerly, sets the header per send, and refreshes once on `401`.**
+**Epistole gets the token eagerly, sets the header per request, and refreshes once on `401`.**
 ADR-0005 already put token acquisition in `connect()`, so `AuthenticationError` is raised at the same line as SMTP's AUTH.
-The per-send step and the `401` handling copy what the vendors' own clients do.
+The per-request step and the `401` handling copy what the vendors' own clients do.
 `google-auth`'s `AuthorizedSession` calls `before_request` before every call and refreshes once on `401` (`max_refresh_attempts=2`).
 `azure-core`'s bearer policy calls `get_token` before every request and re-acquires once on a `401` challenge.
 The retry re-sends only a request the service has not accepted, so it cannot double-submit.
@@ -159,7 +161,7 @@ It is token freshness, not the backoff policy #2 rules out.
   That covers Entra's discovery and token endpoints and every managed identity endpoint Epistole supports.
   Epistole maps that error to `ProviderError` at every status, `429` included.
   The `ProviderError` message names the status, and the `error` and `error_description` of a body that is a JSON object.
-  The adapter raises a private subclass, so the mapping tells a token reply from a mail endpoint reply.
+  The adapter raises the private subclass `_msal._TokenStatusError`, so `_msal._mapping` maps a token reply by the token table, never by the mail endpoint's.
   A token `429` never maps to `ThrottledError`.
 - **The Graph auth adapter returns a `400`, `401` or `403` to `msal`.**
   An error dict is `AuthenticationError`, and a body `msal` cannot read is `ProviderError`.
@@ -167,13 +169,13 @@ It is token freshness, not the backoff policy #2 rules out.
   A `400`, `401` or `403` from the discovery endpoint stays `msal`'s `ValueError`, unmapped.
   So Graph's token table is Google's, except that a `400`, `401` or `403` body that `msal` cannot read is `ProviderError`.
 - **Epistole turns off `msal`'s HTTP cache.**
-  It passes both `msal` clients `http_cache=`, a `dict` that keeps nothing.
-  So `msal` sends every token request on the connection's client, and the adapter's `replies` counts every reply `msal` reads.
+  `_msal.tokens` passes both `msal` clients `http_cache=_NoCache()`, a `dict` that keeps nothing.
+  So `msal` sends every token request on the connection's client, and `_msal._HttpClient.replies` counts every reply `msal` reads.
 - **A token reply that `google-auth` or `msal` cannot read is `ProviderError`.**
   A proxy login page served with status `200` is one such reply.
   A body that is not a JSON object is another.
   So is a field of the wrong type, such as `expires_in`, `scope` or `id_token`.
-  Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError`.
+  Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError`.
   Measured on `google-auth` 2.57.1 and `msal` 1.38.0.
   A reply nested 10,000 levels deep makes `json` raise `RecursionError` on 3.13.12, and 1,000 levels parse.
   3.14.7 parses 10,000 levels and raises at 100,000, so the tests nest 100,000.
@@ -181,7 +183,7 @@ It is token freshness, not the backoff policy #2 rules out.
   Before any reply, the same classes come from the caller's credential.
   `msal` raises `TypeError` for an encrypted PEM, and `AttributeError` for a public key passed as `private_key`.
   Those stay unmapped.
-  The rule also covers a `GoogleAuthError` that subclasses one of the five, such as `MalformedError`.
+  The rule also covers a `GoogleAuthError` that subclasses one of the six, such as `MalformedError`.
   `google-auth` 2.57.1 raises none after a reply.
 - **An error body or a Graph draft reply that is too deeply nested to parse is unreadable too.**
   An error body then maps by its status alone, and a draft or upload session reply is `ProviderError`.
@@ -200,13 +202,13 @@ It is token freshness, not the backoff policy #2 rules out.
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
   | a Graph token reply's status was outside 2xx and not `400`, `401` or `403` | `httpx2.HTTPStatusError`, which the Graph auth adapter raises before msal reads the reply | `ProviderError` |
-  | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
+  | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |
 
 - **The Graph upload `PUT` goes through the connection's client and never carries the bearer.**
   The upload URL is pre-authenticated on a different host, and the bearer would leak.
-  A shared private HTTP helper attaches the bearer and does the `401` retry.
+  `_http.RESTTransport.request` attaches the bearer and does the `401` retry.
   The upload loop bypasses both and keeps the timeout.
 
 ## Considered options
@@ -240,14 +242,14 @@ It is token freshness, not the backoff policy #2 rules out.
 - **Map a failed refresh by `RefreshError.retryable`.**
   `google.oauth2.reauth` sets it to `False` for any reply that is not JSON, so an `AuthorizedUser` `503` with an empty body reads as permanent.
   Measured on `google-auth` 2.57.1.
-- **Map the five classes from the whole token call, without counting replies.**
+- **Map the six classes from the whole token call, without counting replies.**
   `msal` raises `TypeError` for an encrypted PEM inside the same call, before its token request.
   So a caller's key would read as a transient `ProviderError`.
 - **Check the reply's shape in the auth adapter.**
   The adapter can raise for a body that is not a JSON object.
   It cannot check the fields each library reads, such as `expires_in` and `scope`, without copying the libraries' parsing.
 - **Return the cached token when `msal`'s early refresh raises.**
-  `_MsalTokens.token()` could catch the adapter's error and return a cached token with more than five minutes left.
+  `_msal._MsalTokens.token()` could catch the adapter's error and return a cached token with more than five minutes left.
   That copies `msal`'s fallback into Epistole for a token whose reply held `refresh_in`.
   Declined on #63, because the send's `ProviderError` is transient and the case needs `refresh_in`.
 - **Pass `msal` the classes to fall back on, as `http_exceptions=`.**

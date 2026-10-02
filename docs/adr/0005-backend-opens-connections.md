@@ -55,7 +55,8 @@ Using Graph's four concurrent requests per mailbox takes four connections, not o
 - **Every backend has `connect()`, including Gmail, Graph, `MemoryBackend`, and `ConsoleBackend`.**
   The loop `with backend.connect() as c:` must work unchanged after a backend swap.
   On HTTP, the connection holds a token and, where the transport allows it, one keep-alive link.
-  It refreshes the token through the caller's credential object on each send.
+  Before each request, it gets the token through the caller's credential object, which refreshes one near expiry.
+  On a `401`, it refreshes the token and retries that one request once.
   So an expired token in a long notebook session is not an error.
   Only a failed refresh is.
   On the test doubles, it is a no-op that delegates to the backend.
@@ -115,6 +116,6 @@ Using Graph's four concurrent requests per mailbox takes four connections, not o
 - The glossary gains *Connection*.
   The `Backend` entry no longer lists it under *Avoid*.
 - [#16](https://github.com/ozanozbeker/epistole/issues/16) decides whether the chosen HTTP transport can hold a keep-alive link at all.
-  It also decides how the per-send token refresh works through `google-auth` and `msal`.
+  It also decides how the token refresh works through `google-auth` and `msal`.
 - [#18](https://github.com/ozanozbeker/epistole/issues/18) takes as given that SMTP AUTH, including XOAUTH2, happens in `connect()`.
 - The README's user guide is written against this shape.

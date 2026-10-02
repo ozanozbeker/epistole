@@ -1,6 +1,6 @@
 """`GraphBackend` sends through Microsoft Graph, and `ClientSecret`, `Certificate` and `ManagedIdentity` are the credentials it takes.
 
-The module is public, because a caller imports a credential value from its backend's module (ADR-0011). `epistole._graph` holds the code that needs the extra, so `from epistole import GraphBackend` works without it.
+The module is public, because a caller imports a credential value from its backend's module (ADR-0011). `epistole._graph` and `epistole._msal` hold the code that needs the extra, so `from epistole import GraphBackend` works without it.
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, override
 
+from epistole import _tokens
 from epistole._backend import Backend, TokenCredential
 
 if TYPE_CHECKING:
@@ -60,24 +61,14 @@ class GraphBackend(Backend):
             raise TypeError(msg)
 
         # A job without the extra fails at construction rather than on its first send (ADR-0009).
-        _check_extra("GraphBackend")
+        _tokens.require(credential, "graph")
         self._credential = credential
 
     @override
     def _open(self) -> Transport:
-        from epistole._graph import connect  # noqa: PLC0415
+        from epistole._graph import _GraphTransport  # noqa: PLC0415
 
-        return connect(self._credential)
-
-
-def _check_extra(dependent: str, /) -> None:
-    """Raise `ImportError` naming `epistole[graph]` unless `httpx2` and `msal` import."""
-    try:
-        import httpx2  # noqa: F401, PLC0415
-        import msal  # noqa: F401, PLC0415
-    except ImportError as error:
-        msg = f"{dependent} needs httpx2 and msal, so install the extra: pip install 'epistole[graph]'"
-        raise ImportError(msg) from error
+        return _GraphTransport.connect(self._credential)
 
 
 @dataclass(frozen=True)

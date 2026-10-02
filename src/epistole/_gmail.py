@@ -1,47 +1,33 @@
-"""`_GmailTransport` posts each message to the Gmail API, and `_Request` sends `google-auth`'s token requests on the connection's client.
+"""`_GmailTransport` posts each message to the Gmail API, as base64url RFC 5322.
 
-`epistole.gmail` imports this module only after checking the extra, because it imports `httpx2` and `google-auth`.
+`epistole.gmail` imports this module only after checking the extra, because it imports `httpx2`.
 """
 
 from __future__ import annotations
 
 import base64
 import json
-from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
-
-import httpx2
-from google.auth.credentials import TokenState
-from google.auth.exceptions import GoogleAuthError
-from google.auth.exceptions import TransportError as GoogleTransportError
-from google.auth.transport import Request
-from google.oauth2.credentials import Credentials as UserCredentials
-from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+from typing import TYPE_CHECKING, Any, override
 
 from epistole import _http
 from epistole._rfc5322 import build
+from epistole._tokens import REPLY_ERRORS
 from epistole.exceptions import (
     AuthenticationError,
     EpistoleError,
     ProviderError,
     RejectedError,
     ThrottledError,
-    TransportError,
 )
-from epistole.gmail import AuthorizedUser, ServiceAccount
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Mapping
 
-    from google.auth.credentials import Credentials
+    import httpx2
 
-    from epistole._backend import Submission, TokenCredential
+    from epistole._backend import Submission
     from epistole._result import Refusal
-
-_SCOPE = "https://www.googleapis.com/auth/gmail.send"
-"""Narrower than the `https://mail.google.com/` SMTP needs, which also grants reading and deleting messages (ADR-0011)."""
 
 _SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 """`me` names the mailbox the access token was issued for (ADR-0011)."""
@@ -58,66 +44,11 @@ _THROTTLED = frozenset(
 """The `errors[].reason` values that make a `403` a `ThrottledError` (ADR-0004)."""
 
 
-def connect(
-    credential: ServiceAccount | AuthorizedUser | TokenCredential,
-) -> _GmailTransport:
-    """Build the client and the tokens, and get the first token."""
-    client: httpx2.Client = _http.client()
-    with ExitStack() as on_failure:
-        on_failure.callback(client.close)
-        tokens: _http.Tokens = _tokens(credential, client, _SCOPE)
-        with _mapping():
-            tokens.token()
+class _GmailTransport(_http.RESTTransport):
+    """`GmailBackend` opens this transport."""
 
-        on_failure.pop_all()
-
-    return _GmailTransport(client, tokens)
-
-
-def token(credential: ServiceAccount | AuthorizedUser, scope: str) -> str:
-    """Return one access token for `scope`.
-
-    SMTP sends a token once in `AUTH`, so the client closes before this returns.
-    """
-    with _http.client() as client:
-        tokens: _http.Tokens = _tokens(credential, client, scope)
-        with _mapping():
-            return tokens.token()
-
-
-def _tokens(
-    credential: ServiceAccount | AuthorizedUser | TokenCredential,
-    client: httpx2.Client,
-    scope: str,
-) -> _http.Tokens:
-    """Build the tokens for `credential`, reading its file if it has one."""
-    match credential:
-        case ServiceAccount(path=path, subject=subject):
-            credentials: Credentials = (
-                ServiceAccountCredentials.from_service_account_file(
-                    path, scopes=[scope], subject=subject
-                )
-            )
-        case AuthorizedUser(path=path):
-            consent: dict[str, Any] = json.loads(Path(path).read_text(encoding="utf-8"))
-            # Every connect() requests a token for this scope, so an expired or revoked refresh token raises there (ADR-0011).
-            consent.pop("token", None)
-            consent.pop("expiry", None)
-            credentials = UserCredentials.from_authorized_user_info(
-                consent, scopes=[scope]
-            )
-        case _:
-            return _http.ForeignTokens(credential, scope)
-
-    return _GoogleTokens(credentials, _Request(client))
-
-
-class _GmailTransport:
-    """`GmailBackend` opens this transport, which holds the connection's client and tokens."""
-
-    def __init__(self, client: httpx2.Client, tokens: _http.Tokens, /) -> None:
-        self._client = client
-        self._tokens = tokens
+    vendor = "Google"
+    purpose = "gmail"
 
     def submit(self, submission: Submission, /) -> Mapping[str, Refusal]:
         """Post the RFC 5322 message as base64url `raw`."""
@@ -132,81 +63,33 @@ class _GmailTransport:
             raise RejectedError(msg)
 
         raw: str = base64.urlsafe_b64encode(data).decode("ascii")
-        with _mapping():
-            _http.request(
-                self._client,
-                self._tokens,
-                "POST",
-                _SEND,
-                content=json.dumps({"raw": raw}).encode(),
-            )
+        with self.mapping():
+            self.request("POST", _SEND, content=json.dumps({"raw": raw}).encode())
 
         return {}
 
-    def close(self) -> None:
-        """Close the client."""
-        self._client.close()
+    @staticmethod
+    @override
+    def _mapped(response: httpx2.Response) -> EpistoleError:
+        """Return the Epistole error for a status outside 2xx, preferring a row qualified by a reason in any entry of `errors[]` (ADR-0004)."""
+        status: int = response.status_code
+        reasons, detail = _envelope(response)
+        label: str = " ".join([str(status), *reasons])
+        msg = f"Gmail replied {label}: {detail}"
+        if status == HTTPStatus.TOO_MANY_REQUESTS or (
+            status == HTTPStatus.FORBIDDEN and not _THROTTLED.isdisjoint(reasons)
+        ):
+            return ThrottledError(msg, retry_after=_http.retry_after(response))
 
+        if status in {HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND} or (
+            status == HTTPStatus.FORBIDDEN and "domainPolicy" in reasons
+        ):
+            return RejectedError(msg)
 
-@contextmanager
-def _mapping() -> Generator[None]:
-    """Raise the Epistole error for a native failure, by the Gmail mapping in ADR-0004."""
-    try:
-        yield
-    except httpx2.HTTPStatusError as error:
-        raise _mapped(error.response) from error
-    except httpx2.TransportError as error:
-        msg = f"the request to Google failed: {error}"
-        raise TransportError(msg) from error
-    except httpx2.HTTPError as error:
-        msg = f"Google's reply could not be read: {error}"
-        raise ProviderError(msg) from error
-    except GoogleAuthError as error:
-        # _Request raises google-auth's TransportError from the httpx2 error, so a network failure or a token reply other than 200 is one level down (ADR-0009).
-        cause: BaseException | None = error.__cause__
-        if isinstance(cause, httpx2.TransportError):
-            msg = f"the token request to Google failed: {cause}"
-            raise TransportError(msg) from cause
+        if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
+            return AuthenticationError(msg)
 
-        if isinstance(cause, httpx2.HTTPStatusError):
-            raise _token_mapped(cause.response) from cause
-
-        msg = f"the credential could not get an access token: {error}"
-        raise AuthenticationError(msg) from error
-
-
-def _mapped(response: httpx2.Response) -> EpistoleError:
-    """Return the Epistole error for a status outside 2xx, preferring a row qualified by a reason in any entry of `errors[]` (ADR-0004)."""
-    status: int = response.status_code
-    reasons, detail = _envelope(response)
-    label: str = " ".join([str(status), *reasons])
-    msg = f"Gmail replied {label}: {detail}"
-    if status == HTTPStatus.TOO_MANY_REQUESTS or (
-        status == HTTPStatus.FORBIDDEN and not _THROTTLED.isdisjoint(reasons)
-    ):
-        return ThrottledError(msg, retry_after=_http.retry_after(response))
-
-    if status in {HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND} or (
-        status == HTTPStatus.FORBIDDEN and "domainPolicy" in reasons
-    ):
-        return RejectedError(msg)
-
-    if status in {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}:
-        return AuthenticationError(msg)
-
-    return ProviderError(msg)
-
-
-def _token_mapped(response: httpx2.Response) -> EpistoleError:
-    """Return the Epistole error for a token reply other than `200`, by its status alone (ADR-0009)."""
-    status: int = response.status_code
-    error, description = _http.oauth_error(response)
-    label: str = f"{status} {error}" if error else str(status)
-    msg = f"Google's token endpoint replied {label}: {description}"
-    if status in _http.CREDENTIAL_REJECTED:
-        return AuthenticationError(msg)
-
-    return ProviderError(msg)
+        return ProviderError(msg)
 
 
 def _envelope(response: httpx2.Response) -> tuple[list[str], str]:
@@ -220,82 +103,5 @@ def _envelope(response: httpx2.Response) -> tuple[list[str], str]:
             if isinstance(one, dict) and one.get("reason")
         ]
         return reasons, str(error.get("message", ""))
-    except _http.REPLY_ERRORS:
+    except REPLY_ERRORS:
         return [], response.reason_phrase
-
-
-class _GoogleTokens:
-    """The tokens of a `google-auth` credential."""
-
-    def __init__(self, credentials: Credentials, request: _Request, /) -> None:
-        self._credentials = credentials
-        self._request = request
-
-    def token(self) -> str:
-        """Return the credential's token, refreshing it once it is within google-auth's expiry margin."""
-        # before_request would also start google-auth's background Regional Access Boundary lookup on this client.
-        if self._credentials.token_state is not TokenState.FRESH:
-            return self.refresh()
-
-        return cast("str", self._credentials.token)
-
-    def refresh(self) -> str:
-        """Refresh the credential's token, even before its expiry."""
-        replies: int = self._request.replies
-        try:
-            self._credentials.refresh(self._request)
-        except _http.REPLY_ERRORS as error:
-            # With no new 200, these come from the caller's file rather than from google-auth reading a reply (ADR-0009).
-            if self._request.replies == replies:
-                raise
-
-            msg = f"Google's token reply could not be read: {error}"
-            raise ProviderError(msg) from error
-
-        return cast("str", self._credentials.token)
-
-
-class _Request(Request):
-    """A request adapter that sends `google-auth`'s token requests on the connection's client, so they share its timeout, proxy and CA (ADR-0009)."""
-
-    def __init__(self, client: httpx2.Client, /) -> None:
-        self._client = client
-        self.replies = 0
-        """How many `200` replies this adapter has returned to `google-auth`."""
-
-    @override
-    def __call__(
-        self,
-        url: str,
-        method: str = "GET",
-        body: bytes | None = None,
-        headers: Mapping[str, str] | None = None,
-        timeout: float | None = None,
-        **kwargs: object,
-    ) -> _Response:
-        """Raise `google.auth.exceptions.TransportError` for any status but `200`, the one `google-auth` accepts, so it never retries a token request (ADR-0009).
-
-        Ignore `timeout`, because the client's 60 seconds covers token requests too.
-        """
-        try:
-            response = self._client.request(method, url, content=body, headers=headers)
-        except httpx2.TransportError as error:
-            raise GoogleTransportError(error) from error
-
-        if response.status_code != HTTPStatus.OK:
-            msg = f"Google's token endpoint replied {response.status_code}"
-            status = httpx2.HTTPStatusError(
-                msg, request=response.request, response=response
-            )
-            raise GoogleTransportError(status) from status
-
-        self.replies += 1
-        return _Response(response.status_code, response.headers, response.content)
-
-
-class _Response(NamedTuple):
-    """The status, headers and body of an `httpx2` response, under the names `google-auth` reads."""
-
-    status: int
-    headers: Mapping[str, str]
-    data: bytes

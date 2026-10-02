@@ -22,7 +22,7 @@ from smtplib import (
 )
 from typing import TYPE_CHECKING, Literal, cast, override
 
-from epistole import gmail, graph
+from epistole import _tokens, gmail, graph
 from epistole._address import addr_spec
 from epistole._backend import Backend, TokenCredential, _domain
 from epistole._result import Refusal
@@ -45,8 +45,14 @@ if TYPE_CHECKING:
 
 __all__ = ["OAuth", "Password", "SMTPBackend"]
 
-_GRAPH_VALUES = (graph.ClientSecret, graph.Certificate, graph.ManagedIdentity)
-_GMAIL_VALUES = (gmail.ServiceAccount, gmail.AuthorizedUser)
+_ISSUED = (
+    graph.ClientSecret,
+    graph.Certificate,
+    graph.ManagedIdentity,
+    gmail.ServiceAccount,
+    gmail.AuthorizedUser,
+)
+"""The credentials whose issuer `OAuth` reads, so it takes no `scope` with one."""
 
 _TIMEOUT = 60
 """Seconds each socket operation may take. No setting changes it (ADR-0017)."""
@@ -59,12 +65,6 @@ _TOO_BIG = 552
 
 _PERMANENT = 5
 """RFC 5321: a reply code that starts with this digit is a permanent failure."""
-
-_OUTLOOK_AUDIENCE = "https://outlook.office365.com"
-"""Exchange Online's audience for SMTP AUTH, which `_graph.token` requests as a resource or as a scope by the credential's type (ADR-0011)."""
-
-_GMAIL_SCOPE = "https://mail.google.com/"
-"""Gmail requires it for XOAUTH2, though it also grants reading and deleting every message (ADR-0011)."""
 
 
 class SMTPBackend(Backend):
@@ -118,11 +118,7 @@ class SMTPBackend(Backend):
 
         # A job without the extra fails at construction rather than on its first send (ADR-0009).
         if isinstance(credential, OAuth):
-            wrapped: object = credential.credential
-            if isinstance(wrapped, _GRAPH_VALUES):
-                graph._check_extra(f"OAuth over a graph.{type(wrapped).__name__}")  # noqa: SLF001
-            elif isinstance(wrapped, _GMAIL_VALUES):
-                gmail._check_extra(f"OAuth over a gmail.{type(wrapped).__name__}")  # noqa: SLF001
+            _tokens.require(credential.credential, "smtp")
 
         self._host = host
         self._port = port
@@ -255,7 +251,7 @@ class OAuth:
 
     def __post_init__(self) -> None:
         """Raise `TypeError` for a credential of another type, for a `TokenCredential` without `scope`, or for any other credential with it (ADR-0011)."""
-        issued: bool = isinstance(self.credential, (*_GRAPH_VALUES, *_GMAIL_VALUES))
+        issued: bool = isinstance(self.credential, _ISSUED)
         name: str = type(self.credential).__name__
         if not issued and not isinstance(self.credential, TokenCredential):
             msg = f"credential= is a {name}. Pass a value from epistole.graph or epistole.gmail, or an object with get_token()."
@@ -272,18 +268,7 @@ class OAuth:
 
 def _xoauth2(oauth: OAuth) -> str:
     """Return the XOAUTH2 initial response, with a token from `oauth.credential`."""
-    credential = oauth.credential
-    if isinstance(credential, _GRAPH_VALUES):
-        from epistole import _graph  # noqa: PLC0415
-
-        token: str = _graph.token(credential, _OUTLOOK_AUDIENCE)
-    elif isinstance(credential, _GMAIL_VALUES):
-        from epistole import _gmail  # noqa: PLC0415
-
-        token = _gmail.token(credential, _GMAIL_SCOPE)
-    else:
-        token = credential.get_token(cast("str", oauth.scope)).token
-
+    token: str = _tokens.token(oauth.credential, "smtp", scope=oauth.scope)
     return f"user={oauth.username}\x01auth=Bearer {token}\x01\x01"
 
 
