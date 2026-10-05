@@ -494,6 +494,7 @@ source = { editable = "." }
 
 [package.optional-dependencies]
 all = [
+    { name = "cryptography" },
     { name = "google-auth" },
     { name = "httpx2" },
     { name = "markdown-it-py" },
@@ -504,6 +505,7 @@ gmail = [
     { name = "httpx2" },
 ]
 graph = [
+    { name = "cryptography" },
     { name = "httpx2" },
     { name = "msal" },
 ]
@@ -529,6 +531,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", marker = "extra == 'graph'", specifier = ">=38.0.3" },
     { name = "epistole", extras = ["gmail", "graph", "markdown"], marker = "extra == 'all'" },
     { name = "google-auth", marker = "extra == 'gmail'", specifier = ">=2.57" },
     { name = "httpx2", marker = "extra == 'gmail'", specifier = ">=2.12,<3" },

@@ -22,7 +22,7 @@ __all__ = ["Certificate", "ClientSecret", "GraphBackend", "ManagedIdentity"]
 class GraphBackend(Backend):
     """A Graph backend sends each message through Microsoft Graph, as JSON.
 
-    `connect()` builds one HTTP client and gets an access token. So a rejected credential raises `AuthenticationError` on that line. A tenant ID that does not exist in Entra raises `msal`'s `ValueError` there instead. It sends nothing to Graph, so an app without the `Mail.Send` permission raises on the first send instead. Every request times out after 60 seconds, and no setting changes it. See ADR-0005 and ADR-0009.
+    `connect()` builds one HTTP client and gets an access token. So a rejected credential raises `AuthenticationError` on that line, and so does a tenant ID that does not exist in Entra. It sends nothing to Graph, so an app without the `Mail.Send` permission raises on the first send instead. Every request times out after 60 seconds, and no setting changes it. See ADR-0005 and ADR-0009.
 
     Every request names the from address's mailbox as `/users/{addr-spec}`. No request uses `/me`, because an app-only token has no signed-in user. See ADR-0012.
 

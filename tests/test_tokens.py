@@ -1,5 +1,8 @@
 import base64
+import binascii
+import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -540,6 +543,50 @@ def test_a_certificate_signs_an_assertion_rather_than_send_a_secret(
     assert "client_secret" not in form
 
 
+def test_a_pfx_signs_with_ps256_and_sends_its_certificate(
+    issuer: Issuer, pfx_certificate: graph.Certificate, pfx: Path
+):
+    _tokens.tokens(pfx_certificate, "graph", issuer.client).token()
+
+    [token] = issuer.tokens()
+    assertion = parse_qs(token.content.decode())["client_assertion"][0]
+    segment = re.search(r"eyJ[\w-]+", assertion)
+    assert segment is not None
+    header = json.loads(
+        base64.urlsafe_b64decode(segment[0] + "=" * (-len(segment[0]) % 4))
+    )
+    _, signed, _ = pkcs12.load_key_and_certificates(pfx.read_bytes(), b"hunter2")
+    assert signed is not None
+    der = signed.public_bytes(serialization.Encoding.DER)
+    assert header["alg"] == "PS256"
+    assert (
+        header["x5t#S256"]
+        == base64.urlsafe_b64encode(hashlib.sha256(der).digest()).decode()
+    )
+    # msal keeps the PEM body's line breaks in x5c.
+    assert ["".join(one.split()) for one in header["x5c"]] == [
+        base64.b64encode(der).decode()
+    ]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no /dev/fd")
+def test_a_pfx_is_read_once(issuer: Issuer, pfx: Path):
+    # A pipe gives its bytes to the first read only, as a shell's process substitution does.
+    read, write = os.pipe()
+    os.write(write, pfx.read_bytes())
+    os.close(write)
+    piped = graph.Certificate(
+        TENANT,
+        "epistole",
+        pfx=Path(f"/dev/fd/{read}"),
+        passphrase="hunter2",  # noqa: S106
+    )
+    try:
+        assert _tokens.tokens(piped, "graph", issuer.client).token() == "token-1"
+    finally:
+        os.close(read)
+
+
 @pytest.mark.parametrize(("client_id", "expected"), [(None, None), ("7f3c", ["7f3c"])])
 def test_a_managed_identity_requests_a_resource_for_its_client_id(
     issuer: Issuer,
@@ -630,6 +677,43 @@ def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
     else:
         # msal returns its error as a dict and raises nothing, so there is no cause.
         assert caught.value.__cause__ is None
+
+
+CONFIDENTIAL = ["secret", "certificate", "pfx_certificate"]
+"""The credential fixtures whose msal client fetches the tenant's OpenID configuration when it is built."""
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+@pytest.mark.parametrize("fixture", CONFIDENTIAL)
+def test_a_discovery_status_of_400_401_or_403_is_an_authentication_error(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str, status: int
+):
+    body = {"error": "invalid_tenant", "error_description": "Tenant not found."}
+    issuer.replies[DISCOVERY] = [httpx2.Response(status, json=body)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        _tokens.tokens(request.getfixturevalue(fixture), "graph", issuer.client)
+
+    assert str(caught.value) == (
+        f"Microsoft replied {status} invalid_tenant to a token request: Tenant not found."
+    )
+    assert type(caught.value.__cause__) is ValueError
+    assert issuer.tokens() == []
+
+
+@pytest.mark.parametrize("fixture", CONFIDENTIAL)
+def test_a_discovery_reply_msal_cannot_read_is_a_provider_error_for_every_credential(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    issuer.replies[DISCOVERY] = [httpx2.Response(200, content=b"<html>Sign in</html>")]
+
+    with pytest.raises(ProviderError) as caught:
+        _tokens.tokens(request.getfixturevalue(fixture), "graph", issuer.client)
+
+    cause = caught.value.__cause__
+    assert type(cause) is ValueError
+    assert str(caught.value) == f"Microsoft's token reply could not be read: {cause}"
+    assert issuer.tokens() == []
 
 
 WITHOUT_A_TOKEN = [
@@ -1086,14 +1170,29 @@ def rewritten(
 @pytest.fixture
 def spoiled(
     request: pytest.FixtureRequest,
+    *,
     tmp_path: Path,
     service_account: gmail.ServiceAccount,
     pfx: Path,
     rsa_key: rsa.RSAPrivateKey,
+    private_key: str,
 ) -> _tokens.Credential:
     """Return a credential whose key or file is wrong in the way `request.param` names."""
     garbage = tmp_path / "garbage.pfx"
     garbage.write_bytes(b"not a PKCS #12 file")
+    _, signed, _ = pkcs12.load_key_and_certificates(pfx.read_bytes(), b"hunter2")
+
+    def partial(
+        key: rsa.RSAPrivateKey | None, certificate: x509.Certificate | None
+    ) -> graph.Certificate:
+        path = tmp_path / "partial.pfx"
+        path.write_bytes(
+            pkcs12.serialize_key_and_certificates(
+                b"epistole", key, certificate, None, serialization.NoEncryption()
+            )
+        )
+        return graph.Certificate(TENANT, "epistole", pfx=path)
+
     spoil: dict[str, Callable[[], _tokens.Credential]] = {
         "token_uri not a string": lambda: rewritten(service_account, token_uri=123),
         "no client_email": lambda: rewritten(service_account, client_email=None),
@@ -1111,6 +1210,18 @@ def spoiled(
             passphrase="wrong",  # noqa: S106
         ),
         "pfx not PKCS #12": lambda: graph.Certificate(TENANT, "epistole", pfx=garbage),
+        "pfx without a certificate": lambda: partial(rsa_key, None),
+        "pfx without a private key": lambda: partial(None, signed),
+        "thumbprint not hex": lambda: graph.Certificate(
+            TENANT, "epistole", private_key=private_key, thumbprint="AB:CD:EF"
+        ),
+        "thumbprint empty": lambda: graph.Certificate(
+            TENANT, "epistole", private_key=private_key, thumbprint=""
+        ),
+        "private key empty": lambda: graph.Certificate(
+            TENANT, "epistole", private_key="", thumbprint="a1b2c3d4" * 5
+        ),
+        "tenant_id empty": lambda: graph.ClientSecret("", "epistole", "hunter2"),
         "private key encrypted": lambda: graph.Certificate(
             TENANT,
             "epistole",
@@ -1135,6 +1246,12 @@ def spoiled(
         ("no pfx", FileNotFoundError, None),
         ("pfx with the wrong passphrase", ValueError, "PKCS12"),
         ("pfx not PKCS #12", ValueError, "PKCS12"),
+        ("pfx without a certificate", ValueError, "certificate"),
+        ("pfx without a private key", ValueError, "private key"),
+        ("thumbprint not hex", binascii.Error, "Non-hexadecimal"),
+        ("thumbprint empty", ValueError, "thumbprint"),
+        ("private key empty", ValueError, "private_key"),
+        ("tenant_id empty", ValueError, "https url"),
         ("private key encrypted", TypeError, "encrypted"),
     ],
     indirect=["spoiled"],
@@ -1145,13 +1262,41 @@ def test_an_error_raised_before_any_token_reply_stays_unmapped(
     raised: type[Exception],
     text: str | None,
 ):
-    purpose: Purpose = "graph" if isinstance(spoiled, graph.Certificate) else "gmail"
+    purpose: Purpose = (
+        "graph"
+        if isinstance(spoiled, graph.Certificate | graph.ClientSecret)
+        else "gmail"
+    )
 
     with pytest.raises(raised, match=text) as caught:
         _tokens.tokens(spoiled, purpose, issuer.client).token()
 
     assert type(caught.value) is raised
     assert issuer.tokens() == []
+
+
+@pytest.mark.parametrize(
+    "spoiled",
+    [
+        "no pfx",
+        "pfx with the wrong passphrase",
+        "pfx not PKCS #12",
+        "pfx without a certificate",
+        "pfx without a private key",
+        "thumbprint not hex",
+        "thumbprint empty",
+        "private key empty",
+        "tenant_id empty",
+    ],
+    indirect=True,
+)
+def test_an_error_msal_raises_for_a_caller_value_raises_before_any_request(
+    issuer: Issuer, spoiled: _tokens.Credential
+):
+    with pytest.raises((FileNotFoundError, ValueError)):
+        _tokens.tokens(spoiled, "graph", issuer.client)
+
+    assert issuer.requests == []
 
 
 def test_token_closes_its_client_before_it_returns_or_raises(
@@ -1173,7 +1318,9 @@ CLIENT_SECRET = graph.ClientSecret(TENANT, "epistole", "hunter2")
 GMAIL_EXTRA = (
     "httpx2 and google-auth, so install the extra: pip install 'epistole[gmail]'"
 )
-GRAPH_EXTRA = "httpx2 and msal, so install the extra: pip install 'epistole[graph]'"
+GRAPH_EXTRA = (
+    "httpx2, msal and cryptography, so install the extra: pip install 'epistole[graph]'"
+)
 
 
 @pytest.mark.parametrize(

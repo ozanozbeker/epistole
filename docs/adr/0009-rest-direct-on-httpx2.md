@@ -35,6 +35,12 @@ Amended on [#113](https://github.com/ozanozbeker/epistole/issues/113): a `200` t
 That holds when the reply's body names an `error` too.
 It also holds on App Service, Azure ML and Arc, where `msal` turns such a reply into an error dict.
 `google-auth` and `msal` each keep some of these tokens, so each auth adapter checks a token before it returns one.
+Amended on [#116](https://github.com/ozanozbeker/epistole/issues/116): a tenant that does not exist is `AuthenticationError`.
+A discovery reply that `msal` cannot read is `ProviderError`.
+`_msal` reads a pfx and checks a key and thumbprint before `msal` builds its client, so a caller's error during the build raises before any reply.
+The reply count alone then tells it from an error reading a discovery reply.
+`_msal` passes `msal` the pfx's key and certificate as PEM, so the pfx is read once and the assertion stays PS256.
+`msal` then also sends the certificate in the assertion's `x5c` header.
 
 ## Why
 
@@ -129,7 +135,8 @@ It is token freshness, not the backoff policy #2 rules out.
 
 - **The extras are defined as follows.**
   `gmail` is `google-auth` and `httpx2`.
-  `graph` is `msal` and `httpx2`.
+  `graph` is `msal`, `httpx2` and `cryptography`.
+  `_msal` reads a pfx with `cryptography` itself, so the extra names it rather than relying on `msal`'s own requirement.
   `all` is `gmail`, `graph`, and `markdown`.
   The core stays free of runtime dependencies.
 - **`from epistole import GmailBackend` always works.**
@@ -174,7 +181,8 @@ It is token freshness, not the backoff policy #2 rules out.
 - **The Graph auth adapter returns a `400`, `401` or `403` to `msal`.**
   An error dict is `AuthenticationError`, and a body `msal` cannot read is `ProviderError`.
   The dict's `error` never sets the class, so a `400` whose `error` is `temporarily_unavailable` is `AuthenticationError`.
-  A `400`, `401` or `403` from the discovery endpoint stays `msal`'s `ValueError`, unmapped.
+  A `400`, `401` or `403` from the discovery endpoint is `AuthenticationError` too, whatever its body.
+  `msal` raises `ValueError` for it without reading the body, so Epistole maps that `ValueError` by the reply's status.
   So Graph's token table is Google's, except that a `400`, `401` or `403` body that `msal` cannot read is `ProviderError`.
 - **Epistole turns off `msal`'s HTTP cache.**
   `_msal.tokens` passes both `msal` clients `http_cache=_NoCache()`, a `dict` that keeps nothing.
@@ -184,6 +192,7 @@ It is token freshness, not the backoff policy #2 rules out.
   A body that is not a JSON object is another.
   So is a field of the wrong type, such as `expires_in`, `scope` or `id_token`.
   Reading one, the libraries raise `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError`.
+  `msal` also raises `RuntimeError` for a discovery reply with any 2xx status but `200`, so Epistole maps it while `msal` builds a confidential client.
   Measured on `google-auth` 2.57.1 and `msal` 1.38.0.
   A reply nested 10,000 levels deep makes `json` raise `RecursionError` on 3.13.12, and 1,000 levels parse.
   3.14.7 parses 10,000 levels and raises at 100,000, so the tests nest 100,000.
@@ -191,6 +200,9 @@ It is token freshness, not the backoff policy #2 rules out.
   Before any reply, the same classes come from the caller's credential.
   `msal` raises `TypeError` for an encrypted PEM, and `AttributeError` for a public key passed as `private_key`.
   Those stay unmapped.
+  `msal` reads a pfx after its discovery request, and checks that a key and thumbprint are present and that the thumbprint is hex.
+  It raises `ValueError` for any of them it rejects, so `_msal` reads the pfx and runs the same checks first.
+  `msal` parses a PEM key only when it requests a token, where the reply count of that call keeps the error unmapped.
   The rule also covers a `GoogleAuthError` that subclasses one of the six, such as `MalformedError`.
   `google-auth` 2.57.1 raises none after a reply.
 - **An error body or a Graph draft reply that is too deeply nested to parse is unreadable too.**
@@ -211,7 +223,8 @@ It is token freshness, not the backoff policy #2 rules out.
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, and the message names the reply's status and the dict's `error` and `error_description` | `AuthenticationError` |
   | a Graph token reply's status was outside 2xx and not `400`, `401` or `403` | `httpx2.HTTPStatusError`, which the Graph auth adapter raises before msal reads the reply | `ProviderError` |
-  | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
+  | Entra's discovery endpoint replied `400`, `401` or `403` | the `ValueError` msal raised | `AuthenticationError` |
+  | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError`, or msal's `RuntimeError` for a discovery reply with any 2xx status but `200` | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |
   | Epistole pre-check | `None`, per ADR-0004 | `RejectedError` |
 

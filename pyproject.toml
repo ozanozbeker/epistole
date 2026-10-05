@@ -30,7 +30,7 @@ Repository = "https://github.com/ozanozbeker/epistole"
 [project.optional-dependencies]
 all = ["epistole[gmail,graph,markdown]"]
 gmail = ["google-auth>=2.57", "httpx2>=2.12,<3"]
-graph = ["httpx2>=2.12,<3", "msal>=1.38"]
+graph = ["cryptography>=38.0.3", "httpx2>=2.12,<3", "msal>=1.38"]
 markdown = ["markdown-it-py>=4.2"]
 
 [dependency-groups]

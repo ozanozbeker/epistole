@@ -42,7 +42,7 @@ _SCOPES: dict[tuple[Literal["google", "microsoft"], Purpose], str] = {
 
 _EXTRAS: dict[str, tuple[str, tuple[str, ...]]] = {
     "gmail": ("httpx2 and google-auth", ("google.auth", "httpx2")),
-    "graph": ("httpx2 and msal", ("httpx2", "msal")),
+    "graph": ("httpx2, msal and cryptography", ("cryptography", "httpx2", "msal")),
 }
 """The libraries each extra installs, by the names `pip` and `import` use."""
 

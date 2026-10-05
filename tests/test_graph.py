@@ -876,15 +876,13 @@ def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
             id="not JSON",
         ),
         pytest.param(
-            httpx2.Response(200, content=b"[]"), AttributeError, None, id="an array"
+            httpx2.Response(200, content=b"[]"), AttributeError, "", id="an array"
         ),
-        pytest.param(
-            httpx2.Response(200, json={}), KeyError, None, id="an empty object"
-        ),
+        pytest.param(httpx2.Response(200, json={}), KeyError, "", id="an empty object"),
         pytest.param(
             httpx2.Response(200, content=DEEP),
             RecursionError,
-            None,
+            "",
             id="nested too deeply",
         ),
         pytest.param(
@@ -898,6 +896,12 @@ def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
             id="token_endpoint not https",
         ),
         pytest.param(
+            httpx2.Response(200, json=OPENID_CONFIGURATION | {"token_endpoint": 123}),
+            AttributeError,
+            "",
+            id="token_endpoint a number",
+        ),
+        pytest.param(
             httpx2.Response(202, json=OPENID_CONFIGURATION),
             RuntimeError,
             "OIDC Discovery: 202",
@@ -908,19 +912,22 @@ def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
         ),
     ],
 )
-def test_a_discovery_reply_msal_cannot_read_stays_unmapped(
+def test_a_discovery_reply_msal_cannot_read_is_a_provider_error(
     microsoft: Microsoft,
     secret: graph.ClientSecret,
     reply: httpx2.Response,
     raised: type[Exception],
-    text: str | None,
+    text: str,
 ):
     microsoft.replies[DISCOVERY] = [reply]
 
-    with pytest.raises(raised, match=text) as caught:
+    with pytest.raises(ProviderError) as caught:
         backend(secret).connect()
 
-    assert type(caught.value) is raised
+    cause = caught.value.__cause__
+    assert type(cause) is raised
+    assert text in str(cause)
+    assert str(caught.value) == f"Microsoft's token reply could not be read: {cause}"
     assert TOKEN_URI not in [url(one) for one in microsoft.requests]
 
 
@@ -952,15 +959,27 @@ def test_an_error_from_get_token_propagates_unchanged(
     assert caught.value is error
 
 
-def test_a_tenant_that_does_not_exist_raises_msals_value_error(
+def test_a_tenant_that_does_not_exist_is_an_authentication_error(
     microsoft: Microsoft, secret: graph.ClientSecret
 ):
     microsoft.replies[DISCOVERY] = [
-        httpx2.Response(400, json={"error": "invalid_tenant"})
+        httpx2.Response(
+            400,
+            json={
+                "error": "invalid_tenant",
+                "error_description": "AADSTS90002: Tenant not found.",
+            },
+        )
     ]
 
-    with pytest.raises(ValueError, match="authority configuration"):
+    with pytest.raises(AuthenticationError) as caught:
         backend(secret).connect()
+
+    assert str(caught.value) == (
+        "Microsoft replied 400 invalid_tenant to a token request: AADSTS90002: Tenant not found."
+    )
+    assert type(caught.value.__cause__) is ValueError
+    assert TOKEN_URI not in [url(one) for one in microsoft.requests]
 
 
 # --- Refreshing on 401 -------------------------------------------------------

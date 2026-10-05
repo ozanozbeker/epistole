@@ -86,7 +86,7 @@ __all__ = [
 - `from epistole import GmailBackend` and `GraphBackend` always succeed.
   The constructor runs the vendor imports (ADR-0009).
 - The core has no runtime dependency (ADR-0008, ADR-0009).
-  Extras: `gmail` = `google-auth`, `httpx2`; `graph` = `msal`, `httpx2`; `markdown` = `markdown-it-py`; `all` = the three.
+  Extras: `gmail` = `google-auth`, `httpx2`; `graph` = `msal`, `httpx2`, `cryptography`; `markdown` = `markdown-it-py`; `all` = the three.
 - `httpx2` is never re-exported and never appears in a signature (ADR-0009).
 
 ## Message and Address
@@ -858,13 +858,13 @@ A reason in any entry of `errors[]` qualifies a row.
 The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict, or a reply whose `access_token` is missing, empty or not a string.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read or on a discovery `400`, `401` or `403`, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict, or a reply whose `access_token` is missing, empty or not a string.
 `__cause__` is also `None` when a draft or upload session reply holds an `id` or `uploadUrl` that is empty or not a string, because Epistole runs that check itself (ADR-0004).
 
 | Status and `error.code` | Epistole |
 | --- | --- |
 | `400` (including `ErrorMimeContentInvalidBase64String`), `404`, `413`, `415` | `RejectedError` |
-| `401`, any other `403` (including `403` on draft creation), msal error dict from a token `400`, `401` or `403`, second `401` | `AuthenticationError` |
+| `401`, any other `403` (including `403` on draft creation), msal error dict from a token `400`, `401` or `403`, a discovery `400`, `401` or `403`, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
 | `409`, `500`, `503`, `504`, `509`, any other token status outside 2xx (including `429`), a token reply that `msal` cannot read, a `200` token reply whose `access_token` is missing, empty or not a string, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
@@ -884,9 +884,15 @@ Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionEr
 `msal` raises the same classes for a caller's key before its token request, such as `TypeError` for an encrypted PEM.
 Those stay unmapped (ADR-0009).
 Epistole turns off `msal`'s HTTP cache, so `msal` sends every token request on the connection's client (ADR-0009).
-`connect()` raises `msal`'s own `ValueError`, unmapped, for a `400`, `401` or `403` from the discovery endpoint.
+A `400`, `401` or `403` from the discovery endpoint is `AuthenticationError`, whatever its body.
+`msal` raises `ValueError` for it without reading the body, so the rule for a body `msal` cannot read does not apply.
 The discovery endpoint replies `400` to a tenant ID that does not exist in Entra.
-`msal` raises the same `ValueError` for a pfx it cannot read, so Epistole cannot tell that service reply from a caller mistake (ADR-0009).
+Any other discovery reply that `msal` cannot read is `ProviderError`.
+So is a discovery reply with any 2xx status but `200`, such as `202` or `204`, for which `msal` raises `RuntimeError`.
+`connect()` reads a pfx once, before its first request (ADR-0009).
+A pfx it cannot open raises `OSError`.
+A pfx without both a key and a certificate, an empty `private_key` or `thumbprint`, and a `thumbprint` that is not hex each raise `ValueError` before the first request.
+Both stay unmapped.
 
 ## `html_to_text`
 
