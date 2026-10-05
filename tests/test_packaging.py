@@ -133,7 +133,7 @@ def test_each_extra_installs_the_packages_the_spec_lists():
 
     assert installs == {
         "gmail": {"google-auth", "httpx2"},
-        "graph": {"httpx2", "msal"},
+        "graph": {"cryptography", "httpx2", "msal"},
         "markdown": {"markdown-it-py"},
         "all": {"epistole[gmail,graph,markdown]"},
     }

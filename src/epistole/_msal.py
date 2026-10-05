@@ -5,12 +5,20 @@
 
 from __future__ import annotations
 
+import binascii
 from contextlib import contextmanager
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
 import httpx2
 import msal
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    pkcs12,
+)
 
 from epistole import _http
 from epistole._tokens import (
@@ -37,7 +45,7 @@ def tokens(
 ) -> Tokens:
     """Build the tokens for `credential`, in the spelling of `audience` its `msal` client takes (ADR-0011).
 
-    The build runs inside `_mapping`, because `msal` fetches the tenant's OpenID configuration when it builds a confidential client.
+    The build runs inside `_mapping`, because `msal` fetches the tenant's OpenID configuration when it builds a confidential client. An error `msal` raises after that reply comes from reading it, because `_client_credential` reads the caller's pfx and checks their key and thumbprint first (ADR-0009).
     """
     cache = msal.TokenCache()
     http_client = _HttpClient(client)
@@ -61,16 +69,33 @@ def tokens(
                     http_client,
                 )
             case ClientSecret() | Certificate():
-                app = msal.ConfidentialClientApplication(
-                    credential.client_id,
-                    client_credential=_client_credential(credential),
-                    authority=f"https://login.microsoftonline.com/{credential.tenant_id}",
-                    http_client=http_client,
-                    token_cache=cache,
-                    http_cache=_NoCache(),
-                    # Otherwise msal fetches the host's aliases after a rejection, to find a refresh token a client credential never has.
-                    instance_discovery=False,
+                client_credential: str | dict[str, object] = _client_credential(
+                    credential
                 )
+                try:
+                    app = msal.ConfidentialClientApplication(
+                        credential.client_id,
+                        client_credential=client_credential,
+                        authority=f"https://login.microsoftonline.com/{credential.tenant_id}",
+                        http_client=http_client,
+                        token_cache=cache,
+                        http_cache=_NoCache(),
+                        # Otherwise msal fetches the host's aliases after a rejection, to find a refresh token a client credential never has.
+                        instance_discovery=False,
+                    )
+                # msal raises RuntimeError for a 2xx discovery reply other than 200.
+                except (*REPLY_ERRORS, RuntimeError) as error:
+                    last: httpx2.Response | None = http_client.last
+                    # With no reply, the error comes from the caller's values, such as a tenant_id msal cannot put in a URL.
+                    if last is None:
+                        raise
+
+                    if last.status_code in CREDENTIAL_REJECTED:
+                        raise status_error(last, "Microsoft") from error
+
+                    msg = f"Microsoft's token reply could not be read: {error}"
+                    raise ProviderError(msg) from error
+
                 return _MsalTokens(
                     partial(app.acquire_token_for_client, [f"{audience}/.default"]),
                     cache,
@@ -85,10 +110,37 @@ def _client_credential(
     match credential:
         case ClientSecret(client_secret=secret):
             return secret
-        case Certificate(pfx=None, private_key=key, thumbprint=thumbprint):
+        case Certificate(pfx=pfx, passphrase=passphrase) if pfx is not None:
+            return _read_pfx(pfx, passphrase)
+        case Certificate(private_key=key, thumbprint=thumbprint):
+            # msal checks these only after its discovery request.
+            if not key or not thumbprint:
+                msg = "Certificate's private_key and thumbprint must not be empty"
+                raise ValueError(msg)
+
+            # msal decodes the thumbprint the same way, so it raises the same binascii.Error.
+            binascii.a2b_hex(thumbprint)
             return {"private_key": key, "thumbprint": thumbprint}
-        case Certificate(pfx=pfx, passphrase=passphrase):
-            return {"private_key_pfx_path": pfx, "passphrase": passphrase}
+
+
+def _read_pfx(pfx: Path, passphrase: str | None, /) -> dict[str, object]:
+    """Return the key and certificate in `pfx`, in the `client_credential` shape `ConfidentialClientApplication` takes.
+
+    `msal` would read the pfx after its discovery request. It raises `ValueError` for a pfx it cannot read, as it does for an unreadable discovery reply. Passing the PEM key and certificate keeps `msal`'s PS256 assertion, and `msal` also sends the certificate in the `x5c` header. The checks and the passphrase's encoding copy `msal`'s `_parse_pfx` and `_build_client`.
+    """
+    key, certificate, _ = pkcs12.load_key_and_certificates(
+        Path(pfx).read_bytes(), passphrase.encode() if passphrase else None
+    )
+    if key is None or certificate is None:
+        msg = f"{pfx} must hold both a private key and a certificate"
+        raise ValueError(msg)
+
+    return {
+        "private_key": key.private_bytes(
+            Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
+        ).decode(),
+        "public_certificate": certificate.public_bytes(Encoding.PEM).decode(),
+    }
 
 
 @contextmanager
