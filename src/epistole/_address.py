@@ -109,3 +109,23 @@ def name_and_addr_spec(address: str) -> tuple[str, str]:
     """
     name, spec = getaddresses([address])[0]
     return str(default.header_factory("Comments", name)), spec
+
+
+def domain(from_address: str) -> str:
+    """Return the from address's domain for a `Message-ID` or an SMTP EHLO, IDNA-encoded when it is not ASCII.
+
+    The empty-label check reads the encoded domain, because the codec reads U+3002 and two other characters as a dot. See ADR-0015.
+    """
+    host: str = addr_spec(from_address).rpartition("@")[2]
+    if not host.isascii():
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError as error:
+            msg = f"{from_address!r} has a domain that cannot be written into a Message-ID or an EHLO: {error}"
+            raise ValueError(msg) from error
+
+    if "" in host.split("."):
+        msg = f"{from_address!r} has a domain with an empty label, which a Message-ID and an EHLO cannot hold"
+        raise ValueError(msg)
+
+    return host

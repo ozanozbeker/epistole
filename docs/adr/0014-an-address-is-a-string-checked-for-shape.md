@@ -12,6 +12,7 @@ Amended on [#58](https://github.com/ozanozbeker/epistole/issues/58): SMTP and Gm
 Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): an address that holds a surrogate is a `ValueError` (ADR-0016), and `Address()` names the argument that holds one.
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): an address, or an argument of `Address()`, that is not a `str` is a `TypeError` (ADR-0004).
 SMTP checks for `SMTPUTF8` itself on every message that needs UTF-8 headers, so ADR-0004's SMTP mapping loses the `SMTPNotSupportedError` row.
+Amended on [#105](https://github.com/ozanozbeker/epistole/issues/105): each transport parses an address again where it needs the parts, rather than reading parts stored at the check.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -195,7 +196,10 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   The docstring says so.
 - **The check and the split each backend needs are one mechanism.**
   The `getaddresses` call that validates shape produces exactly the pair Graph's `toRecipients` needs and the addr-spec SMTP's envelope needs.
-  An implementation that recomputes it at the transport is doing the work twice.
+  Epistole still parses the address again at each call site that needs the parts.
+  A parse takes under 10 µs on Python 3.13.12, and one send to one recipient parses about 8 times.
+  Storing the parts at the check would add private state to `Message` and `Backend` and change 10 call sites.
+  It would save about 50 µs a send.
 - **`getaddresses` silently repairs some input.**
   `'ada @example.com'` becomes `'ada@example.com'`.
   Epistole reports nothing, because the addr-spec it will send is the repaired one and it is sound.

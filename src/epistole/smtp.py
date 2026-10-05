@@ -23,8 +23,8 @@ from smtplib import (
 from typing import TYPE_CHECKING, Literal, cast, override
 
 from epistole import _tokens, gmail, graph
-from epistole._address import addr_spec
-from epistole._backend import Backend, TokenCredential, _domain
+from epistole._address import addr_spec, domain
+from epistole._backend import Backend, TokenCredential
 from epistole._result import Refusal
 from epistole._rfc5322 import build
 from epistole.exceptions import (
@@ -141,7 +141,7 @@ class SMTPBackend(Backend):
         # smtplib's own default context checks no certificate.
         context: ssl.SSLContext = ssl.create_default_context()
         # smtplib's default EHLO name is socket.getfqdn(), which sends the machine's hostname and can wait seconds on reverse DNS.
-        name: str = _domain(self.from_address)
+        name: str = domain(self.from_address)
         smtp: SMTP = (
             SMTP_SSL(
                 self._host,
