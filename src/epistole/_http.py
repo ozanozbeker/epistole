@@ -33,20 +33,21 @@ def client() -> httpx2.Client:
 
 
 @contextmanager
-def request_mapping(vendor: str) -> Generator[None]:
+def request_mapping(vendor: str, /, *, token: bool = False) -> Generator[None]:
     """Raise the Epistole error for a request that failed, or for a reply that could not be read (ADR-0004).
 
-    A status outside 2xx passes, so the caller maps it by its own table.
+    A status outside 2xx passes, so the caller maps it by its own table. `token` puts "token" in the message, because a mail request to the same vendor would read the same.
     """
+    kind: str = "token " if token else ""
     try:
         yield
     except httpx2.HTTPStatusError:
         raise
     except httpx2.TransportError as error:
-        msg = f"the request to {vendor} failed: {error}"
+        msg = f"the {kind}request to {vendor} failed: {error}"
         raise TransportError(msg) from error
     except httpx2.HTTPError as error:
-        msg = f"{vendor}'s reply could not be read: {error}"
+        msg = f"{vendor}'s {kind}reply could not be read: {error}"
         raise ProviderError(msg) from error
 
 

@@ -13,7 +13,7 @@ import httpx2
 import msal
 
 from epistole import _http
-from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, oauth_error
+from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, status_error
 from epistole.exceptions import AuthenticationError, ProviderError
 from epistole.graph import Certificate, ClientSecret, ManagedIdentity
 
@@ -89,19 +89,11 @@ def _client_credential(
 def _mapping() -> Generator[None]:
     """Raise the Epistole error for a failed token request, by the Graph token rows in ADR-0009."""
     try:
-        with _http.request_mapping("Microsoft"):
+        with _http.request_mapping("Microsoft", token=True):
             yield
-    except _TokenStatusError as error:
-        raise _token_mapped(error.response) from error
-
-
-def _token_mapped(response: httpx2.Response) -> ProviderError:
-    """Return the `ProviderError` for a token reply `msal` never read, naming its status and its RFC 6749 error (ADR-0009)."""
-    status: int = response.status_code
-    error, description = oauth_error(response)
-    label: str = f"{status} {error}" if error else str(status)
-    msg = f"Microsoft replied {label} to a token request: {description}"
-    return ProviderError(msg)
+    except httpx2.HTTPStatusError as error:
+        # Only token requests run here, so a status error is always a token reply's (ADR-0009).
+        raise status_error(error.response, "Microsoft") from error
 
 
 class _MsalTokens:
@@ -121,6 +113,7 @@ class _MsalTokens:
     def token(self) -> str:
         """Return the cached token, or a new one once the cached one is within five minutes of expiry."""
         replies: int = self._http_client.replies
+        self._http_client.rejected = None
         with _mapping():
             try:
                 result: dict[str, Any] = self._acquire()
@@ -132,12 +125,19 @@ class _MsalTokens:
                 msg = f"Microsoft's token reply could not be read: {error}"
                 raise ProviderError(msg) from error
 
-        if "access_token" not in result:
-            # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
-            msg = f"the credential could not get an access token: {result.get('error')}: {result.get('error_description')}"
+        if "access_token" in result:
+            return result["access_token"]
+
+        # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
+        if self._http_client.rejected is not None:
+            raise status_error(self._http_client.rejected, "Microsoft")
+
+        if "error" not in result:
+            msg = "Microsoft's token reply holds no access token."
             raise AuthenticationError(msg)
 
-        return result["access_token"]
+        msg = f"the credential could not get an access token: {result['error']}: {result.get('error_description')}"
+        raise AuthenticationError(msg)
 
     def refresh(self) -> str:
         """Drop the cached tokens and return a new one, because `acquire_token_for_client` takes no `force_refresh`."""
@@ -159,6 +159,8 @@ class _HttpClient:
         self._client = client
         self.replies = 0
         """How many replies this adapter has returned to `msal`."""
+        self.rejected: httpx2.Response | None = None
+        """The last reply this adapter returned to `msal` if it was a `400`, `401` or `403`, so `_MsalTokens` can name its status, which `msal`'s error dict drops."""
 
     def get(
         self,
@@ -184,17 +186,19 @@ class _HttpClient:
         )
 
     def _to_msal(self, response: httpx2.Response) -> httpx2.Response:
-        """Count `response` and return it to `msal`, or raise `_TokenStatusError` for a status outside 2xx that does not reject the credential (ADR-0009)."""
-        if not response.is_success and response.status_code not in CREDENTIAL_REJECTED:
+        """Count `response` and return it to `msal`, or raise `httpx2.HTTPStatusError` for a status outside 2xx that does not reject the credential (ADR-0009)."""
+        # Azure Arc answers its first request with a 401 challenge, so a later reply clears it.
+        self.rejected = (
+            response if response.status_code in CREDENTIAL_REJECTED else None
+        )
+        if not response.is_success and self.rejected is None:
             msg = f"Microsoft replied {response.status_code} to a token request"
-            raise _TokenStatusError(msg, request=response.request, response=response)
+            raise httpx2.HTTPStatusError(
+                msg, request=response.request, response=response
+            )
 
         self.replies += 1
         return response
-
-
-class _TokenStatusError(httpx2.HTTPStatusError):
-    """`_HttpClient` raises this for a token reply, so `_mapping` maps it by the token table and never by the mail endpoint's (ADR-0009)."""
 
 
 class _NoCache(dict[str, object]):
