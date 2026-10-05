@@ -247,13 +247,24 @@ class _HttpClient:
         self,
         url: str,
         params: Mapping[str, str] | None = None,
-        data: Mapping[str, str] | None = None,
+        data: Mapping[str, str | bytes] | None = None,
         headers: Mapping[str, str] | None = None,
         **_: object,
     ) -> httpx2.Response:
-        """Ignore any other keyword, as `get` does."""
+        """Send each bytes value in `data` as text, and ignore any other keyword.
+
+        `msal` passes its client assertion as bytes, which `requests` sends unchanged and `httpx2` form-encodes as the bytes' `repr`.
+        """
+        form: dict[str, str] | None = (
+            None
+            if data is None
+            else {
+                key: value.decode() if isinstance(value, bytes) else value
+                for key, value in data.items()
+            }
+        )
         return self._to_msal(
-            self._client.post(url, params=params, data=data, headers=headers)
+            self._client.post(url, params=params, data=form, headers=headers)
         )
 
     def _to_msal(self, response: httpx2.Response) -> httpx2.Response:
