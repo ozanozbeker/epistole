@@ -9,7 +9,7 @@ import json
 from contextlib import contextmanager
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
+from typing import TYPE_CHECKING, Any, NamedTuple, override
 
 import httpx2
 from google.auth.credentials import TokenState
@@ -20,7 +20,7 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 
 from epistole import _http
-from epistole._tokens import REPLY_ERRORS, status_error
+from epistole._tokens import REPLY_ERRORS, status_error, usable
 from epistole.exceptions import AuthenticationError, ProviderError, TransportError
 from epistole.gmail import AuthorizedUser, ServiceAccount
 
@@ -90,11 +90,13 @@ class _GoogleTokens:
 
     def token(self) -> str:
         """Return the credential's token, refreshing it once it is within google-auth's expiry margin."""
+        token: object = self._credentials.token
         # before_request would also start google-auth's background Regional Access Boundary lookup on this client.
-        if self._credentials.token_state is not TokenState.FRESH:
-            return self.refresh()
+        # google-auth keeps the token of a reply it fails to read, so a fresh one may not be usable.
+        if self._credentials.token_state is TokenState.FRESH and usable(token):
+            return token
 
-        return cast("str", self._credentials.token)
+        return self.refresh()
 
     def refresh(self) -> str:
         """Drop the credential's token and request a new one, because google-auth keeps the old token when a grant fails."""
@@ -119,13 +121,11 @@ class _GoogleTokens:
                 raise ProviderError(msg) from error
 
         token: object = self._credentials.token
-        if isinstance(token, str) and token:
-            return token
+        if not usable(token):
+            msg = "Google's token reply holds no access token."
+            raise ProviderError(msg)
 
-        # google-auth treats any token but None as fresh, so token() would return this one again.
-        self._credentials.token = None
-        msg = "Google's token reply holds no access token."
-        raise ProviderError(msg)
+        return token
 
 
 class _Request(Request):

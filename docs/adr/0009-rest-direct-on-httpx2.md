@@ -32,7 +32,9 @@ Every token message names the token request or reply, so it never reads as a mai
 A rejected Graph credential's message names the status, which the auth adapter reads from the reply it returned to `msal`.
 `_msal._TokenStatusError` is gone, because only token requests run inside `_msal._mapping` since [#99](https://github.com/ozanozbeker/epistole/issues/99).
 Amended on [#113](https://github.com/ozanozbeker/epistole/issues/113): a `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError`, because the caller's credential is not at fault.
-Each auth adapter drops such a token, because `google-auth` and `msal` would otherwise return it on the next call.
+That holds when the reply's body names an `error` too.
+It also holds on App Service, Azure ML and Arc, where `msal` turns such a reply into an error dict.
+`google-auth` and `msal` each keep some of these tokens, so each auth adapter checks a token before it returns one.
 
 ## Why
 

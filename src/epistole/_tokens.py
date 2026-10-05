@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import importlib
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeIs, cast
 
 from epistole._backend import TokenCredential
 from epistole.exceptions import AuthenticationError, ProviderError
@@ -193,6 +193,14 @@ def replied(issuer: str, status: int, error: str, description: str, /) -> str:
     """
     label: str = f"{status} {error}" if error else str(status)
     return f"{issuer} replied {label} to a token request: {description}"
+
+
+def usable(token: object, /) -> TypeIs[str]:
+    """Return whether a token reply's `access_token` can be a bearer token.
+
+    `google-auth` and `msal` return the reply's value unchecked, `null` and `""` included.
+    """
+    return isinstance(token, str) and bool(token)
 
 
 def oauth_error(response: httpx2.Response) -> tuple[str, str]:

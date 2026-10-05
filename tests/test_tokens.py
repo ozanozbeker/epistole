@@ -16,9 +16,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
-from google.auth.exceptions import GoogleAuthError, MalformedError
+from google.auth.exceptions import GoogleAuthError, MalformedError, RefreshError
 
-from epistole import _msal, _tokens, gmail, graph
+from epistole import _tokens, gmail, graph
 from epistole._tokens import Purpose
 from epistole.exceptions import (
     AuthenticationError,
@@ -35,6 +35,7 @@ DISCOVERY = (
 MICROSOFT = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
 IMDS = "http://169.254.169.254/metadata/identity/oauth2/token"
 APP_SERVICE = "http://localhost:8081/msi/token"
+AZURE_ML = "http://localhost:46808/msi/token"
 OPENID_CONFIGURATION = {
     "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
     "token_endpoint": MICROSOFT,
@@ -629,12 +630,20 @@ def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
         assert caught.value.__cause__ is None
 
 
+WITHOUT_A_TOKEN = [
+    pytest.param({}, id="missing"),
+    pytest.param({"access_token": None}, id="null"),
+    pytest.param({"access_token": ""}, id="empty"),
+    pytest.param({"access_token": 123}, id="a number"),
+    pytest.param(
+        {"error": "invalid_client", "error_description": "Rejected."}, id="an error"
+    ),
+]
+"""The fields of a `200` token reply that holds no usable access token."""
+
+
 @pytest.mark.parametrize("method", ["token", "refresh"])
-@pytest.mark.parametrize(
-    "access_token",
-    [{}, {"access_token": None}, {"access_token": ""}, {"access_token": 123}],
-    ids=["missing", "null", "empty", "a number"],
-)
+@pytest.mark.parametrize("fields", WITHOUT_A_TOKEN)
 @pytest.mark.parametrize(
     "fixture", ["service_account", "authorized_user", "secret", "managed_identity"]
 )
@@ -642,7 +651,7 @@ def test_a_200_token_reply_without_an_access_token_is_a_provider_error(
     issuer: Issuer,
     request: pytest.FixtureRequest,
     fixture: str,
-    access_token: dict[str, object],
+    fields: dict[str, object],
     method: Literal["token", "refresh"],
 ):
     purpose, where = ISSUERS[fixture]
@@ -650,13 +659,16 @@ def test_a_200_token_reply_without_an_access_token_is_a_provider_error(
     if method == "refresh":
         tokens.token()
 
-    body = {"token_type": "Bearer", "expires_in": 3600} | access_token
+    body = {"token_type": "Bearer", "expires_in": 3600} | fields
     issuer.replies[where] = [httpx2.Response(200, json=body)]
 
     with pytest.raises(ProviderError) as caught:
         tokens.token() if method == "token" else tokens.refresh()
 
     assert str(caught.value) == f"{named(fixture)}'s token reply holds no access token."
+    # google-auth raises RefreshError only for a missing key, and Epistole finds the rest itself.
+    missing = where == GOOGLE and "access_token" not in fields
+    assert type(caught.value.__cause__) is (RefreshError if missing else type(None))
     # google-auth and msal each keep some such tokens, so the next call must request a new one.
     before = len(issuer.tokens())
     assert tokens.token().startswith("token-")
@@ -701,15 +713,71 @@ def test_a_rejected_app_service_identity_keeps_its_message(
     )
 
 
-def test_a_reply_after_a_rejected_one_clears_it(issuer: Issuer):
-    # Azure Arc replies 401 to its first request, and that reply never names a later failure.
-    client = _msal._HttpClient(issuer.client)
-    issuer.replies[IMDS] = [httpx2.Response(401), httpx2.Response(200, json={})]
+@pytest.mark.parametrize("fields", WITHOUT_A_TOKEN)
+@pytest.mark.parametrize(
+    ("variables", "where"),
+    [
+        ({"IDENTITY_ENDPOINT": APP_SERVICE, "IDENTITY_HEADER": "header"}, APP_SERVICE),
+        ({"MSI_ENDPOINT": AZURE_ML, "MSI_SECRET": "secret"}, AZURE_ML),
+    ],
+    ids=["App Service", "Azure ML"],
+)
+def test_a_managed_identity_host_reply_without_an_access_token_is_a_provider_error(
+    issuer: Issuer,
+    monkeypatch: pytest.MonkeyPatch,
+    variables: dict[str, str],
+    where: str,
+    fields: dict[str, object],
+):
+    # msal turns these hosts' replies into an error dict, unlike IMDS's.
+    for name, value in variables.items():
+        monkeypatch.setenv(name, value)
 
-    client.get(IMDS)
-    assert client.rejected is not None
-    client.get(IMDS)
-    assert client.rejected is None
+    issuer.replies[where] = [httpx2.Response(200, json={"expires_in": 3600} | fields)]
+
+    with pytest.raises(ProviderError) as caught:
+        _tokens.tokens(graph.ManagedIdentity(), "graph", issuer.client).token()
+
+    assert str(caught.value) == "Microsoft's token reply holds no access token."
+
+
+def test_an_empty_token_keeps_the_cached_token_msal_falls_back_to(
+    issuer: Issuer,
+    managed_identity: graph.ManagedIdentity,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    now = time.time()
+    tokens = _tokens.tokens(managed_identity, "graph", issuer.client)
+    issuer.replies[IMDS] = [
+        httpx2.Response(200, json={"access_token": "good", "expires_in": 7200})
+    ]
+    assert tokens.token() == "good"
+
+    # msal refreshes a token early after half its lifetime, and returns it if that refresh fails.
+    monkeypatch.setattr(time, "time", lambda: now + 3700)
+    issuer.replies[IMDS] = [
+        httpx2.Response(200, json={"access_token": ""}),
+        httpx2.Response(503),
+    ]
+    with pytest.raises(ProviderError):
+        tokens.token()
+
+    assert tokens.token() == "good"
+
+
+@pytest.mark.parametrize("access_token", ["", 123])
+def test_a_token_google_auth_keeps_from_an_unreadable_reply_is_never_sent(
+    issuer: Issuer, authorized_user: gmail.AuthorizedUser, access_token: object
+):
+    # google-auth sets the token before it fails to split a scope of null.
+    tokens = _tokens.tokens(authorized_user, "gmail", issuer.client)
+    body = {"access_token": access_token, "expires_in": 3600, "scope": None}
+    issuer.replies[GOOGLE] = [httpx2.Response(200, json=body)]
+
+    with pytest.raises(ProviderError):
+        tokens.token()
+
+    assert tokens.token() == "token-1"
 
 
 def test_a_google_auth_error_before_any_token_reply_keeps_its_text(
@@ -727,24 +795,6 @@ def test_a_google_auth_error_before_any_token_reply_keeps_its_text(
         "the credential could not get an access token: The credentials do not contain"
     )
     assert issuer.tokens() == []
-
-
-@pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
-def test_an_error_in_a_200_token_reply_is_an_authentication_error_without_a_status(
-    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
-):
-    _, where = ISSUERS[fixture]
-    body = {"error": "invalid_client", "error_description": "Rejected."}
-    issuer.replies[where] = [httpx2.Response(200, json=body)]
-
-    with pytest.raises(AuthenticationError) as caught:
-        first_token(issuer, request, fixture)
-
-    assert (
-        str(caught.value)
-        == "the credential could not get an access token: invalid_client: Rejected."
-    )
-    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize(

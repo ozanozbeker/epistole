@@ -832,7 +832,7 @@ That is a fact about the message, not about the from address.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, the exception `google-auth` raised on a `200` token reply it cannot read, and `google.auth.exceptions.RefreshError` on a `200` token reply with no `access_token` and on any other failed refresh.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, the exception `google-auth` raised on a `200` token reply it cannot read, and `google.auth.exceptions.RefreshError` on a `200` token reply whose `access_token` key is missing, and on any other failed refresh.
 `__cause__` is `None` on a `200` token reply whose `access_token` is empty or not a string, because Epistole runs that check itself.
 
 | Status and `errors[].reason` | Epistole |
@@ -850,14 +850,15 @@ A `200` token reply that `google-auth` cannot read is `ProviderError`.
 A proxy login page is one, and so is an `expires_in` that is not a number.
 Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
 The same classes raised before the adapter returns a reply stay unmapped (ADR-0009).
-A `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError` too, and the auth adapter drops that token, so the next request gets a new one.
+A `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError` too.
+The auth adapter never sends that token, so the next request gets a new one.
 Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 A reason in any entry of `errors[]` qualifies a row.
 The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict or a token that is empty or not a string.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict, or a reply whose `access_token` is missing, empty or not a string.
 `__cause__` is also `None` when a draft or upload session reply holds an `id` or `uploadUrl` that is empty or not a string, because Epistole runs that check itself (ADR-0004).
 
 | Status and `error.code` | Epistole |
@@ -875,6 +876,7 @@ Epistole maps that error to `ProviderError` at every status, `429` included.
 The `ProviderError` message names the status, and the `error` and `error_description` of a body that is a JSON object.
 The adapter returns a `400`, `401` or `403` to `msal`.
 `msal` returns an error dict when Entra or a managed identity endpoint rejects a credential.
+A `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError`, even when `msal` returns an error dict for it.
 The dict's `error` never sets the class.
 A token reply that `msal` cannot read is `ProviderError`, whatever its status.
 A body that is not a JSON object is one.
