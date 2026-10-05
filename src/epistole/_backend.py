@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from email.utils import localtime, make_msgid
 from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 
-from epistole._address import addr_spec, check_address
+from epistole._address import addr_spec, check_address, domain
 from epistole._message import unresolved_cids
 from epistole._result import SendResult
 from epistole.exceptions import EpistoleError, RecipientsRefusedError, TransportError
@@ -132,7 +132,7 @@ class Connection:
         submission = Submission(
             message=message,
             from_address=self.backend.from_address,
-            message_id=make_msgid(domain=_domain(self.backend.from_address)),
+            message_id=make_msgid(domain=domain(self.backend.from_address)),
             date=localtime(),
         )
 
@@ -264,26 +264,6 @@ class AccessToken(Protocol):
     def expires_on(self) -> int:
         """When the token expires, in seconds since the Unix epoch."""
         ...
-
-
-def _domain(from_address: str) -> str:
-    """Return the from address's domain for a `Message-ID` or an SMTP EHLO, IDNA-encoded when it is not ASCII.
-
-    The empty-label check reads the encoded domain, because the codec reads U+3002 and two other characters as a dot. See ADR-0015.
-    """
-    domain: str = addr_spec(from_address).rpartition("@")[2]
-    if not domain.isascii():
-        try:
-            domain = domain.encode("idna").decode("ascii")
-        except UnicodeError as error:
-            msg = f"{from_address!r} has a domain that cannot be written into a Message-ID or an EHLO: {error}"
-            raise ValueError(msg) from error
-
-    if "" in domain.split("."):
-        msg = f"{from_address!r} has a domain with an empty label, which a Message-ID and an EHLO cannot hold"
-        raise ValueError(msg)
-
-    return domain
 
 
 def _rekey(
