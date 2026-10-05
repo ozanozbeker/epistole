@@ -27,6 +27,10 @@ So `msal` never reads a `5xx` and never raises `MsalServiceError`.
 Epistole also turns off `msal`'s HTTP cache, so `msal` sends every token request on the connection's client.
 Amended on [#104](https://github.com/ozanozbeker/epistole/issues/104): the token code is in `_tokens.py`, and the auth adapters are in `_google_auth.py` and `_msal.py`.
 `_GmailTransport` and `_GraphTransport` subclass `_http.RESTTransport`, which opens the client, gets the first token, and sends each request with the `401` retry.
+Amended on [#112](https://github.com/ozanozbeker/epistole/issues/112): Gmail and Graph word each token error the same way.
+Every token message names the token request or reply, so it never reads as a mail request's.
+A rejected Graph credential's message names the status, which the auth adapter reads from the reply it returned to `msal`.
+`_msal._TokenStatusError` is gone, because only token requests run inside `_msal._mapping` since [#99](https://github.com/ozanozbeker/epistole/issues/99).
 
 ## Why
 
@@ -161,7 +165,7 @@ It is token freshness, not the backoff policy #2 rules out.
   That covers Entra's discovery and token endpoints and every managed identity endpoint Epistole supports.
   Epistole maps that error to `ProviderError` at every status, `429` included.
   The `ProviderError` message names the status, and the `error` and `error_description` of a body that is a JSON object.
-  The adapter raises the private subclass `_msal._TokenStatusError`, so `_msal._mapping` maps a token reply by the token table, never by the mail endpoint's.
+  Only token requests run inside `_msal._mapping`, so it maps every `httpx2.HTTPStatusError` by the token table, never by the mail endpoint's.
   A token `429` never maps to `ThrottledError`.
 - **The Graph auth adapter returns a `400`, `401` or `403` to `msal`.**
   An error dict is `AuthenticationError`, and a body `msal` cannot read is `ProviderError`.
@@ -200,7 +204,7 @@ It is token freshness, not the backoff policy #2 rules out.
   | Google's token endpoint replied with any status but `200` | `httpx2.HTTPStatusError`, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `AuthenticationError` on `400`, `401` or `403`; `ProviderError` otherwise |
   | Google refresh failed otherwise | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
-  | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, so the message carries `error` and `error_description` | `AuthenticationError` |
+  | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, and the message names the reply's status and the dict's `error` and `error_description` | `AuthenticationError` |
   | a Graph token reply's status was outside 2xx and not `400`, `401` or `403` | `httpx2.HTTPStatusError`, which the Graph auth adapter raises before msal reads the reply | `ProviderError` |
   | `google-auth` or `msal` could not read a token reply | the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` the library raised, such as `json.JSONDecodeError` | `ProviderError` |
   | second `401` after the refresh | `httpx2.HTTPStatusError` | `AuthenticationError` |

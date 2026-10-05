@@ -10,11 +10,13 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 
 from epistole._backend import TokenCredential
+from epistole.exceptions import AuthenticationError, ProviderError
 
 if TYPE_CHECKING:
     import httpx2
 
     from epistole import gmail, graph
+    from epistole.exceptions import EpistoleError
 
 type Purpose = Literal["gmail", "graph", "smtp"]
 
@@ -57,7 +59,7 @@ REPLY_ERRORS = (
 CREDENTIAL_REJECTED = frozenset(
     {HTTPStatus.BAD_REQUEST, HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN}
 )
-"""The token reply statuses that reject the credential on both HTTP backends (ADR-0009). `_google_auth` maps each to `AuthenticationError`. `_msal`'s adapter returns each to `msal` for its error dict."""
+"""The token reply statuses that reject the credential on both HTTP backends (ADR-0009). `status_error` maps each to `AuthenticationError`. `_msal`'s adapter also returns each to `msal`, which reads it as an error dict."""
 
 
 class Tokens(Protocol):
@@ -173,6 +175,24 @@ def token(
 
     with _http.client() as client:
         return tokens(credential, purpose, client).token()
+
+
+def status_error(response: httpx2.Response, issuer: str, /) -> EpistoleError:
+    """Return the Epistole error for a token reply outside 2xx, by its status alone (ADR-0009)."""
+    msg: str = replied(issuer, response.status_code, *oauth_error(response))
+    if response.status_code in CREDENTIAL_REJECTED:
+        return AuthenticationError(msg)
+
+    return ProviderError(msg)
+
+
+def replied(issuer: str, status: int, error: str, description: str, /) -> str:
+    """Return the message for a token reply outside 2xx.
+
+    `issuer` is `Google` or `Microsoft`, never the mail service, because SMTP OAuth requests the same tokens. Every token message names the token request or reply, so a caller can tell it from a mail request's.
+    """
+    label: str = f"{status} {error}" if error else str(status)
+    return f"{issuer} replied {label} to a token request: {description}"
 
 
 def oauth_error(response: httpx2.Response) -> tuple[str, str]:

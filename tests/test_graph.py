@@ -866,20 +866,6 @@ def test_a_rejected_credential_is_an_authentication_error_on_the_connect_line(
     assert microsoft.clients[0].is_closed
 
 
-def test_a_200_token_reply_without_an_access_token_is_an_authentication_error(
-    microsoft: Microsoft, secret: graph.ClientSecret
-):
-    microsoft.replies[TOKEN_URI] = [httpx2.Response(200, json={"token_type": "Bearer"})]
-
-    with pytest.raises(AuthenticationError) as caught:
-        backend(secret).connect()
-
-    assert (
-        str(caught.value) == "the credential could not get an access token: None: None"
-    )
-    assert caught.value.__cause__ is None
-
-
 @pytest.mark.parametrize(
     ("reply", "raised", "text"),
     [
@@ -1212,10 +1198,16 @@ def test_a_network_failure_on_a_send_is_a_transport_error_that_closes_the_connec
 
 
 @pytest.mark.parametrize(
-    ("where", "status"), [(SEND_MAIL, 202), (TOKEN_URI, 200)], ids=["send", "token"]
+    ("where", "status", "reply"),
+    [(SEND_MAIL, 202, "reply"), (TOKEN_URI, 200, "token reply")],
+    ids=["send", "token"],
 )
 def test_a_reply_that_does_not_decode_is_a_provider_error(
-    microsoft: Microsoft, secret: graph.ClientSecret, where: str, status: int
+    microsoft: Microsoft,
+    secret: graph.ClientSecret,
+    where: str,
+    status: int,
+    reply: str,
 ):
     microsoft.replies[where] = [
         httpx2.Response(
@@ -1226,7 +1218,7 @@ def test_a_reply_that_does_not_decode_is_a_provider_error(
     ]
 
     with pytest.raises(
-        ProviderError, match=r"^Microsoft's reply could not be read: "
+        ProviderError, match=rf"^Microsoft's {reply} could not be read: "
     ) as caught:
         backend(secret).send(message())
 

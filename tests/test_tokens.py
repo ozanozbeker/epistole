@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
 from google.auth.exceptions import GoogleAuthError, MalformedError
 
-from epistole import _tokens, gmail, graph
+from epistole import _msal, _tokens, gmail, graph
 from epistole._tokens import Purpose
 from epistole.exceptions import (
     AuthenticationError,
@@ -34,6 +34,7 @@ DISCOVERY = (
 )
 MICROSOFT = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
 IMDS = "http://169.254.169.254/metadata/identity/oauth2/token"
+APP_SERVICE = "http://localhost:8081/msi/token"
 OPENID_CONFIGURATION = {
     "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
     "token_endpoint": MICROSOFT,
@@ -288,12 +289,14 @@ def get(credential: Broken, purpose: Purpose, issuer: Issuer) -> str:
     return _tokens.tokens(credential, purpose, issuer.client).token()
 
 
-def replied(where: str, label: str, description: str) -> str:
-    """Return the message for a token reply outside 2xx from `where`, in the words of its issuer's adapter."""
-    if where == GOOGLE:
-        return f"Google's token endpoint replied {label}: {description}"
+def named(fixture: str) -> str:
+    """Return the issuer of the credential `fixture` names, as token messages name it."""
+    return "Google" if ISSUERS[fixture][1] == GOOGLE else "Microsoft"
 
-    return f"Microsoft replied {label} to a token request: {description}"
+
+def replied(fixture: str, label: str, description: str) -> str:
+    """Return the message for a token reply outside 2xx to the credential `fixture` names."""
+    return f"{named(fixture)} replied {label} to a token request: {description}"
 
 
 def granted(request: httpx2.Request) -> str:
@@ -588,10 +591,10 @@ def test_a_token_status_that_does_not_reject_the_credential_is_one_request_and_a
         first_token(issuer, request, fixture)
 
     assert str(caught.value) == replied(
-        where, f"{status} temporarily_unavailable", "Try again later."
+        fixture, f"{status} temporarily_unavailable", "Try again later."
     )
     cause = caught.value.__cause__
-    assert isinstance(cause, httpx2.HTTPStatusError)
+    assert type(cause) is httpx2.HTTPStatusError
     assert cause.response.status_code == status
     assert cause.response.headers["Retry-After"] == "30"
     assert [url(one) for one in issuer.requests].count(where) == 1
@@ -600,7 +603,8 @@ def test_a_token_status_that_does_not_reject_the_credential_is_one_request_and_a
 @pytest.mark.parametrize("code", ["invalid_client", "temporarily_unavailable"])
 @pytest.mark.parametrize("status", [400, 401, 403])
 @pytest.mark.parametrize(
-    "fixture", ["service_account", "authorized_user", "secret", "certificate"]
+    "fixture",
+    ["service_account", "authorized_user", "secret", "certificate", "managed_identity"],
 )
 def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
     issuer: Issuer,
@@ -617,16 +621,113 @@ def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
         first_token(issuer, request, fixture)
 
     assert len(issuer.tokens()) == 1
+    assert str(caught.value) == replied(fixture, f"{status} {code}", "Rejected.")
     if where == GOOGLE:
-        assert str(caught.value) == replied(where, f"{status} {code}", "Rejected.")
-        assert isinstance(caught.value.__cause__, httpx2.HTTPStatusError)
+        assert type(caught.value.__cause__) is httpx2.HTTPStatusError
     else:
         # msal returns its error as a dict and raises nothing, so there is no cause.
-        assert (
-            str(caught.value)
-            == f"the credential could not get an access token: {code}: Rejected."
-        )
         assert caught.value.__cause__ is None
+
+
+@pytest.mark.parametrize(
+    "fixture", ["service_account", "authorized_user", "secret", "managed_identity"]
+)
+def test_a_200_token_reply_without_an_access_token_names_the_missing_token(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    _, where = ISSUERS[fixture]
+    issuer.replies[where] = [
+        httpx2.Response(200, json={"token_type": "Bearer", "expires_in": 3600})
+    ]
+
+    with pytest.raises(AuthenticationError) as caught:
+        first_token(issuer, request, fixture)
+
+    assert str(caught.value) == f"{named(fixture)}'s token reply holds no access token."
+
+
+@pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
+def test_a_rejected_token_reply_without_an_error_names_its_status(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    _, where = ISSUERS[fixture]
+    issuer.replies[where] = [httpx2.Response(400, json={"error_description": "x"})]
+
+    with pytest.raises(AuthenticationError) as caught:
+        first_token(issuer, request, fixture)
+
+    assert str(caught.value) == "Microsoft replied 400 to a token request: x"
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (400, "Unable to load the proper Managed Identity."),
+        (401, "X-IDENTITY-HEADER is invalid."),
+    ],
+)
+def test_a_rejected_app_service_identity_keeps_its_message(
+    issuer: Issuer, monkeypatch: pytest.MonkeyPatch, status: int, message: str
+):
+    monkeypatch.setenv("IDENTITY_ENDPOINT", APP_SERVICE)
+    monkeypatch.setenv("IDENTITY_HEADER", "header")
+    body = {"statusCode": status, "message": message}
+    issuer.replies[APP_SERVICE] = [httpx2.Response(status, json=body)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        _tokens.tokens(graph.ManagedIdentity(), "graph", issuer.client).token()
+
+    # msal names every App Service error invalid_scope.
+    assert (
+        str(caught.value)
+        == f"Microsoft replied {status} invalid_scope to a token request: {status}, {message}"
+    )
+
+
+def test_a_reply_after_a_rejected_one_clears_it(issuer: Issuer):
+    # Azure Arc replies 401 to its first request, and that reply never names a later failure.
+    client = _msal._HttpClient(issuer.client)
+    issuer.replies[IMDS] = [httpx2.Response(401), httpx2.Response(200, json={})]
+
+    client.get(IMDS)
+    assert client.rejected is not None
+    client.get(IMDS)
+    assert client.rejected is None
+
+
+def test_a_google_auth_error_before_any_token_reply_keeps_its_text(
+    issuer: Issuer, authorized_user: gmail.AuthorizedUser
+):
+    consent = json.loads(Path(authorized_user.path).read_text()) | {
+        "refresh_token": None
+    }
+    Path(authorized_user.path).write_text(json.dumps(consent))
+
+    with pytest.raises(AuthenticationError) as caught:
+        _tokens.tokens(authorized_user, "gmail", issuer.client).token()
+
+    assert str(caught.value).startswith(
+        "the credential could not get an access token: The credentials do not contain"
+    )
+    assert issuer.tokens() == []
+
+
+@pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
+def test_an_error_in_a_200_token_reply_is_an_authentication_error_without_a_status(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    _, where = ISSUERS[fixture]
+    body = {"error": "invalid_client", "error_description": "Rejected."}
+    issuer.replies[where] = [httpx2.Response(200, json=body)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        first_token(issuer, request, fixture)
+
+    assert (
+        str(caught.value)
+        == "the credential could not get an access token: invalid_client: Rejected."
+    )
+    assert caught.value.__cause__ is None
 
 
 @pytest.mark.parametrize(
@@ -673,7 +774,7 @@ def test_a_token_error_that_is_not_json_maps_by_its_status_and_reason_phrase(
 
     assert type(caught.value) is raised
     assert str(caught.value) == replied(
-        where, str(reply.status_code), reply.reason_phrase
+        fixture, str(reply.status_code), reply.reason_phrase
     )
 
 
@@ -821,7 +922,7 @@ def test_a_token_reply_that_does_not_decode_is_a_provider_error(
     ]
 
     with pytest.raises(
-        ProviderError, match=rf"^{vendor}'s reply could not be read: "
+        ProviderError, match=rf"^{vendor}'s token reply could not be read: "
     ) as caught:
         first_token(issuer, request, fixture)
 
@@ -833,9 +934,9 @@ def test_a_token_reply_that_does_not_decode_is_a_provider_error(
     [
         ("service_account", GOOGLE, "the token request to Google failed: refused"),
         ("authorized_user", GOOGLE, "the token request to Google failed: refused"),
-        ("secret", DISCOVERY, "the request to Microsoft failed: refused"),
-        ("secret", MICROSOFT, "the request to Microsoft failed: refused"),
-        ("managed_identity", IMDS, "the request to Microsoft failed: refused"),
+        ("secret", DISCOVERY, "the token request to Microsoft failed: refused"),
+        ("secret", MICROSOFT, "the token request to Microsoft failed: refused"),
+        ("managed_identity", IMDS, "the token request to Microsoft failed: refused"),
     ],
 )
 def test_a_network_failure_on_a_token_request_is_a_transport_error(

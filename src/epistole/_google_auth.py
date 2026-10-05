@@ -13,20 +13,15 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast, override
 
 import httpx2
 from google.auth.credentials import TokenState
-from google.auth.exceptions import GoogleAuthError
+from google.auth.exceptions import GoogleAuthError, RefreshError
 from google.auth.exceptions import TransportError as GoogleTransportError
 from google.auth.transport import Request
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 
 from epistole import _http
-from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, oauth_error
-from epistole.exceptions import (
-    AuthenticationError,
-    EpistoleError,
-    ProviderError,
-    TransportError,
-)
+from epistole._tokens import REPLY_ERRORS, status_error
+from epistole.exceptions import AuthenticationError, ProviderError, TransportError
 from epistole.gmail import AuthorizedUser, ServiceAccount
 
 if TYPE_CHECKING:
@@ -70,7 +65,7 @@ def tokens(
 def _mapping() -> Generator[None]:
     """Raise the Epistole error for a failed token request, by the Gmail token rows in ADR-0009."""
     try:
-        with _http.request_mapping("Google"):
+        with _http.request_mapping("Google", token=True):
             yield
     except GoogleAuthError as error:
         # _Request raises google-auth's TransportError from the httpx2 error, so a network failure or a token reply other than 200 is one level down (ADR-0009).
@@ -80,22 +75,10 @@ def _mapping() -> Generator[None]:
             raise TransportError(msg) from cause
 
         if isinstance(cause, httpx2.HTTPStatusError):
-            raise _token_mapped(cause.response) from cause
+            raise status_error(cause.response, "Google") from cause
 
         msg = f"the credential could not get an access token: {error}"
         raise AuthenticationError(msg) from error
-
-
-def _token_mapped(response: httpx2.Response) -> EpistoleError:
-    """Return the Epistole error for a token reply other than `200`, by its status alone (ADR-0009)."""
-    status: int = response.status_code
-    error, description = oauth_error(response)
-    label: str = f"{status} {error}" if error else str(status)
-    msg = f"Google's token endpoint replied {label}: {description}"
-    if status in CREDENTIAL_REJECTED:
-        return AuthenticationError(msg)
-
-    return ProviderError(msg)
 
 
 class _GoogleTokens:
@@ -127,6 +110,13 @@ class _GoogleTokens:
 
                 msg = f"Google's token reply could not be read: {error}"
                 raise ProviderError(msg) from error
+            except RefreshError as error:
+                # After a 200, google-auth raises RefreshError only for a reply without an access token.
+                if self._request.replies == replies:
+                    raise
+
+                msg = "Google's token reply holds no access token."
+                raise AuthenticationError(msg) from error
 
         return cast("str", self._credentials.token)
 
@@ -159,7 +149,7 @@ class _Request(Request):
             raise GoogleTransportError(error) from error
 
         if response.status_code != HTTPStatus.OK:
-            msg = f"Google's token endpoint replied {response.status_code}"
+            msg = f"Google replied {response.status_code} to a token request"
             status = httpx2.HTTPStatusError(
                 msg, request=response.request, response=response
             )
