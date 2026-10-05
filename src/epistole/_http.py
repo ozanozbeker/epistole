@@ -36,7 +36,7 @@ def client() -> httpx2.Client:
 def request_mapping(vendor: str, /, *, token: bool = False) -> Generator[None]:
     """Raise the Epistole error for a request that failed, or for a reply that could not be read (ADR-0004).
 
-    A status outside 2xx passes, so the caller maps it by its own table. `token` puts "token" in the message, because a mail request to the same vendor would read the same.
+    A status outside 2xx passes, so the caller maps it by its own table. `token` puts "token" in the message, so a token request's message differs from a mail request's to the same vendor.
     """
     kind: str = "token " if token else ""
     try:

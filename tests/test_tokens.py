@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
 from google.auth.exceptions import GoogleAuthError, MalformedError
 
-from epistole import _tokens, gmail, graph
+from epistole import _msal, _tokens, gmail, graph
 from epistole._tokens import Purpose
 from epistole.exceptions import (
     AuthenticationError,
@@ -34,6 +34,7 @@ DISCOVERY = (
 )
 MICROSOFT = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
 IMDS = "http://169.254.169.254/metadata/identity/oauth2/token"
+APP_SERVICE = "http://localhost:8081/msi/token"
 OPENID_CONFIGURATION = {
     "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
     "token_endpoint": MICROSOFT,
@@ -602,7 +603,8 @@ def test_a_token_status_that_does_not_reject_the_credential_is_one_request_and_a
 @pytest.mark.parametrize("code", ["invalid_client", "temporarily_unavailable"])
 @pytest.mark.parametrize("status", [400, 401, 403])
 @pytest.mark.parametrize(
-    "fixture", ["service_account", "authorized_user", "secret", "certificate"]
+    "fixture",
+    ["service_account", "authorized_user", "secret", "certificate", "managed_identity"],
 )
 def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
     issuer: Issuer,
@@ -630,7 +632,7 @@ def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
 @pytest.mark.parametrize(
     "fixture", ["service_account", "authorized_user", "secret", "managed_identity"]
 )
-def test_a_200_token_reply_without_an_access_token_says_so(
+def test_a_200_token_reply_without_an_access_token_names_the_missing_token(
     issuer: Issuer, request: pytest.FixtureRequest, fixture: str
 ):
     _, where = ISSUERS[fixture]
@@ -642,6 +644,72 @@ def test_a_200_token_reply_without_an_access_token_says_so(
         first_token(issuer, request, fixture)
 
     assert str(caught.value) == f"{named(fixture)}'s token reply holds no access token."
+
+
+@pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
+def test_a_rejected_token_reply_without_an_error_names_its_status(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    _, where = ISSUERS[fixture]
+    issuer.replies[where] = [httpx2.Response(400, json={"error_description": "x"})]
+
+    with pytest.raises(AuthenticationError) as caught:
+        first_token(issuer, request, fixture)
+
+    assert str(caught.value) == "Microsoft replied 400 to a token request: x"
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (400, "Unable to load the proper Managed Identity."),
+        (401, "X-IDENTITY-HEADER is invalid."),
+    ],
+)
+def test_a_rejected_app_service_identity_keeps_its_message(
+    issuer: Issuer, monkeypatch: pytest.MonkeyPatch, status: int, message: str
+):
+    monkeypatch.setenv("IDENTITY_ENDPOINT", APP_SERVICE)
+    monkeypatch.setenv("IDENTITY_HEADER", "header")
+    body = {"statusCode": status, "message": message}
+    issuer.replies[APP_SERVICE] = [httpx2.Response(status, json=body)]
+
+    with pytest.raises(AuthenticationError) as caught:
+        _tokens.tokens(graph.ManagedIdentity(), "graph", issuer.client).token()
+
+    # msal names every App Service error invalid_scope.
+    assert (
+        str(caught.value)
+        == f"Microsoft replied {status} invalid_scope to a token request: {status}, {message}"
+    )
+
+
+def test_a_reply_after_a_rejected_one_clears_it(issuer: Issuer):
+    # Azure Arc replies 401 to its first request, and that reply never names a later failure.
+    client = _msal._HttpClient(issuer.client)
+    issuer.replies[IMDS] = [httpx2.Response(401), httpx2.Response(200, json={})]
+
+    client.get(IMDS)
+    assert client.rejected is not None
+    client.get(IMDS)
+    assert client.rejected is None
+
+
+def test_a_google_auth_error_before_any_token_reply_keeps_its_text(
+    issuer: Issuer, authorized_user: gmail.AuthorizedUser
+):
+    consent = json.loads(Path(authorized_user.path).read_text()) | {
+        "refresh_token": None
+    }
+    Path(authorized_user.path).write_text(json.dumps(consent))
+
+    with pytest.raises(AuthenticationError) as caught:
+        _tokens.tokens(authorized_user, "gmail", issuer.client).token()
+
+    assert str(caught.value).startswith(
+        "the credential could not get an access token: The credentials do not contain"
+    )
+    assert issuer.tokens() == []
 
 
 @pytest.mark.parametrize("fixture", ["secret", "managed_identity"])

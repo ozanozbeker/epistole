@@ -178,18 +178,21 @@ def token(
 
 
 def status_error(response: httpx2.Response, issuer: str, /) -> EpistoleError:
-    """Return the Epistole error for a token reply outside 2xx, by its status alone (ADR-0009).
-
-    `issuer` is `Google` or `Microsoft`, never the mail service, because SMTP OAuth requests the same tokens. Every token message names the token request or reply, so a caller can tell it from a mail request's.
-    """
-    status: int = response.status_code
-    error, description = oauth_error(response)
-    label: str = f"{status} {error}" if error else str(status)
-    msg = f"{issuer} replied {label} to a token request: {description}"
-    if status in CREDENTIAL_REJECTED:
+    """Return the Epistole error for a token reply outside 2xx, by its status alone (ADR-0009)."""
+    msg: str = replied(issuer, response.status_code, *oauth_error(response))
+    if response.status_code in CREDENTIAL_REJECTED:
         return AuthenticationError(msg)
 
     return ProviderError(msg)
+
+
+def replied(issuer: str, status: int, error: str, description: str, /) -> str:
+    """Return the message for a token reply outside 2xx.
+
+    `issuer` is `Google` or `Microsoft`, never the mail service, because SMTP OAuth requests the same tokens. Every token message names the token request or reply, so a caller can tell it from a mail request's.
+    """
+    label: str = f"{status} {error}" if error else str(status)
+    return f"{issuer} replied {label} to a token request: {description}"
 
 
 def oauth_error(response: httpx2.Response) -> tuple[str, str]:

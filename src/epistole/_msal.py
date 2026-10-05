@@ -13,7 +13,7 @@ import httpx2
 import msal
 
 from epistole import _http
-from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, status_error
+from epistole._tokens import CREDENTIAL_REJECTED, REPLY_ERRORS, replied, status_error
 from epistole.exceptions import AuthenticationError, ProviderError
 from epistole.graph import Certificate, ClientSecret, ManagedIdentity
 
@@ -129,8 +129,16 @@ class _MsalTokens:
             return result["access_token"]
 
         # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
-        if self._http_client.rejected is not None:
-            raise status_error(self._http_client.rejected, "Microsoft")
+        rejected: httpx2.Response | None = self._http_client.rejected
+        if rejected is not None:
+            # msal reads App Service's and Azure ML's error bodies, which oauth_error cannot.
+            msg = replied(
+                "Microsoft",
+                rejected.status_code,
+                result.get("error") or "",
+                result.get("error_description") or rejected.reason_phrase,
+            )
+            raise AuthenticationError(msg)
 
         if "error" not in result:
             msg = "Microsoft's token reply holds no access token."
@@ -160,7 +168,7 @@ class _HttpClient:
         self.replies = 0
         """How many replies this adapter has returned to `msal`."""
         self.rejected: httpx2.Response | None = None
-        """The last reply this adapter returned to `msal` if it was a `400`, `401` or `403`, so `_MsalTokens` can name its status, which `msal`'s error dict drops."""
+        """The last reply this adapter returned to `msal`, if it was a `400`, `401` or `403`. `msal`'s error dict holds no status, so `_MsalTokens` reads it here."""
 
     def get(
         self,
@@ -187,7 +195,7 @@ class _HttpClient:
 
     def _to_msal(self, response: httpx2.Response) -> httpx2.Response:
         """Count `response` and return it to `msal`, or raise `httpx2.HTTPStatusError` for a status outside 2xx that does not reject the credential (ADR-0009)."""
-        # Azure Arc answers its first request with a 401 challenge, so a later reply clears it.
+        # Azure Arc replies 401 to its first request, so each reply resets `rejected`.
         self.rejected = (
             response if response.status_code in CREDENTIAL_REJECTED else None
         )
