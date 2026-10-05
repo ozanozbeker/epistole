@@ -317,6 +317,11 @@ def granted(request: httpx2.Request) -> str:
     return form["scope"][0]
 
 
+def header(jwt: str) -> dict[str, Any]:
+    """Return the header of `jwt`."""
+    return json.loads(base64.urlsafe_b64decode(jwt.partition(".")[0] + "=="))
+
+
 def claims(jwt: str) -> dict[str, Any]:
     """Return the claims of `jwt`, without checking its signature."""
     return json.loads(base64.urlsafe_b64decode(jwt.split(".")[1] + "=="))
@@ -539,7 +544,10 @@ def test_a_certificate_signs_an_assertion_rather_than_send_a_secret(
     assert form["client_assertion_type"] == [
         "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
     ]
-    assert "client_assertion" in form
+    [assertion] = form["client_assertion"]
+    assert len(assertion.split(".")) == 3
+    assert header(assertion)["typ"] == "JWT"
+    assert claims(assertion)["aud"] == MICROSOFT
     assert "client_secret" not in form
 
 
@@ -549,22 +557,18 @@ def test_a_pfx_signs_with_ps256_and_sends_its_certificate(
     _tokens.tokens(pfx_certificate, "graph", issuer.client).token()
 
     [token] = issuer.tokens()
-    assertion = parse_qs(token.content.decode())["client_assertion"][0]
-    segment = re.search(r"eyJ[\w-]+", assertion)
-    assert segment is not None
-    header = json.loads(
-        base64.urlsafe_b64decode(segment[0] + "=" * (-len(segment[0]) % 4))
-    )
+    [assertion] = parse_qs(token.content.decode())["client_assertion"]
+    fields = header(assertion)
     _, signed, _ = pkcs12.load_key_and_certificates(pfx.read_bytes(), b"hunter2")
     assert signed is not None
     der = signed.public_bytes(serialization.Encoding.DER)
-    assert header["alg"] == "PS256"
+    assert fields["alg"] == "PS256"
     assert (
-        header["x5t#S256"]
+        fields["x5t#S256"]
         == base64.urlsafe_b64encode(hashlib.sha256(der).digest()).decode()
     )
     # msal keeps the PEM body's line breaks in x5c.
-    assert ["".join(one.split()) for one in header["x5c"]] == [
+    assert ["".join(one.split()) for one in fields["x5c"]] == [
         base64.b64encode(der).decode()
     ]
 
