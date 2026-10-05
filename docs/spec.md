@@ -832,14 +832,15 @@ That is a fact about the message, not about the from address.
 SMTP never raises `ThrottledError`.
 
 **Gmail mapping (ADR-0004, ADR-0009).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, the exception `google-auth` raised on a `200` token reply it cannot read, and `google.auth.exceptions.RefreshError` on any other failed refresh.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from the Gmail API or a token reply other than `200`, the `httpx2.TransportError` subclass on a network failure, the exception `google-auth` raised on a `200` token reply it cannot read, and `google.auth.exceptions.RefreshError` on a `200` token reply with no `access_token` and on any other failed refresh.
+`__cause__` is `None` on a `200` token reply whose `access_token` is empty or not a string, because Epistole runs that check itself.
 
 | Status and `errors[].reason` | Epistole |
 | --- | --- |
 | `400`, `404`, `403 domainPolicy` | `RejectedError` |
 | `401`, `403 authError`, `403 insufficientPermissions`, any other `403`, a token endpoint `400`, `401` or `403`, any other failed refresh, second `401` | `AuthenticationError` |
 | `403 rateLimitExceeded`, `403 userRateLimitExceeded`, `403 dailyLimitExceeded`, `429` | `ThrottledError` |
-| `5xx`, a `200` token reply that `google-auth` cannot read, any other token endpoint status but `200`, including `429` | `ProviderError` |
+| `5xx`, a `200` token reply that `google-auth` cannot read, a `200` token reply whose `access_token` is missing, empty or not a string, any other token endpoint status but `200`, including `429` | `ProviderError` |
 | network failure, including one during a refresh | `TransportError` |
 
 A `google-auth` error is read one level down.
@@ -849,13 +850,14 @@ A `200` token reply that `google-auth` cannot read is `ProviderError`.
 A proxy login page is one, and so is an `expires_in` that is not a number.
 Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
 The same classes raised before the adapter returns a reply stay unmapped (ADR-0009).
+A `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError` too, and the auth adapter drops that token, so the next request gets a new one.
 Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 A reason in any entry of `errors[]` qualifies a row.
 The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 
 **Graph mapping (ADR-0004, ADR-0009, ADR-0012).**
-`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict.
+`__cause__` is `httpx2.HTTPStatusError` on a non-2xx from Graph or a token reply that `msal` never reads, the `httpx2.TransportError` subclass on a network failure, the exception `msal` raised on a token reply it cannot read, the error from reading a draft or upload session reply that is not a JSON object or has no `id` or `uploadUrl` key, and `None` when `msal` returned an error dict or a token that is empty or not a string.
 `__cause__` is also `None` when a draft or upload session reply holds an `id` or `uploadUrl` that is empty or not a string, because Epistole runs that check itself (ADR-0004).
 
 | Status and `error.code` | Epistole |
@@ -864,7 +866,7 @@ The throttle reasons are read first, then `domainPolicy` (ADR-0004).
 | `401`, any other `403` (including `403` on draft creation), msal error dict from a token `400`, `401` or `403`, second `401` | `AuthenticationError` |
 | `403 ErrorSendAsDenied` | `SenderRefusedError` |
 | `429` | `ThrottledError` |
-| `409`, `500`, `503`, `504`, `509`, any other token status outside 2xx (including `429`), a token reply that `msal` cannot read, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
+| `409`, `500`, `503`, `504`, `509`, any other token status outside 2xx (including `429`), a token reply that `msal` cannot read, a `200` token reply whose `access_token` is missing, empty or not a string, a draft or upload session reply whose `id` or `uploadUrl` is missing, empty, or not a string | `ProviderError` |
 | network failure | `TransportError` |
 
 The auth adapter raises `httpx2.HTTPStatusError` for a token reply outside 2xx but `400`, `401` or `403`, before `msal` reads it (ADR-0009).

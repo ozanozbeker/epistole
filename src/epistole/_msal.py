@@ -125,8 +125,9 @@ class _MsalTokens:
                 msg = f"Microsoft's token reply could not be read: {error}"
                 raise ProviderError(msg) from error
 
-        if "access_token" in result:
-            return result["access_token"]
+        token: object = result.get("access_token")
+        if isinstance(token, str) and token:
+            return token
 
         # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
         rejected: httpx2.Response | None = self._http_client.rejected
@@ -141,20 +142,25 @@ class _MsalTokens:
             raise AuthenticationError(msg)
 
         if "error" not in result:
+            # msal caches a token that is not a string, and would return it again.
+            self._drop()
             msg = "Microsoft's token reply holds no access token."
-            raise AuthenticationError(msg)
+            raise ProviderError(msg)
 
         msg = f"the credential could not get an access token: {result['error']}: {result.get('error_description')}"
         raise AuthenticationError(msg)
 
     def refresh(self) -> str:
         """Drop the cached tokens and return a new one, because `acquire_token_for_client` takes no `force_refresh`."""
+        self._drop()
+        return self.token()
+
+    def _drop(self) -> None:
+        """Remove every access token from `msal`'s cache."""
         for entry in list(
             self._cache.search(msal.TokenCache.CredentialType.ACCESS_TOKEN)
         ):
             self._cache.remove_at(entry)
-
-        return self.token()
 
 
 class _HttpClient:

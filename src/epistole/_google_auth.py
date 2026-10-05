@@ -116,9 +116,16 @@ class _GoogleTokens:
                     raise
 
                 msg = "Google's token reply holds no access token."
-                raise AuthenticationError(msg) from error
+                raise ProviderError(msg) from error
 
-        return cast("str", self._credentials.token)
+        token: object = self._credentials.token
+        if isinstance(token, str) and token:
+            return token
+
+        # google-auth treats any token but None as fresh, so token() would return this one again.
+        self._credentials.token = None
+        msg = "Google's token reply holds no access token."
+        raise ProviderError(msg)
 
 
 class _Request(Request):

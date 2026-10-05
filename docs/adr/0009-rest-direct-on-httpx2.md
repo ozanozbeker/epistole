@@ -31,6 +31,8 @@ Amended on [#112](https://github.com/ozanozbeker/epistole/issues/112): Gmail and
 Every token message names the token request or reply, so it never reads as a mail request's.
 A rejected Graph credential's message names the status, which the auth adapter reads from the reply it returned to `msal`.
 `_msal._TokenStatusError` is gone, because only token requests run inside `_msal._mapping` since [#99](https://github.com/ozanozbeker/epistole/issues/99).
+Amended on [#113](https://github.com/ozanozbeker/epistole/issues/113): a `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError`, because the caller's credential is not at fault.
+Each auth adapter drops such a token, because `google-auth` and `msal` would otherwise return it on the next call.
 
 ## Why
 
@@ -202,7 +204,8 @@ It is token freshness, not the backoff policy #2 rules out.
   | mail endpoint returned non-2xx | `httpx2.HTTPStatusError`; `.response` keeps status, headers, and body | ADR-0004 status tables |
   | connect, TLS, read, write, timeout | the `httpx2.TransportError` subclass raised | `TransportError` |
   | Google's token endpoint replied with any status but `200` | `httpx2.HTTPStatusError`, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `AuthenticationError` on `400`, `401` or `403`; `ProviderError` otherwise |
-  | Google refresh failed otherwise | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
+  | Google refresh failed before any token reply | `google.auth.exceptions.RefreshError` | `AuthenticationError` |
+  | a `200` token reply's `access_token` was missing, empty or not a string | `google.auth.exceptions.RefreshError` for a missing key on Gmail; `None` otherwise | `ProviderError` |
   | Google refresh failed on the network | the `httpx2.TransportError` subclass, which Epistole reads one level down from `google.auth.exceptions.TransportError` | `TransportError` |
   | Entra or a managed identity endpoint rejected the credential with `400`, `401` or `403` | `None`; msal returns an error dict, and the message names the reply's status and the dict's `error` and `error_description` | `AuthenticationError` |
   | a Graph token reply's status was outside 2xx and not `400`, `401` or `403` | `httpx2.HTTPStatusError`, which the Graph auth adapter raises before msal reads the reply | `ProviderError` |

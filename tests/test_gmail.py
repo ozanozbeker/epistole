@@ -633,7 +633,7 @@ def test_an_error_from_get_token_propagates_unchanged(
         ),
         pytest.param(
             httpx2.Response(200, json={"expires_in": 3600}),
-            AuthenticationError,
+            ProviderError,
             RefreshError,
             id="no access token",
         ),

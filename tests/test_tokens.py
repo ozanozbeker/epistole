@@ -629,21 +629,38 @@ def test_a_token_status_of_400_401_or_403_is_an_authentication_error(
         assert caught.value.__cause__ is None
 
 
+@pytest.mark.parametrize("method", ["token", "refresh"])
+@pytest.mark.parametrize(
+    "access_token",
+    [{}, {"access_token": None}, {"access_token": ""}, {"access_token": 123}],
+    ids=["missing", "null", "empty", "a number"],
+)
 @pytest.mark.parametrize(
     "fixture", ["service_account", "authorized_user", "secret", "managed_identity"]
 )
-def test_a_200_token_reply_without_an_access_token_names_the_missing_token(
-    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+def test_a_200_token_reply_without_an_access_token_is_a_provider_error(
+    issuer: Issuer,
+    request: pytest.FixtureRequest,
+    fixture: str,
+    access_token: dict[str, object],
+    method: Literal["token", "refresh"],
 ):
-    _, where = ISSUERS[fixture]
-    issuer.replies[where] = [
-        httpx2.Response(200, json={"token_type": "Bearer", "expires_in": 3600})
-    ]
+    purpose, where = ISSUERS[fixture]
+    tokens = _tokens.tokens(request.getfixturevalue(fixture), purpose, issuer.client)
+    if method == "refresh":
+        tokens.token()
 
-    with pytest.raises(AuthenticationError) as caught:
-        first_token(issuer, request, fixture)
+    body = {"token_type": "Bearer", "expires_in": 3600} | access_token
+    issuer.replies[where] = [httpx2.Response(200, json=body)]
+
+    with pytest.raises(ProviderError) as caught:
+        tokens.token() if method == "token" else tokens.refresh()
 
     assert str(caught.value) == f"{named(fixture)}'s token reply holds no access token."
+    # google-auth and msal each keep some such tokens, so the next call must request a new one.
+    before = len(issuer.tokens())
+    assert tokens.token().startswith("token-")
+    assert len(issuer.tokens()) == before + 1
 
 
 @pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
