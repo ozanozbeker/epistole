@@ -135,6 +135,10 @@ class _MsalTokens:
         if usable(token):
             return token
 
+        if token:
+            # msal caches a truthy token whatever the reply's status, and would return it again.
+            self._drop()
+
         # msal returns its error rather than raising it, so the error has no __cause__ (ADR-0009).
         last: httpx2.Response | None = self._http_client.last
         if last is not None and last.status_code in CREDENTIAL_REJECTED:
@@ -148,10 +152,6 @@ class _MsalTokens:
             raise AuthenticationError(msg)
 
         # The last reply is 2xx here, and msal turns one without a token into an error dict on App Service, Azure ML and Arc.
-        if token:
-            # msal caches a truthy token, and would return it again.
-            self._drop()
-
         msg = "Microsoft's token reply holds no access token."
         raise ProviderError(msg)
 

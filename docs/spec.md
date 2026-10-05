@@ -851,7 +851,7 @@ A proxy login page is one, and so is an `expires_in` that is not a number.
 Epistole maps the `AttributeError`, `LookupError`, `OverflowError`, `RecursionError`, `TypeError` or `ValueError` that `google-auth` raises reading it.
 The same classes raised before the adapter returns a reply stay unmapped (ADR-0009).
 A `200` token reply whose `access_token` is missing, empty or not a string is `ProviderError` too.
-The auth adapter never sends that token, so the next request gets a new one.
+The auth adapter never returns that token, so the next call for a token requests a new one.
 Any other failed refresh is `AuthenticationError`.
 The qualified row applies first, per the precedence rule (ADR-0009).
 A reason in any entry of `errors[]` qualifies a row.

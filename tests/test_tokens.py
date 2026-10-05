@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 from cryptography.x509.oid import NameOID
 from google.auth.exceptions import GoogleAuthError, MalformedError, RefreshError
+from msal.managed_identity import _supported_arc_platforms_and_their_prefixes
 
 from epistole import _tokens, gmail, graph
 from epistole._tokens import Purpose
@@ -36,6 +37,7 @@ MICROSOFT = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/token"
 IMDS = "http://169.254.169.254/metadata/identity/oauth2/token"
 APP_SERVICE = "http://localhost:8081/msi/token"
 AZURE_ML = "http://localhost:46808/msi/token"
+ARC = "http://localhost:40342/metadata/identity/oauth2/token"
 OPENID_CONFIGURATION = {
     "authorization_endpoint": f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0/authorize",
     "token_endpoint": MICROSOFT,
@@ -733,12 +735,59 @@ def test_a_managed_identity_host_reply_without_an_access_token_is_a_provider_err
     for name, value in variables.items():
         monkeypatch.setenv(name, value)
 
-    issuer.replies[where] = [httpx2.Response(200, json={"expires_in": 3600} | fields)]
+    # msal returns an error dict on these hosts unless the reply holds expires_on too.
+    body = {"expires_on": int(time.time()) + 3600} | fields
+    issuer.replies[where] = [httpx2.Response(200, json=body)]
 
     with pytest.raises(ProviderError) as caught:
         _tokens.tokens(graph.ManagedIdentity(), "graph", issuer.client).token()
 
     assert str(caught.value) == "Microsoft's token reply holds no access token."
+
+
+@pytest.mark.parametrize("fields", WITHOUT_A_TOKEN)
+def test_an_arc_reply_without_an_access_token_after_its_401_is_a_provider_error(
+    issuer: Issuer,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fields: dict[str, object],
+):
+    # msal reads the key Arc's 401 names from a fixed directory for each platform.
+    monkeypatch.setitem(
+        _supported_arc_platforms_and_their_prefixes,
+        sys.platform,
+        str(tmp_path),
+    )
+    (tmp_path / "secret.key").write_text("secret")
+    monkeypatch.setenv("IDENTITY_ENDPOINT", ARC)
+    monkeypatch.setenv("IMDS_ENDPOINT", "http://localhost:40342")
+    challenge = {"WWW-Authenticate": "Basic realm=/tokens/secret.key"}
+    issuer.replies[ARC] = [
+        httpx2.Response(401, headers=challenge),
+        httpx2.Response(200, json={"expires_in": 3600} | fields),
+    ]
+
+    with pytest.raises(ProviderError) as caught:
+        _tokens.tokens(graph.ManagedIdentity(), "graph", issuer.client).token()
+
+    assert str(caught.value) == "Microsoft's token reply holds no access token."
+
+
+@pytest.mark.parametrize("fixture", ["secret", "managed_identity"])
+def test_a_rejected_token_reply_never_leaves_its_token_cached(
+    issuer: Issuer, request: pytest.FixtureRequest, fixture: str
+):
+    purpose, where = ISSUERS[fixture]
+    tokens = _tokens.tokens(request.getfixturevalue(fixture), purpose, issuer.client)
+    body = {"access_token": 123, "expires_in": 3600}
+    issuer.replies[where] = [httpx2.Response(400, json=body)]
+
+    with pytest.raises(AuthenticationError):
+        tokens.token()
+
+    before = len(issuer.tokens())
+    assert tokens.token().startswith("token-")
+    assert len(issuer.tokens()) == before + 1
 
 
 def test_an_empty_token_keeps_the_cached_token_msal_falls_back_to(

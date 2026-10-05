@@ -92,7 +92,7 @@ class _GoogleTokens:
         """Return the credential's token, refreshing it once it is within google-auth's expiry margin."""
         token: object = self._credentials.token
         # before_request would also start google-auth's background Regional Access Boundary lookup on this client.
-        # google-auth keeps the token of a reply it fails to read, so a fresh one may not be usable.
+        # google-auth keeps a token refresh rejected, and the token of a reply it fails to read.
         if self._credentials.token_state is TokenState.FRESH and usable(token):
             return token
 
