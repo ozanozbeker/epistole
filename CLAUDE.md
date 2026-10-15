@@ -49,7 +49,7 @@ In practice, that means:
   The first sentence gives the answer.
   The rest gives the reason.
 - Keep the domain word.
-  Simplify the grammar, not the vocabulary: `quarantine`, `partition` and `materialization` stay.
+  Simplify the grammar, not the vocabulary: `submission`, `inline image` and `content id` stay.
 
 ### Say what happens, without figures of speech
 
@@ -58,10 +58,10 @@ Code does not refuse, decide, know, learn, ask, answer or promise: it raises, se
 Data does not land, arrive, ride or survive: the code writes, passes, copies and keeps it.
 
 Give every sentence a verb, including a heading's description or a caption.
-"The decorator, and the spec that puts a quarantine in the graph" becomes "`dd.asset` builds an asset, and `quarantine_spec` adds its quarantine to the asset graph".
+"The backend, and the transport behind each send" becomes "`GmailBackend.connect` opens a connection, and its transport submits each submission to the Gmail API".
 
 Use the word an upstream library already uses, in the meaning it has there.
-A step is Dagster's, a member is Dataframely's, and Polars collects a plan.
+An addr-spec is RFC 5322's, a scope is OAuth's, and `msal` acquires a token.
 Coin a term only for something the code names, such as a function, a class or a setting.
 Where the repo keeps a glossary, define the term there and list the words it replaces beside it.
 

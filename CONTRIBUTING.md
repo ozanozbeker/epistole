@@ -1,9 +1,8 @@
 # Contributing
 
-This file follows the release standard for the maintainer's Python packages, and oxyscraper is its reference repo.
-[How is oxy versioned, documented and released?](https://github.com/ozanozbeker/oxyscraper/issues/22) records each decision and the evidence for it.
-Epistole departs from it in one place: its [Python versions](#python-versions).
-A repo that adopts the standard follows the one-time setup in [oxyscraper's copy](https://github.com/ozanozbeker/oxyscraper/blob/main/CONTRIBUTING.md#a-new-repo).
+This file holds the release standard for the maintainer's Python packages, and Epistole is its reference repo.
+[ADR 0021](docs/adr/0021-epistole-holds-the-release-standard-for-every-package.md) records the decision, and [the CI/CD research note](docs/research/ci-cd-standard.md) holds the evidence.
+A package that adopts the standard follows [Adopting the standard](#adopting-the-standard), and [Epistole's departures](#epistoles-departures) lists where Epistole itself differs.
 
 ## Setup
 
@@ -90,9 +89,11 @@ Below 1.0, a break needs no deprecation period.
 - `test` runs on Ubuntu, macOS and Windows, on every supported Python, against the built wheel.
 - `next-python` runs the newest CPython that has reached its first beta, and it may fail.
 - `lowest` runs the floor Python with each dependency at its floor, and fails under 100% line coverage.
-- `lint` runs every prek hook on every file, and `gitleaks-ci` on each commit the pull request adds.
+- `lint` runs every prek hook on every file except `gitleaks` and `check-added-large-files`, which read staged changes only.
+  It then runs `gitleaks-ci` on each commit the pull request adds.
 - `docs` builds the site.
-  Epistole's examples send mail, so the build runs none of them.
+  The build runs every example.
+  An example with side effects, such as sending mail, runs in a test against a fake instead.
 - `all-green` passes when the jobs above pass.
   The `main` ruleset requires only this job and `title`, so a change to the jobs never touches the ruleset.
 
@@ -101,7 +102,7 @@ pytest turns warnings into errors, so a new upstream deprecation fails the Depen
 ## Tests
 
 Tests are in `tests/`, and `uv run pytest` runs them.
-CI runs them against the built wheel, so `test_packaging.py` fails a change that drops `py.typed` from it.
+CI runs them against the built wheel, not `src/`, so a test that reads a package file, such as `py.typed`, checks what the wheel holds.
 
 `coverage report` fails under 100% line coverage.
 A line that no test can reach takes `# pragma: no cover` and a one-line comment that says why.
@@ -118,24 +119,19 @@ Skip the return-annotation part of `ANN`.
 
 ## Dependencies
 
-Each floor in `pyproject.toml` is as low as the `lowest` job proves.
-A floor rises only in a `deps:` commit, which the changelog shows to users.
+Each runtime floor in `pyproject.toml` is as low as the `lowest` job proves.
+A runtime floor rises only in a `deps:` commit, which the changelog shows to users.
+Set a `dev` floor to the newest release at least 7 days old.
+Raise it by hand in a `chore:` commit with `uv add --dev "<name>>=<version>"`, because users never install the group.
+
 Dependabot moves `uv.lock` and the pinned actions weekly, after a 7-day cooldown.
 Its `chore` and `ci` prefixes keep those pull requests out of the changelog.
-Dependabot does not read `prek.toml`, and it moves only the dependencies `pyproject.toml` declares.
+Dependabot does not read `prek.toml`, and its version updates move only the dependencies `pyproject.toml` declares.
 So `prek-update.yml` updates the hooks and runs `uv lock --upgrade` monthly, with the same 7-day cooldown.
 
 ## Python versions
 
-Epistole supports every CPython from 3.13 on that has not reached its end of life.
-The standard starts at the oldest CPython still supported, and three facts, measured on 2026-09-29, hold Epistole at 3.13:
-
-- `typing.override` needs 3.12, and 8 modules use it.
-- `mimetypes.guess_file_type` needs 3.13.
-- The address check needs the strict `email.utils.getaddresses` from the CVE-2023-27043 fix.
-  3.11 gained it only in 3.11.10 and 3.12 only in 3.12.6, and `requires-python` cannot exclude the earlier patch releases without one `!=` for each.
-
-The rest of the policy is the standard's:
+A package supports every CPython that has not reached its end of life.
 
 - A version joins at its final release.
   Add its classifier in `pyproject.toml` and its entry in the `test` matrix.
@@ -149,6 +145,8 @@ The rest of the policy is the standard's:
 1. release-please keeps a release pull request open with the next version, `CHANGELOG.md` and `uv.lock`.
 2. Merging it makes the App create the tag and the GitHub release.
 3. `release.yml` builds the distributions, and its `pypi` job waits for approval.
+   Before approving, read `git log <previous tag>..<new tag>`.
+   The `main` ruleset requires no review, so this approval is the last check a person makes.
    On the run's page, click **Review deployments**, tick `pypi`, then click **Approve and deploy**.
    The job then uploads the distributions to PyPI with attestations.
 4. After the upload, `release.yml` builds the site and deploys it.
@@ -181,10 +179,77 @@ A release published by hand starts the same workflow, which makes it the recover
 - `GITHUB_TOKEN` cannot run CI on a pull request it opens, and a release it creates starts no workflow.
   So release-please and `prek-update.yml` use the App's token.
 - The `pypi` and `github-pages` environments accept `v*` tags only, and `release.yml` runs on the release's tag.
+- Turn on auto-merge with `gh pr merge --auto --squash`, not the web form.
+  The web form appears to save the squash title it shows (untested), so a later title fix may never reach the commit.
 - A numpydoc `Returns` block starts with a `:` line.
   griffe, which great-docs uses, reads a bare description line as the return type.
 
-## Prose
+## Adopting the standard
+
+1. Copy these from Epistole and replace `epistole` in each:
+   - `.github/dependabot.yml` and `.github/workflows/{ci,pr-title,release-please,release,prek-update}.yml`;
+   - `release-please-config.json`, `prek.toml`, `ruff.toml`, `rumdl.toml`, `tombi.toml`, `pyrefly.toml` and `user_guide/upgrading.qmd`;
+   - from `great-docs.yml`, the `parser`, `dynamic`, `authors` and `seo` keys and the `upgrading.qmd` entry;
+   - from `pyproject.toml`, the `[build-system]`, `[tool.pytest.ini_options]` and `[tool.coverage.*]` tables, the `docs` group, and the `dev` group's tools: `coverage`, `prek`, `pyrefly`, `pytest`, `ruff`, `rumdl` and `tombi`;
+   - from `.gitignore`, the `great-docs/`, `_great_docs_build/` and `_freeze/` lines.
+2. Write the package's own parts:
+   - its floor CPython in `.python-version`, `default_language_version` in `prek.toml`, the `test` matrix and `requires-python`;
+   - a self-reference in the `dev` group that installs every extra, and a `src/<package>/py.typed`;
+   - the rest of `great-docs.yml`, and the comments in `ci.yml` and `release.yml` that name Epistole's examples and tests.
+3. Write `.release-please-manifest.json` as `{".": "<last released version>"}`, or `{".": "0.0.0"}` in a repo with no release.
+   That repo also sets `bootstrap-sha` to the commit before the one that adds release-please, and its first pull request ends with a `Release-As: 0.0.1` footer.
+4. In the package's `CONTRIBUTING.md`, write `Copied from Epistole at <sha>` and a table of where the package departs.
+   In its `CLAUDE.md`, import `@~/Dev/epistole/CONTRIBUTING.md`, then `@CONTRIBUTING.md`.
+5. Apply [Repository settings](#repository-settings).
+
+A package follows the standard in full or in maintenance:
+
+| Package | Follows |
+| --- | --- |
+| dagster-dataframely | maintenance |
+
+A change to a standard file merges in Epistole first, then as a pull request with the same title in each package that follows in full.
+To catch up, run `git -C ~/Dev/epistole diff <sha> HEAD -- .github release-please-config.json prek.toml ruff.toml rumdl.toml tombi.toml pyrefly.toml great-docs.yml user_guide/upgrading.qmd pyproject.toml CONTRIBUTING.md`, port the diff, and update the SHA.
+A package in maintenance keeps Dependabot's `uv` entry and applies steps 3, 4 and 6 to 9 of Repository settings, with rulesets that require the checks its pull requests report.
+It owes no catch-up pull request.
+
+## Repository settings
+
+Appendix C of [the CI/CD research note](docs/research/ci-cd-standard.md) holds each command in full, with `R=ozanozbeker/<repo>`.
+
+1. Install the release App, `ozanozbeker-release` (Integration 5110076), on the repo.
+   It holds Contents, Issues and Pull requests read and write, and Metadata read.
+   Generate a private key for the new repo on the App's page, and keep no `.pem` on disk.
+2. Create the `release` environment: branch policy `main`, variable `APP_CLIENT_ID`, secret `APP_PRIVATE_KEY`.
+3. Create the `pypi` environment: tag policy `v*`, the maintainer as required reviewer, self-review allowed, admin bypass off.
+   Self-review stays allowed, because a release published by hand makes the maintainer its initiator.
+4. On pypi.org, add the trusted publisher: owner `ozanozbeker`, the repo, workflow `release.yml`, environment `pypi`.
+5. Set Pages to deploy from GitHub Actions, limit the `github-pages` environment to tags `v*`, and run `gh api -X PUT repos/$R/pages -F https_enforced=true`.
+6. Allow squash merges only, titled and described from the pull request, with auto-merge on and head branches deleted.
+7. Require actions pinned to a full SHA, keep the default token read-only, and stop GitHub Actions approving pull requests.
+8. Turn on Dependabot alerts and security updates, private vulnerability reporting, and CodeQL default setup for `actions` and `python`.
+   Check that secret scanning and push protection read `enabled` under `security_and_analysis` in `gh api repos/$R`.
+9. After `all-green` and `title` have run on a pull request, copy Epistole's `main` and `version tags` rulesets to the new repo.
+10. In a repo with no release, release once: the `Release-As: 0.0.1` pull request from Adopting the standard, then the release pull request, then approve `pypi`.
+    Check that PyPI shows one attestation per file and that the site serves HTTPS.
+
+## Epistole's departures
+
+### Python 3.13 floor
+
+The standard starts at the oldest CPython still supported, and three facts hold Epistole at 3.13:
+
+- `typing.override` needs 3.12, and 10 modules use it (2026-10-15).
+- `mimetypes.guess_file_type` needs 3.13.
+- The address check needs the strict `email.utils.getaddresses` from the CVE-2023-27043 fix.
+  3.11 gained it only in 3.11.10 and 3.12 only in 3.12.6, and `requires-python` cannot exclude the earlier patch releases without one `!=` for each.
+
+### Examples
+
+Epistole's examples send mail, so the docs build runs none of them.
+`tests/test_examples.py` runs each one against `MemoryBackend` instead.
+
+### Prose
 
 The package has two spellings in prose.
 Each means one thing.

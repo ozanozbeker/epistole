@@ -57,7 +57,7 @@ jobs:
       - run: uv sync --locked --no-editable
       - run: uv run --no-sync pytest
 
-  # Each floor in `pyproject.toml` is the oldest version that passes, so this job tests the floors.
+  # Each runtime floor in `pyproject.toml` is the oldest version that passes, so this job tests the floors.
   lowest:
     runs-on: ubuntu-latest
     timeout-minutes: 15
