@@ -88,7 +88,7 @@ Below 1.0, a break needs no deprecation period.
 `ci.yml` runs on each pull request and each push to `main`:
 
 - `test` runs on Ubuntu, macOS and Windows, on every supported Python, against the built wheel.
-- `next-python` runs the next CPython from its first beta, and it may fail.
+- `next-python` runs the newest CPython that has reached its first beta, and it may fail.
 - `lowest` runs the floor Python with each dependency at its floor.
 - `lint` runs every prek hook on every file, and `gitleaks-ci` on each commit the pull request adds.
 - `docs` builds the site.
@@ -134,7 +134,8 @@ The standard starts at the oldest CPython still supported, and three facts, meas
 The rest of the policy is the standard's:
 
 - A version joins at its final release.
-  Add its classifier in `pyproject.toml` and its entry in the `test` matrix, and point `next-python` at the version after it.
+  Add its classifier in `pyproject.toml` and its entry in the `test` matrix.
+  `next-python` stays on it until the next version reaches its first beta.
 - A version leaves in the first release after its end of life, in a `feat!:` commit.
   Raise `requires-python`, `.python-version`, `default_language_version` in `prek.toml` and the Python of the `lowest` job.
   Then remove the version's classifier and its matrix entry.
