@@ -74,7 +74,9 @@ jobs:
           enable-cache: false
       # `lowest-direct` resolves each transitive dependency to its newest release, so `--exclude-newer` applies Dependabot's cooldown.
       - run: uv sync --resolution lowest-direct --no-editable --exclude-newer '7 days'
-      - run: uv run --no-sync pytest
+      # The suite runs once on Ubuntu here, so this job also checks coverage.
+      - run: uv run --no-sync coverage run -m pytest
+      - run: uv run --no-sync coverage report
 
   # Local hooks miss a `--no-verify` commit and a fork's commits, so CI runs the hooks on every file and `gitleaks-ci` on every new commit.
   lint:

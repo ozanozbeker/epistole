@@ -226,3 +226,7 @@ def test_a_rendered_report_matches_the_pinned_text():
         "\n"
         "Data team · Unsubscribe <https://example.com/unsubscribe?u=abc123>"
     )
+
+
+def test_two_br_tags_make_a_blank_line():
+    assert html_to_text("a<br><br>b") == "a\n\nb"
