@@ -147,9 +147,9 @@ The rest of the policy is the standard's:
 3. `release.yml` builds the distributions, and its `pypi` job waits for approval.
    On the run's page, click **Review deployments**, tick `pypi`, then click **Approve and deploy**.
    The job then uploads the distributions to PyPI with attestations.
-4. `docs.yml` deploys the site.
+4. After the upload, `release.yml` builds the site and deploys it.
 
-A release published by hand starts the same two workflows, which makes it the recovery path.
+A release published by hand starts the same workflow, which makes it the recovery path.
 
 ## When something fails
 
@@ -160,8 +160,11 @@ A release published by hand starts the same two workflows, which makes it the re
   Fix the title with `gh pr edit --title`, and the check runs again.
 - **A changelog entry is wrong after the merge.**
   Use `BEGIN_COMMIT_OVERRIDE`, as [Pull requests](#pull-requests) describes.
-- **`release.yml` or `docs.yml` fails after the tag exists.**
+- **`release.yml` fails after the tag exists.**
   `gh run rerun <run-id> --failed` runs the failed jobs again.
+  The `pypi` job sets `skip-existing`, so a rerun after a partial upload skips the files PyPI already has.
+- **`build` fails the ancestor check.**
+  The tag points at a commit that `main` does not contain, so nothing was published.
 
 ## Traps
 
@@ -173,7 +176,7 @@ A release published by hand starts the same two workflows, which makes it the re
   Migration notes go in the upgrade page.
 - `GITHUB_TOKEN` cannot run CI on a pull request it opens, and a release it creates starts no workflow.
   So release-please and `prek-update.yml` use the App's token.
-- The `pypi` and `github-pages` environments accept `v*` tags only, and both release workflows run on the release's tag.
+- The `pypi` and `github-pages` environments accept `v*` tags only, and `release.yml` runs on the release's tag.
 - A numpydoc `Returns` block starts with a `:` line.
   griffe, which great-docs uses, reads a bare description line as the return type.
 

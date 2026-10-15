@@ -10,14 +10,21 @@ permissions: {}
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The ancestor check reads `origin/main`.
+          fetch-depth: 0
           persist-credentials: false
+      # The App can tag any commit, so the workflow publishes only a tag that `main` contains.
+      - run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
+          # uv follows setup-uv, which Dependabot bumps after the cooldown.
+          version: latest-known
           # A release must not restore a cache that a pull request run could have written.
           enable-cache: false
       - run: uv build
@@ -31,6 +38,7 @@ jobs:
   pypi:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The environment accepts `v*` tags only and waits for the maintainer's approval.
     environment:
       name: pypi
@@ -44,3 +52,57 @@ jobs:
           path: dist/
       # The PyPA action makes PEP 740 attestations by default, and `uv publish` does not.
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          # A rerun after a partial upload skips the files PyPI already has.
+          skip-existing: true
+
+  # The site documents the version on PyPI, so it builds after the approved upload.
+  # `upload-pages-artifact` keeps its artifact for 1 day, so the build also waits for the approval.
+  site:
+    needs: pypi
+    runs-on: ubuntu-latest
+    # Quarto sets no timeout on a cell.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # great-docs reads the git history for page dates.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: latest-known
+          enable-cache: false
+      - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2.2.0
+        with:
+          version: "1.10.18"
+      - run: uv sync --locked --group docs
+      - run: uv run --no-sync great-docs build
+        env:
+          # great-docs reads GitHub Releases for the changelog page, and an anonymous runner gets 60 requests an hour.
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: great-docs/_site
+          # great-docs writes `.well-known/agent-skills/`, which `npx skills add` reads.
+          include-hidden-files: true
+
+  pages:
+    needs: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    # The environment accepts `v*` tags only.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
