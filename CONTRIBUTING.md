@@ -50,7 +50,7 @@ Since release-please reads that commit:
 ## Pull requests from bots
 
 - Dependabot opens `chore: bump the uv group` and `ci: bump the actions group` on Mondays.
-- `prek-update.yml` opens `chore: update prek hooks` on the first of each month.
+- `prek-update.yml` opens `chore: update prek hooks and uv.lock` on the first of each month.
 - release-please opens `chore(main): release X.Y.Z`, and it updates that pull request after each merge that users would see.
 
 Their types start no release, so merge the first two with `gh pr merge <number> --auto --squash` once they pass.
@@ -119,7 +119,8 @@ Each floor in `pyproject.toml` is as low as the `lowest` job proves.
 A floor rises only in a `deps:` commit, which the changelog shows to users.
 Dependabot moves `uv.lock` and the pinned actions weekly, after a 7-day cooldown.
 Its `chore` and `ci` prefixes keep those pull requests out of the changelog.
-Dependabot does not read `prek.toml`, so `prek-update.yml` updates the hooks monthly.
+Dependabot does not read `prek.toml`, and it moves only the dependencies `pyproject.toml` declares.
+So `prek-update.yml` updates the hooks and runs `uv lock --upgrade` monthly, with the same 7-day cooldown.
 
 ## Python versions
 

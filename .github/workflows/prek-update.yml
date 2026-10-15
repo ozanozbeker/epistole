@@ -1,6 +1,6 @@
 name: Update hooks
 
-# Dependabot does not read `prek.toml`, so this workflow updates its hooks.
+# Dependabot does not read `prek.toml` and moves only the dependencies `pyproject.toml` declares, so this workflow updates the hooks and every package in `uv.lock`.
 on:
   schedule:
     - cron: "17 6 1 * *"
@@ -9,10 +9,50 @@ on:
 permissions: {}
 
 jobs:
+  # `uv lock` can run a package's build backend, so this job holds no secret.
   update:
     runs-on: ubuntu-latest
-    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # uv follows setup-uv, which Dependabot bumps after the cooldown.
+          version: latest-known
+          enable-cache: false
+      # The 7 days match Dependabot's cooldown.
+      - run: |
+          uv run --locked --only-dev prek update --freeze --cooldown-days 7
+          uv lock --upgrade --exclude-newer '7 days'
+          # The first lock writes `exclude-newer` into `uv.lock`, and `uv lock --check` fails until this one removes it.
+          uv lock
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: update
+          path: |
+            prek.toml
+            uv.lock
+
+  # Only pinned actions run beside the App key, which mints tokens for every repo the App is installed on.
+  pr:
+    needs: update
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Only jobs in this environment can read the App's private key, and `deployment: false` keeps each run from writing a deployment record.
+    environment:
+      name: release
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: update
       # Unlike `GITHUB_TOKEN`, an App token lets the PR run CI.
       - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app
@@ -21,20 +61,12 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           permission-contents: write
           permission-pull-requests: write
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: false
-      # The 7 days match Dependabot's cooldown.
-      - run: uv run --locked --only-dev prek update --freeze --cooldown-days 7
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app.outputs.token }}
           sign-commits: true
           branch: prek-update
           delete-branch: true
-          commit-message: "chore: update prek hooks"
-          title: "chore: update prek hooks"
-          body: "`prek update --freeze --cooldown-days 7` found newer hook releases."
+          commit-message: "chore: update prek hooks and uv.lock"
+          title: "chore: update prek hooks and uv.lock"
+          body: "`prek update --freeze --cooldown-days 7` or `uv lock --upgrade --exclude-newer '7 days'` found newer releases."
