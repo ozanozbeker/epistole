@@ -10,8 +10,21 @@ hooks = [
   {
     id = "conventional-pre-commit",
     stages = ["commit-msg"],
+    # Listing types replaces the hook's defaults, so the list repeats them and adds `deps`, which CONTRIBUTING.md uses for a floor.
     args = [
       "--strict",
+      "build",
+      "chore",
+      "ci",
+      "deps",
+      "docs",
+      "feat",
+      "fix",
+      "perf",
+      "refactor",
+      "revert",
+      "style",
+      "test",
     ]
   }
 ]
