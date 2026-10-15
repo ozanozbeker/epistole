@@ -37,15 +37,15 @@ markdown = ["markdown-it-py>=4.2"]
 [dependency-groups]
 dev = [
   "coverage>=7.16.2",
-  "css-inline>=0.21.3",
+  "css-inline>=0.22.0",
   "epistole[gmail,graph,markdown]",
-  "inscriptis>=2.7.4",
-  "prek>=0.5.2",
-  "pyrefly>=1.2.0",
+  "inscriptis>=2.7.5",
+  "prek>=0.5.5",
+  "pyrefly>=1.3.2",
   "pytest>=9.1.1",
-  "ruff>=0.16.6",
-  "rumdl>=0.2.68",
-  "tombi>=1.5.2",
+  "ruff>=0.16.10",
+  "rumdl>=0.2.78",
+  "tombi>=1.7.3",
 ]
 # Not in `dev`, so the test and lint jobs skip Quarto's Jupyter stack.
 docs = ["great-docs>=0.17"]
