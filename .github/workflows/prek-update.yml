@@ -1,6 +1,6 @@
 name: Update hooks
 
-# Dependabot does not read `prek.toml` and moves only the dependencies `pyproject.toml` declares, so this workflow updates the hooks and every package in `uv.lock`.
+# Dependabot does not read `prek.toml`, and its version updates move only the dependencies `pyproject.toml` declares, so this workflow updates the hooks and every package in `uv.lock`.
 on:
   schedule:
     - cron: "17 6 1 * *"
