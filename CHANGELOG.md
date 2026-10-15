@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.8](https://github.com/ozanozbeker/epistole/compare/v0.0.7...v0.0.8) (2026-10-15)
+
+
+### Features
+
+* return the submission on the send result ([#135](https://github.com/ozanozbeker/epistole/issues/135)) ([570cf9e](https://github.com/ozanozbeker/epistole/commit/570cf9eca0b74ba02af32052f24a999a8845efa8)), closes [#134](https://github.com/ozanozbeker/epistole/issues/134)
+
 ## [0.0.7](https://github.com/ozanozbeker/epistole/compare/v0.0.6...v0.0.7) (2026-10-15)
 
 
