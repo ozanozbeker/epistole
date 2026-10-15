@@ -137,7 +137,7 @@ The rest of the policy is the standard's:
   Add its classifier in `pyproject.toml` and its entry in the `test` matrix.
   `next-python` stays on it until the next version reaches its first beta.
 - A version leaves in the first release after its end of life, in a `feat!:` commit.
-  Raise `requires-python`, `.python-version`, `default_language_version` in `prek.toml` and the Python of the `lowest` job.
+  Raise `requires-python`, `.python-version` and `default_language_version` in `prek.toml`.
   Then remove the version's classifier and its matrix entry.
 
 ## Releasing
