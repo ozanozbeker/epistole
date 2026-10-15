@@ -1,0 +1,121 @@
+---
+title: Sending from an orchestrator
+---
+
+An orchestrator such as Dagster or Prefect reruns a step on a retry or a backfill.
+A step that sends mail then sends it again, unless it checks a record of what it already sent.
+Epistole keeps no such record, because the key and the storage are yours.
+It returns what the record needs: `result.submission.as_bytes()` returns the submission as the bytes of an `.eml` file, which any mail client opens.
+
+## Send each report once
+
+`backend` is any backend from [Sending](sending.qmd).
+
+```python
+from email import message_from_bytes
+from pathlib import Path
+
+from epistole import Message
+
+records = Path("sent")
+records.mkdir(exist_ok=True)
+
+
+def send_once(key: str, message: Message) -> str:
+    """Send `message` unless the record for `key` shows it went, and return its Message-ID."""
+    sending = records / f"{key}.sending"
+    sent = records / f"{key}.eml"
+    if sent.exists():
+        return message_from_bytes(sent.read_bytes())["Message-ID"]
+    if sending.exists():
+        msg = f"{key} may have been sent. Check the Sent folder, then delete {sending} or write {sent}."
+        raise RuntimeError(msg)
+
+    with backend.connect() as connection:
+        sending.touch()
+        result = connection.send(message)
+
+    sent.write_bytes(result.submission.as_bytes())
+    sending.unlink()
+    return result.message_id
+
+
+report = Message(text="Daily KPIs").subject("Daily KPIs").to("boss@corp.example")
+send_once("2026-10-12", report)
+```
+
+The key names one email in your terms: a report date, a partition key, a customer and a month.
+Epistole's `Message-ID` cannot be the key, because each send makes a new one.
+
+`send_once` writes `sending` before the send and the `.eml` after it.
+The `.eml` holds the `Message-ID`, the `Date`, every recipient including `Bcc`, and the attachments.
+On Graph it is Epistole's rendering of the message, because Graph receives JSON, not these bytes.
+On Gmail the recipients see a different `Message-ID`, because Gmail replaces it.
+
+Point `records` at storage that every run reads, not the disk of one container.
+For a bucket or a table, replace the `Path` calls with that store's reads and writes.
+
+## A rerun skips the send
+
+```python
+send_once("2026-10-12", report)
+```
+
+The `.eml` exists, so `send_once` returns its `Message-ID` and sends nothing.
+
+## A run that stopped between the two writes
+
+```python
+(records / "2026-10-13.sending").touch()
+send_once("2026-10-13", report)
+```
+
+A `sending` record without an `.eml` means a run started the send and never finished it.
+The service may have accepted the message before the process died or the send raised `TransportError`.
+So `send_once` raises, and a person checks the from address's Sent folder.
+`send_once` opens the connection before it writes `sending`, so a wrong password writes no record.
+A `ValueError` or `RejectedError` from the send means the service accepted nothing, but the record stays until a person deletes it.
+
+This order sends each email at most once.
+A crash can lose an email, but no rerun sends it twice.
+
+## Send each report at least once
+
+```python
+def send_at_least_once(key: str, message: Message) -> None:
+    """Send `message` unless the record for `key` shows it went."""
+    sent = records / f"{key}.eml"
+    if not sent.exists():
+        result = backend.send(message)
+        sent.write_bytes(result.submission.as_bytes())
+
+
+send_at_least_once("2026-10-14", report)
+```
+
+Writing only after the send reverses the trade.
+A crash after the service accepts the message and before the write makes the rerun send it again, but every email goes out.
+Choose this order when a missing email costs more than a duplicate.
+
+No order sends exactly once, because the send and the write are two systems.
+
+## Dagster
+
+A partitioned asset uses its partition key as the key, and records the `Message-ID` in its materialization metadata.
+
+```{.python filename="daily_kpis.py"}
+import dagster as dg
+
+from my_project.mail import daily_report, send_once
+
+
+@dg.asset(partitions_def=dg.DailyPartitionsDefinition(start_date="2026-01-01"))
+def daily_kpis_email(context: dg.AssetExecutionContext) -> dg.MaterializeResult:
+    message_id = send_once(context.partition_key, daily_report(context.partition_key))
+    return dg.MaterializeResult(metadata={"message_id": message_id})
+```
+
+A backfill over partitions whose `.eml` exists rematerializes them without sending.
+A run that raises on a `sending` record fails that partition.
+The rest of the backfill continues, because Dagster launches one run per partition by default.
+Under `BackfillPolicy.single_run()`, `context.partition_key` raises on the range, so the asset needs a loop over `context.partition_keys` instead.

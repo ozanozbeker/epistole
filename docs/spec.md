@@ -343,7 +343,11 @@ class Submission:
     from_address: str
     message_id: str
     date: datetime
+
+    def as_bytes(self) -> bytes: ...
 ```
+
+`as_bytes` returns `_rfc5322.build(self).as_bytes()`, `Bcc` included (ADR-0022).
 
 **Backend (ADR-0001, ADR-0005, ADR-0006).**
 
@@ -382,7 +386,7 @@ class Submission:
   4. Call `transport.submit`.
   5. Re-key the returned refusals from addr-spec to the matching entry of `message.recipients`.
   6. Raise `RecipientsRefusedError` if every recipient was refused.
-  7. Return `SendResult(message_id, date, refused)`.
+  7. Return `SendResult(refused, submission)`.
 - The completeness check reads the `<img src>` values the `data:` rewrite reads, so an `<img>` inside a comment does not count (ADR-0002, ADR-0003).
   A content id matches as written or percent-decoded, because RFC 2392 percent-encodes it in a `cid:` URL and Markdown writes a space as `%20`.
 - Only `Connection.send` raises `RecipientsRefusedError`, on every backend including the doubles (ADR-0015).
@@ -690,9 +694,13 @@ Every class below them is in `epistole.exceptions`.
 ```python
 @dataclass(frozen=True)
 class SendResult:
-    message_id: str
-    date: datetime
     refused: Mapping[str, Refusal]
+    submission: Submission
+
+    @property
+    def message_id(self) -> str: ...  # submission.message_id
+    @property
+    def date(self) -> datetime: ...  # submission.date
 
 
 @dataclass(frozen=True)

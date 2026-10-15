@@ -20,7 +20,10 @@ PAGES = [ROOT / "README.md", *sorted((ROOT / "user_guide").glob("*.qmd"))]
 """The README and the user guide pages, whose Python blocks the test runs."""
 EXAMPLE = re.compile(r"^#+ ([^\n]+)$|^```python\n(.*?)^```$", re.MULTILINE | re.DOTALL)
 """A heading, or a Python block. A block with a filename is a script the reader saves and runs, so it does not match."""
-RAISES = {"Kept a connection past its `with`": ValueError}
+RAISES = {
+    "Kept a connection past its `with`": ValueError,
+    "A run that stopped between the two writes": RuntimeError,
+}
 """The guide shows the example under each of these headings raising."""
 
 FILES = {

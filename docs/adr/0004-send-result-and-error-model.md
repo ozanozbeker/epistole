@@ -27,6 +27,8 @@ A reason in any entry of Gmail's `errors[]` qualifies a row, and the throttle re
 Amended on [#68](https://github.com/ozanozbeker/epistole/issues/68): Gmail replaces the `Message-ID` Epistole wrote, and sends from the account's own address when `From` names neither the account nor a verified alias.
 Neither raises, so the send result and the mapping stay as they are.
 Amended on [#71](https://github.com/ozanozbeker/epistole/issues/71): a `Password` authenticates through `auth`, so the SMTP mapping names neither `login` nor `SMTPNotSupportedError` (ADR-0011).
+Amended on [#134](https://github.com/ozanozbeker/epistole/issues/134): `SendResult` holds `submission`, the submission the transport received, so a caller can keep an `.eml` of it (ADR-0022).
+`message_id` and `date` become properties that read it, because reading the id is the common case.
 
 ## Why
 
@@ -101,9 +103,10 @@ Epistole never sleeps and never retries.
 
 ## Rules
 
-- **`SendResult` is frozen and has three fields.**
-  `message_id` and `date` hold the `Message-ID` and `Date` `send` set.
+- **`SendResult` is frozen and has two fields.**
   `refused` is a mapping of address to `Refusal(code, reason)`.
+  `submission` is the `Submission` the transport received, and is never `None`.
+  The `message_id` and `date` properties return the `Message-ID` and `Date` `send` set on it.
   Only `Connection.send` constructs one.
   `Refusal` is public because `MemoryBackend(refuse=...)` takes one (ADR-0015).
 - **`refused` is keyed by the caller's recipient string.**

@@ -132,7 +132,8 @@ _Avoid_: send (the caller's verb, which includes preparation), deliver
 It is the frozen value a connection builds and a transport receives.
 Sending the same message twice makes two submissions with two ids.
 `MemoryBackend` keeps every one it accepted, in `submissions`.
-_Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb), outbox (a mail client's outbox holds what it has not sent yet, which is the reverse)
+A send result holds it, and `as_bytes` returns it as an RFC 5322 message.
+_Avoid_: delivery (acceptance never means anyone received it), send (the caller's verb), outbox (a mail client's outbox holds what it has not sent yet, which is the reverse), artifact, manifest
 
 **Complete message**: A message that has passed preparation and can be submitted.
 It has at least one recipient, plain text, HTML whenever the caller supplied the content as HTML or Markdown, and an inline image for every `cid:` the HTML names.
@@ -142,7 +143,7 @@ A submission holds only a complete message.
 _Avoid_: prepared message, rendered message
 
 **Send result**: What a send returns: the record that the service accepted one submission.
-It holds the submission's `Message-ID` and `Date` and any refusals.
+It holds the submission and any refusals, and reads the submission's `Message-ID` and `Date` from it.
 It never implies that anyone received the message.
 A connection builds it from its submission and the refusals the transport returned.
 A transport never builds one.
