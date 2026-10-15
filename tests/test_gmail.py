@@ -1,5 +1,6 @@
 import base64
 import json
+import re
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -173,6 +174,13 @@ def raw(request: httpx2.Request) -> bytes:
     return base64.urlsafe_b64decode(json.loads(request.content)["raw"])
 
 
+def unbounded(data: bytes) -> bytes:
+    """Replace each MIME boundary in `data` with its position, since `build` picks new ones on every call."""
+    for position, boundary in enumerate(re.findall(rb'boundary="([^"]+)"', data)):
+        data = data.replace(boundary, b"boundary-%d" % position)
+    return data
+
+
 def error(
     status: int, *reasons: str, headers: dict[str, str] | None = None
 ) -> httpx2.Response:
@@ -197,6 +205,28 @@ def test_a_send_posts_the_message_as_base64url_raw(
     assert f"Message-ID: {result.message_id}".encode() in raw(request)
     assert b"Bcc: cleo@example.com" in raw(request)
     assert result.refused == {}
+
+
+def test_as_bytes_returns_the_bytes_gmail_sent_as_raw(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    result = backend(service_account).send(message().bcc("cleo@example.com"))
+
+    assert result.submission.as_bytes() == raw(google.sent()[0])
+
+
+def test_as_bytes_differs_from_raw_only_in_its_mime_boundaries(
+    google: Google, service_account: gmail.ServiceAccount
+):
+    built = (
+        Message(html="<p>Weekly numbers</p>")
+        .to("ada@example.com")
+        .attach(b"%PDF-1.7", filename="weekly.pdf")
+    )
+
+    result = backend(service_account).send(built)
+
+    assert unbounded(result.submission.as_bytes()) == unbounded(raw(google.sent()[0]))
 
 
 def test_each_line_break_goes_out_as_crlf_and_each_part_ends_with_one(

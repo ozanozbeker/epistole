@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Protocol, Self, runtime_checkable
 from epistole._address import addr_spec, check_address, domain
 from epistole._message import unresolved_cids
 from epistole._result import SendResult
+from epistole._rfc5322 import build
 from epistole.exceptions import EpistoleError, RecipientsRefusedError, TransportError
 
 if TYPE_CHECKING:
@@ -154,11 +155,7 @@ class Connection:
                 msg = f"every recipient was refused, so nothing was submitted: {', '.join(refused)}"
                 raise RecipientsRefusedError(msg, refused=refused, backend=self.backend)
 
-        return SendResult(
-            message_id=submission.message_id,
-            date=submission.date,
-            refused=refused,
-        )
+        return SendResult(refused=refused, submission=submission)
 
     def close(self) -> None:
         """Close the link for good.
@@ -235,6 +232,13 @@ class Submission:
     from_address: str
     message_id: str
     date: datetime
+
+    def as_bytes(self) -> bytes:
+        """Return the submission as an RFC 5322 message, the bytes of an `.eml` file.
+
+        The bytes hold `Bcc`, so an audit copy names every recipient. A forwarded copy shows the bcc list too. Each call writes new MIME boundaries, so the bytes match what Gmail received except for those. SMTP sends them without `Bcc`. Graph receives JSON instead. Gmail replaces the `Message-ID` after it receives them. See ADR-0022.
+        """
+        return build(self).as_bytes()
 
 
 @runtime_checkable

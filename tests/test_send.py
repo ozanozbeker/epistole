@@ -231,6 +231,14 @@ def test_send_returns_the_message_id_and_date_the_submission_carried():
     assert result.date == submission.date
 
 
+def test_send_returns_the_submission_the_transport_received():
+    backend = FakeBackend()
+
+    result = backend.send(message())
+
+    assert result.submission is backend.transport.submitted[0]
+
+
 def test_connect_hands_back_a_connection():
     with FakeBackend().connect() as connection:
         assert isinstance(connection, Connection)
@@ -453,6 +461,12 @@ def test_sending_one_message_twice_makes_two_ids():
     second = backend.send(built)
 
     assert first.message_id != second.message_id
+
+
+def test_as_bytes_names_every_bcc_recipient():
+    result = MemoryBackend().send(message().bcc("cleo@example.com"))
+
+    assert b"\r\nBcc: cleo@example.com\r\n" in result.submission.as_bytes()
 
 
 def test_the_transport_receives_the_submission():

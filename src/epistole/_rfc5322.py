@@ -1,4 +1,4 @@
-"""`build` turns a submission into the RFC 5322 message that SMTP writes and Gmail sends as `raw`. Graph never calls it, because every Graph request is JSON (ADR-0012). It is in the core, so it takes no dependency."""
+"""`build` turns a submission into the RFC 5322 message that SMTP writes, Gmail sends as `raw`, and `Submission.as_bytes` returns. Graph never calls it, because every Graph request is JSON (ADR-0012). It is in the core, so it takes no dependency."""
 
 from __future__ import annotations
 

@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import datetime
 
+    from epistole._backend import Submission
+
 
 @dataclass(frozen=True)
 class Refusal:
@@ -42,8 +44,19 @@ class SendResult:
         The `Date` the send set, timezone-aware in the sending machine's offset.
     refused
         The recipients the service refused while accepting the rest, keyed by the caller's recipient string. Only SMTP and `MemoryBackend(refuse=)` fill it.
+    submission
+        The submission the transport received. `submission.as_bytes()` returns it as the bytes of an `.eml` file. See ADR-0022.
     """
 
-    message_id: str
-    date: datetime
     refused: Mapping[str, Refusal]
+    submission: Submission
+
+    @property
+    def message_id(self) -> str:
+        """Return the submission's `Message-ID`, which a send result holds once, in `submission` (ADR-0015)."""
+        return self.submission.message_id
+
+    @property
+    def date(self) -> datetime:
+        """Return the submission's `Date`."""
+        return self.submission.date
