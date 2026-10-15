@@ -20,6 +20,7 @@ jobs:
         # The same versions as the Python classifiers in `pyproject.toml`.
         python: ["3.13", "3.14", "3.15"]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -29,6 +30,10 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: ${{ matrix.python }}
+          # uv follows setup-uv, which Dependabot bumps after the cooldown.
+          version: latest-known
+          # Every dependency is a pre-built wheel, so a cache hit saves nothing.
+          enable-cache: false
       # `--no-editable` installs the built wheel, so the tests import what PyPI would get.
       - run: uv sync --locked --no-editable
       - run: uv run --no-sync pytest
@@ -37,7 +42,7 @@ jobs:
   # It stays on a version after its final release, until the next version reaches its first beta.
   next-python:
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -47,28 +52,34 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           python-version: "3.15"
+          version: latest-known
+          enable-cache: false
       - run: uv sync --locked --no-editable
       - run: uv run --no-sync pytest
 
   # Each floor in `pyproject.toml` is the oldest version that passes, so this job tests the floors.
   lowest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # uv reads the floor Python from `.python-version`.
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.13"
-          cache-suffix: lowest
-      - run: uv sync --resolution lowest-direct --no-editable
+          version: latest-known
+          enable-cache: false
+      # `lowest-direct` resolves each transitive dependency to its newest release, so `--exclude-newer` applies Dependabot's cooldown.
+      - run: uv sync --resolution lowest-direct --no-editable --exclude-newer '7 days'
       - run: uv run --no-sync pytest
 
   # Local hooks miss a `--no-verify` commit and a fork's commits, so CI runs the hooks on every file and `gitleaks-ci` on every new commit.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -78,6 +89,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: latest-known
+          enable-cache: false
       - run: uv sync --locked
       - run: uv run --no-sync prek run --all-files --show-diff-on-failure
         env:
@@ -105,7 +119,8 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          cache-suffix: docs
+          version: latest-known
+          enable-cache: false
       - uses: quarto-dev/quarto-actions/setup@8a96df13519ee81fd526f2dfca5962811136661b # v2.2.0
         with:
           version: "1.10.18"
@@ -120,6 +135,7 @@ jobs:
     if: always()
     needs: [test, next-python, lowest, lint, docs]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions: {}
     steps:
       - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0

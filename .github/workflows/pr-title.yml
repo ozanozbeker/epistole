@@ -10,6 +10,7 @@ permissions: {}
 jobs:
   title:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -17,6 +18,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          # uv follows setup-uv, which Dependabot bumps after the cooldown.
+          version: latest-known
+          enable-cache: false
       # The `commit-msg` hook from `prek.toml` checks the title, so titles and local commits follow one rule set.
       - run: |
           printf '%s\n' "$TITLE" > "$RUNNER_TEMP/title.txt"
