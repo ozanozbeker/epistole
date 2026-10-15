@@ -7,7 +7,6 @@ disable = [
 ]
 exclude = [
   "CHANGELOG.md",
-  "LICENSE.md",
   "docs/agents/",
   "docs/adr/",
 ]
