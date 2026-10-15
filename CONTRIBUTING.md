@@ -90,7 +90,7 @@ Below 1.0, a break needs no deprecation period.
 - `test` runs on Ubuntu, macOS and Windows, on every supported Python, against the built wheel.
 - `next-python` runs the next CPython from its first beta, and it may fail.
 - `lowest` runs the floor Python with each dependency at its floor.
-- `lint` runs every prek hook on every file.
+- `lint` runs every prek hook on every file, and `gitleaks-ci` on each commit the pull request adds.
 - `docs` builds the site.
   Epistole's examples send mail, so the build runs none of them.
 - `all-green` passes when the jobs above pass.
@@ -136,7 +136,7 @@ The rest of the policy is the standard's:
 - A version joins at its final release.
   Add its classifier in `pyproject.toml` and its entry in the `test` matrix, and point `next-python` at the version after it.
 - A version leaves in the first release after its end of life, in a `feat!:` commit.
-  Raise `requires-python`, `.python-version`, ruff's `target-version`, `default_language_version` in `prek.toml` and the Python of the `lowest` job.
+  Raise `requires-python`, `.python-version`, `default_language_version` in `prek.toml` and the Python of the `lowest` job.
   Then remove the version's classifier and its matrix entry.
 
 ## Releasing

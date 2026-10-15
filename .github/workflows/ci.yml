@@ -65,7 +65,7 @@ jobs:
       - run: uv sync --resolution lowest-direct --no-editable
       - run: uv run --no-sync pytest
 
-  # Local hooks miss a `--no-verify` commit and a fork's commits, so CI runs every hook on every file.
+  # Local hooks miss a `--no-verify` commit and a fork's commits, so CI runs the hooks on every file and `gitleaks-ci` on every new commit.
   lint:
     runs-on: ubuntu-latest
     permissions:
@@ -73,10 +73,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # `gitleaks-ci` reads every commit the pull request adds.
+          fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: uv sync --locked
       - run: uv run --no-sync prek run --all-files --show-diff-on-failure
+        env:
+          # zizmor skips its online audits without a token.
+          GH_TOKEN: ${{ github.token }}
+          # Both read staged changes only, and CI stages nothing.
+          SKIP: gitleaks,check-added-large-files
+      # gitleaks exits 0 when `git log` fails on a shallow clone, so check that the parent exists first.
+      - run: |
+          git rev-parse --verify --quiet HEAD^1
+          uv run --no-sync prek run --all-files --hook-stage manual gitleaks-ci
 
   # Epistole's examples send mail, so the build runs none of them and fails only when a page stops rendering.
   docs:

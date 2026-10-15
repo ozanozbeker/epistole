@@ -1,4 +1,5 @@
-target-version = "py313"
+# Ruff reads the target version from `requires-python`, and formats a `.qmd` page as markdown.
+extension = { qmd = "markdown" }
 
 [lint]
 select = ["ALL"]
