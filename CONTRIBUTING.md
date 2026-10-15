@@ -89,7 +89,7 @@ Below 1.0, a break needs no deprecation period.
 
 - `test` runs on Ubuntu, macOS and Windows, on every supported Python, against the built wheel.
 - `next-python` runs the newest CPython that has reached its first beta, and it may fail.
-- `lowest` runs the floor Python with each dependency at its floor.
+- `lowest` runs the floor Python with each dependency at its floor, and fails under 100% line coverage.
 - `lint` runs every prek hook on every file, and `gitleaks-ci` on each commit the pull request adds.
 - `docs` builds the site.
   Epistole's examples send mail, so the build runs none of them.
@@ -102,6 +102,9 @@ pytest turns warnings into errors, so a new upstream deprecation fails the Depen
 
 Tests are in `tests/`, and `uv run pytest` runs them.
 CI runs them against the built wheel, so `test_packaging.py` fails a change that drops `py.typed` from it.
+
+`coverage report` fails under 100% line coverage.
+A line that no test can reach takes `# pragma: no cover` and a one-line comment that says why.
 
 Annotate every test parameter, including fixtures and `parametrize` values.
 Ruff never enforces this, because `ruff.toml` turns off `ANN` under `**/tests/**`.

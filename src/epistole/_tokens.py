@@ -149,7 +149,8 @@ def tokens(
             return _google_auth.tokens(credential, _SCOPES["google", purpose], client)
         case TokenCredential():
             return ForeignTokens(credential, _SCOPES["google", purpose])
-        case _:
+        # Every backend raises `TypeError` for another credential type before it calls `tokens`.
+        case _:  # pragma: no cover
             msg = f"a {type(credential).__name__} gets no token for {purpose}."
             raise TypeError(msg)
 

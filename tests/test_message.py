@@ -1200,3 +1200,9 @@ def test_headers_raises_on_a_name_repeated_in_another_case():
         Message(text="hi").headers(
             {"X-Campaign-Id": "autumn", "x-campaign-id": "spring"}
         )
+
+
+def test_a_data_image_whose_src_the_tag_text_hides_stays_in_the_html():
+    html = f'<img =SRC\r="/src={CHART}>'
+
+    assert Message(html=html).html == html
