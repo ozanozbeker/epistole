@@ -23,6 +23,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      # uv otherwise runs the macOS and Windows images' own 3.11.9, which predates the CVE-2023-27043 fix (ADR 0014).
+      UV_PYTHON_PREFERENCE: only-managed
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
