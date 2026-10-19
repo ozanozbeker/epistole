@@ -26,7 +26,7 @@ from smtplib import (
     SMTPSenderRefused,
     SMTPServerDisconnected,
 )
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeAlias
 from urllib.parse import parse_qs
 
 import httpx2
@@ -54,8 +54,8 @@ EXTENSIONS = ("SIZE 10485760", "8BITMIME", "SMTPUTF8", "AUTH PLAIN XOAUTH2")
 STARTTLS = (*EXTENSIONS, "STARTTLS")
 PASSWORD = smtp.Password(username="reports", password="hunter2")  # noqa: S106
 WRONG = smtp.Password(username="reports", password="x")  # noqa: S106
-AUTH = f"AUTH PLAIN {b64('\0reports\0hunter2')}"
-XOAUTH2 = f"AUTH XOAUTH2 {b64('user=reports@example.com\1auth=Bearer token-1\1\1')}"
+AUTH = "AUTH PLAIN " + b64("\0reports\0hunter2")
+XOAUTH2 = "AUTH XOAUTH2 " + b64("user=reports@example.com\1auth=Bearer token-1\1\1")
 OUTLOOK = "https://outlook.office365.com/.default"
 GMAIL = "https://mail.google.com/"
 ACCEPTED = "235 2.7.0 accepted"
@@ -63,7 +63,7 @@ CHALLENGE = "<1896.697170952@postoffice.example.net>"
 TENANT = "contoso.onmicrosoft.com"
 MICROSOFT = f"https://login.microsoftonline.com/{TENANT}"
 
-type Reply = str | bytes | None
+Reply: TypeAlias = str | bytes | None
 
 
 class Server:
@@ -89,6 +89,7 @@ class Server:
         self.implicit = implicit
         self.closes_after = closes_after
         self.commands: list[str] = []
+        """Each command line as received. `smtplib` writes `FROM:` and `TO:` before 3.13 and `from:` and `to:` from 3.13, so a test lowercases a MAIL or RCPT line before comparing it."""
         self.messages: list[bytes] = []
         self.hung_up = threading.Event()
         """Set when the client closes its socket, so a test can wait for it."""
@@ -390,8 +391,8 @@ def test_an_anonymous_send_submits_the_message_and_quits(serve: Callable[..., Se
 
     assert result.refused == {}
     assert server.verbs() == ["EHLO", "MAIL", "RCPT", "DATA", "QUIT"]
-    assert server.commands[1].startswith("mail from:<reports@example.com>")
-    assert server.commands[2] == "rcpt to:<ada@example.com>"
+    assert server.commands[1].lower().startswith("mail from:<reports@example.com>")
+    assert server.commands[2].lower() == "rcpt to:<ada@example.com>"
     assert f"Message-ID: {result.message_id}".encode() in server.messages[0]
 
 
@@ -439,7 +440,7 @@ def test_the_envelope_names_to_cc_and_bcc_in_order_and_the_message_hides_bcc(
         message("ada@example.com").cc("bob@example.com").bcc("Cleo <cleo@example.com>")
     )
 
-    assert [one for one in server.commands if one.startswith("rcpt")] == [
+    assert [one.lower() for one in server.commands if one.startswith("rcpt")] == [
         "rcpt to:<ada@example.com>",
         "rcpt to:<bob@example.com>",
         "rcpt to:<cleo@example.com>",
@@ -452,7 +453,7 @@ def test_a_sender_header_does_not_change_the_envelope(serve: Callable[..., Serve
 
     backend(server).send(message().headers({"Sender": "eve@example.com"}))
 
-    assert server.commands[1].startswith("mail from:<reports@example.com>")
+    assert server.commands[1].lower().startswith("mail from:<reports@example.com>")
 
 
 def test_resent_to_and_resent_from_headers_are_written(serve: Callable[..., Server]):

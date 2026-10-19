@@ -25,6 +25,8 @@ unfixable = [
   "F401",  # Pyflakes > unused-import
   "T20",  # flake8-print > ALL
 ]
+# Ruff skips an `@override` method in rules such as ARG002 only when it can tell the decorator is `typing.override`.
+typing-modules = ["epistole._compat"]
 
 [lint.per-file-ignores]
 "**/__init__.py" = [

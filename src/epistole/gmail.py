@@ -6,10 +6,11 @@ The module is public, because a caller imports a credential value from its backe
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 from epistole import _tokens
 from epistole._backend import Backend, TokenCredential
+from epistole._compat import override
 
 if TYPE_CHECKING:
     from pathlib import Path

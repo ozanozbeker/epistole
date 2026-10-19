@@ -13,7 +13,6 @@ from email.message import EmailMessage
 from email.utils import format_datetime
 from functools import partial
 from pathlib import Path
-from typing import override
 
 import pytest
 
@@ -34,6 +33,7 @@ from epistole import (
     graph,
     smtp,
 )
+from epistole._compat import override
 from epistole.exceptions import (
     EpistoleError,
     ProviderError,

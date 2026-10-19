@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import sys
 from email.utils import format_datetime
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 
 from epistole._address import addr_spec, check_address
 from epistole._backend import Backend
+from epistole._compat import override
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

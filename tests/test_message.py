@@ -585,9 +585,7 @@ def test_attach_infers_the_content_type_from_the_filename_alone(
 def test_attach_never_infers_a_message_or_multipart_type(
     monkeypatch: pytest.MonkeyPatch, inferred: str
 ):
-    monkeypatch.setattr(
-        mimetypes, "guess_file_type", {"weekly.bin": (inferred, None)}.get
-    )
+    monkeypatch.setattr(mimetypes, "guess_type", {"weekly.bin": (inferred, None)}.get)
 
     message = Message(text="hi").attach(PDF, filename="weekly.bin")
 
@@ -652,7 +650,7 @@ def test_a_message_or_multipart_content_type_raises_naming_octet_stream(
 ):
     with pytest.raises(
         ValueError,
-        match=f"{re.escape(repr(content_type))}.*{re.escape("'application/octet-stream'")}",
+        match=f"{re.escape(repr(content_type))}.*{re.escape(repr('application/octet-stream'))}",
     ):
         Message(text="hi").attach(PDF, filename="weekly.csv", content_type=content_type)
 

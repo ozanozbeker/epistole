@@ -9,7 +9,7 @@ import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeAlias
 from urllib.parse import parse_qs
 
 import httpx2
@@ -70,7 +70,7 @@ ISSUERS: dict[str, tuple[Purpose, str]] = {
 }
 """The purpose each credential fixture gets its tokens for here, and the endpoint it requests them from."""
 
-type Reply = httpx2.Response | Exception
+Reply: TypeAlias = httpx2.Response | Exception
 
 
 def url(request: httpx2.Request) -> str:

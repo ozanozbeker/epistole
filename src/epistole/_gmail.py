@@ -8,10 +8,11 @@ from __future__ import annotations
 import base64
 import json
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 
 from epistole import _http
 from epistole._address import addr_spec
+from epistole._compat import override
 from epistole._rfc5322 import build
 from epistole._tokens import REPLY_ERRORS
 from epistole.exceptions import (

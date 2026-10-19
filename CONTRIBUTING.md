@@ -235,14 +235,12 @@ Appendix C of [the CI/CD research note](docs/research/ci-cd-standard.md) holds e
 
 ## Epistole's departures
 
-### Python 3.13 floor
+### The 3.12 floor is 3.12.6
 
-The standard starts at the oldest CPython still supported, and three facts hold Epistole at 3.13:
-
-- `typing.override` needs 3.12, and 10 modules use it (2026-10-15).
-- `mimetypes.guess_file_type` needs 3.13.
-- The address check needs the strict `email.utils.getaddresses` from the CVE-2023-27043 fix.
-  3.11 gained it only in 3.11.10 and 3.12 only in 3.12.6, and `requires-python` cannot exclude the earlier patch releases without one `!=` for each.
+When 3.11 leaves, raise `requires-python` to `>=3.12.6`, not `>=3.12`.
+3.12.0 to 3.12.5 lack the strict `email.utils.getaddresses` from the CVE-2023-27043 fix, so the address check accepts more on them ([ADR 0014](docs/adr/0014-an-address-is-a-string-checked-for-shape.md)).
+`.python-version`, `default_language_version` in `prek.toml` and the `test` matrix stay at `3.12`.
+When 3.12 leaves, `>=3.13` needs no patch release.
 
 ### Examples
 
