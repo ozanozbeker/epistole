@@ -13,7 +13,7 @@ Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): an address 
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): an address, or an argument of `Address()`, that is not a `str` is a `TypeError` (ADR-0004).
 SMTP checks for `SMTPUTF8` itself on every message that needs UTF-8 headers, so ADR-0004's SMTP mapping loses the `SMTPNotSupportedError` row.
 Amended on [#105](https://github.com/ozanozbeker/epistole/issues/105): each transport parses an address again where it needs the parts, rather than reading parts stored at the check.
-Amended on #PR: the floor falls to Python 3.11, and the check accepts more on releases that predate the CVE-2023-27043 fix.
+Amended on [#138](https://github.com/ozanozbeker/epistole/pull/138): the floor falls to Python 3.11, and the check accepts more on releases that predate the CVE-2023-27043 fix.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
