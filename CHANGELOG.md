@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.9](https://github.com/ozanozbeker/epistole/compare/v0.0.8...v0.0.9) (2026-10-19)
+
+
+### Features
+
+* support Python 3.11 and 3.12 ([#138](https://github.com/ozanozbeker/epistole/issues/138)) ([ed56669](https://github.com/ozanozbeker/epistole/commit/ed56669a427ba83ad025bd5d35f791c63b032b3c))
+
 ## [0.0.8](https://github.com/ozanozbeker/epistole/compare/v0.0.7...v0.0.8) (2026-10-15)
 
 
