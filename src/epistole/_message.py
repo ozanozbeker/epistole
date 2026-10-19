@@ -9,10 +9,11 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, unquote_to_bytes
 
 from epistole._address import LINE_BREAK, check_address, check_text
+from epistole._compat import override
 from epistole._text import Parser, html_to_text
 
 if TYPE_CHECKING:
@@ -528,7 +529,7 @@ def _filename(
 def _content_type(filename: str, content_type: str | None) -> str:
     """Return `content_type` once checked, or else the type `filename` implies, or else `application/octet-stream`."""
     if content_type is None:
-        guessed, encoding = mimetypes.guess_file_type(filename)
+        guessed, encoding = mimetypes.guess_type(filename)
         # A compressed file's bytes are not its inner type, and MIME has no header to mark the compression.
         if not guessed or encoding or guessed.lower().startswith(_COMPOSITE_PREFIXES):
             return "application/octet-stream"

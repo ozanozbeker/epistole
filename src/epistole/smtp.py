@@ -20,11 +20,12 @@ from smtplib import (
     SMTPSenderRefused,
     SMTPServerDisconnected,
 )
-from typing import TYPE_CHECKING, Literal, cast, override
+from typing import TYPE_CHECKING, Literal, cast
 
 from epistole import _tokens, gmail, graph
 from epistole._address import addr_spec, domain
 from epistole._backend import Backend, TokenCredential
+from epistole._compat import override
 from epistole._result import Refusal
 from epistole._rfc5322 import build
 from epistole.exceptions import (

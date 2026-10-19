@@ -9,7 +9,7 @@ import binascii
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 
 import httpx2
 import msal
@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from epistole import _http
+from epistole._compat import override
 from epistole._tokens import (
     CREDENTIAL_REJECTED,
     REPLY_ERRORS,

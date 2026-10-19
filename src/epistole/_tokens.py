@@ -7,27 +7,21 @@ from __future__ import annotations
 
 import importlib
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeIs, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, cast
 
 from epistole._backend import TokenCredential
 from epistole.exceptions import AuthenticationError, ProviderError
 
 if TYPE_CHECKING:
     import httpx2
+    from typing_extensions import TypeIs
 
     from epistole import gmail, graph
     from epistole.exceptions import EpistoleError
 
-type Purpose = Literal["gmail", "graph", "smtp"]
+Purpose: TypeAlias = Literal["gmail", "graph", "smtp"]
 
-type Credential = (
-    gmail.ServiceAccount
-    | gmail.AuthorizedUser
-    | graph.ClientSecret
-    | graph.Certificate
-    | graph.ManagedIdentity
-    | TokenCredential
-)
+Credential: TypeAlias = "gmail.ServiceAccount | gmail.AuthorizedUser | graph.ClientSecret | graph.Certificate | graph.ManagedIdentity | TokenCredential"
 
 _SCOPES: dict[tuple[Literal["google", "microsoft"], Purpose], str] = {
     ("google", "gmail"): "https://www.googleapis.com/auth/gmail.send",

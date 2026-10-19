@@ -9,7 +9,7 @@ import json
 from contextlib import contextmanager
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, override
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import httpx2
 from google.auth.credentials import TokenState
@@ -20,6 +20,7 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 
 from epistole import _http
+from epistole._compat import override
 from epistole._tokens import REPLY_ERRORS, status_error, usable
 from epistole.exceptions import AuthenticationError, ProviderError, TransportError
 from epistole.gmail import AuthorizedUser, ServiceAccount

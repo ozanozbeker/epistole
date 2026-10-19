@@ -13,6 +13,7 @@ Amended on [#59](https://github.com/ozanozbeker/epistole/issues/59): an address 
 Amended on [#62](https://github.com/ozanozbeker/epistole/issues/62): an address, or an argument of `Address()`, that is not a `str` is a `TypeError` (ADR-0004).
 SMTP checks for `SMTPUTF8` itself on every message that needs UTF-8 headers, so ADR-0004's SMTP mapping loses the `SMTPNotSupportedError` row.
 Amended on [#105](https://github.com/ozanozbeker/epistole/issues/105): each transport parses an address again where it needs the parts, rather than reading parts stored at the check.
+Amended on #PR: the floor falls to Python 3.11, and the check accepts more on releases that predate the CVE-2023-27043 fix.
 
 Measurements below ran on this repo's interpreter, Python 3.14.7, against `requires-python = ">=3.13"`.
 
@@ -190,6 +191,15 @@ ADR-0004 mapped that exception only for `login` and `auth`.
   The same holds for `a@[IPv6:::1]`.
   They are legal under RFC 5321, and the stdlib parser drops them.
   A caller who needs one has no route through Epistole.
+- **On Python 3.11.0 to 3.11.9 and 3.12.0 to 3.12.5, the check accepts more.**
+  Those releases predate the CVE-2023-27043 fix, so their `getaddresses` parses leniently.
+  Of 54,240 strings built from two addresses and the RFC 5322 specials, 2,451 passed the check on 3.11.9 and 3.12.5 and raised on 3.11.10 and 3.12.6.
+  `alice@example.org(bob@example.org` passes on 3.11.9 as `alice@example.org`, so Epistole sends to Alice alone.
+  Address literals pass as well, so the consequence above holds only on a fixed release.
+  No string passed on both releases with a different addr-spec.
+  Epistole adds no guard against those releases, because the check catches a caller's mistake and a caller supplies addresses they already know work.
+  `requires-python` cannot exclude them without one `!=` for each, so the floor is `>=3.11`.
+  When 3.11 leaves, the floor becomes `>=3.12.6`, as `CONTRIBUTING.md` records.
 - **The two paths differ on non-ASCII addresses, by design.**
   `.to("用户@例子.广告")` is accepted, and `Address("Ada", "用户@例子.广告")` raises `ValueError`.
   The helper formats what `formataddr` can format.

@@ -2,7 +2,8 @@
 
 import re
 from html.parser import HTMLParser
-from typing import override
+
+from epistole._compat import override
 
 _COMMENT_END = re.compile(r"--!?>")
 """HTML5 ends a comment at the first of these."""

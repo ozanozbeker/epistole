@@ -3,7 +3,7 @@ import sys
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeAlias
 
 import httpx2
 import pytest
@@ -57,7 +57,7 @@ UNAVAILABLE = {
 DEEP = b"[" * 1_000_000 + b"]" * 1_000_000
 """JSON nested too deeply for `json`, which raises `RecursionError` reading it (ADR-0009). 3.14.7 bounds the depth by the C stack, so it parses 100,000 levels on Linux x86-64 and raises on macOS arm64."""
 
-type Reply = httpx2.Response | Exception
+Reply: TypeAlias = httpx2.Response | Exception
 
 
 def url(request: httpx2.Request) -> str:

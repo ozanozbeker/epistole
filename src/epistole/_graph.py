@@ -9,11 +9,12 @@ import base64
 import json
 from contextlib import suppress
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 from epistole import _http
 from epistole._address import addr_spec, name_and_addr_spec
+from epistole._compat import override
 from epistole._tokens import REPLY_ERRORS
 from epistole.exceptions import (
     AuthenticationError,
